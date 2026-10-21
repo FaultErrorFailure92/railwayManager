@@ -21,3 +21,7 @@
 
 - Züge dürfen sich nicht stauen und einen deadlock erzeugen, falls doch, muss das spiel da verloren sein
 - ich möchte save states haben, wenn ich abspeichere, d.h. ich sollte da auch wieder laden können. es muss bei jedem "meilenstein" ein autosave angelegt werden
+- Wende Triebzüge (vgl TGV oder ICE)
+- züge sollen auch mit verfügbarer bahnsteiglänge länger werden können
+- quests müssen grundsätzlich schaffbar sein... jetzt stehe ich beim 2. bahnsteiggleis an, weil nie 2 züge gleichzeitig da sind, die abgefertig werden müssen
+

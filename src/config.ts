@@ -1,14 +1,20 @@
 // Welt: 1 Tile = 16 Einheiten. Bildschirm: 32x16 px pro Tile-Oberseite.
 export const TILE = 16;
 export const PARCEL = 8;
-export const MAP_W = 96;
-export const MAP_H = 32;
+export const MAP_W = 256;
+export const MAP_H = 64;
 /** Bestandsstrecke */
-export const MAIN_ROW = 15;
+export const MAIN_ROW = 31;
 /** zweites Streckengleis (kommt mit dem Streckenausbau, Fahrtrichtung Ost = rechts) */
-export const SECOND_ROW = 16;
+export const SECOND_ROW = 32;
 /** Startfläche in Parzellen (inklusive) */
-export const START_PARCELS = { x0: 4, x1: 7, y0: 1, y1: 2 };
+export const START_PARCELS = { x0: 14, x1: 17, y0: 3, y1: 4 };
+/** Spielstände v4 (Karte 96x32) liegen um diesen Versatz in der großen Karte */
+export const OLD_OFFSET = { x: 80, y: 16 };
+/** Kreuzungsstellen des Netzbetreibers auf der eingleisigen Strecke: [Weiche West, Weiche Ost] */
+export const PASSING_LOOPS: [number, number][] = [[6, 20], [48, 62], [88, 102], [154, 168], [190, 204], [232, 246]];
+/** Fahrplanzuschlag je Kreuzungsstelle (Spielsekunden) */
+export const LOOP_SLACK = 75;
 
 // Zeit: Simulation läuft in Spielsekunden
 export const GAME_SEC_PER_REAL_SEC = 20;

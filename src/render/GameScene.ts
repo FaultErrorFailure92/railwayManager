@@ -5,6 +5,8 @@ import type { ToolId } from '../game/Missions';
 import manifest from '../gen/manifest.json';
 import { toScreen, toWorld } from '../iso';
 import type { Train } from '../sim/Simulation';
+import { ROCK, WATER } from '../world/Grid';
+import { Animals, preloadAnimals } from './Animals';
 import { SORT_DESTS } from '../sim/Operators';
 import { BUILD_MENU, BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
@@ -74,10 +76,11 @@ export class GameScene extends Phaser.Scene {
   private overlayKey = '';
   private staticObjs: (Phaser.GameObjects.Image | Phaser.GameObjects.Text)[] = [];
   private downAt: XY | null = null;
+  private animals!: Animals;
+  private buildingImgs = new Map<number, { key: string; x: number; y: number; img: Phaser.GameObjects.Image }>();
   private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W' }[] = [];
   private trainSprites = new Map<number, Phaser.GameObjects.Image[]>();
   private lastTrainPos = new Map<number, XY>();
-  private ground!: Phaser.GameObjects.RenderTexture;
   private overlay!: Phaser.GameObjects.Graphics;
   private priceLabels: Phaser.GameObjects.Text[] = [];
   private hintGfx!: Phaser.GameObjects.Graphics;
@@ -103,6 +106,7 @@ export class GameScene extends Phaser.Scene {
     this.load.spritesheet('people', `assets/gen/${pm.file}`, { frameWidth: pm.w, frameHeight: pm.h });
     const em = manifest.emotes;
     this.load.spritesheet('emotes', `assets/gen/${em.file}`, { frameWidth: em.w, frameHeight: em.h });
+    preloadAnimals(this);
   }
 
   create() {
@@ -112,6 +116,7 @@ export class GameScene extends Phaser.Scene {
     this.hintArrow = this.add.image(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
     this.ghost = this.add.graphics().setDepth(D_UI);
     this.people = new People(this, this.g);
+    this.animals = new Animals(this, this.g);
 
     const cam = this.cameras.main;
     cam.setBackgroundColor('#1b2130');
@@ -126,21 +131,37 @@ export class GameScene extends Phaser.Scene {
     this.setupInput();
   }
 
+  /** Boden in Kacheln (große RenderTextures sind auf manchen Grafikkarten zu groß) */
   private buildGround() {
+    const g = this.g.grid;
     const left = -MAP_H * TILE;
-    const w = (MAP_W + MAP_H) * TILE, h = ((MAP_W + MAP_H) * TILE) / 2 + 20;
-    this.ground = this.add.renderTexture(left, 0, w, h).setOrigin(0).setDepth(D_GROUND);
+    const totalW = (MAP_W + MAP_H) * TILE, h = ((MAP_W + MAP_H) * TILE) / 2 + 20;
+    const CHUNK = 2048;
     const n = (manifest as { groundVariants?: number }).groundVariants ?? 4;
     const s = SPRITES.ground_0;
-    this.ground.beginDraw();
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const v = Math.abs((x * 7349 + y * 3571) ^ (x * y * 113)) % n;
-        const p = toScreen(x * TILE, y * TILE);
-        this.ground.batchDrawFrame(`ground_${v}`, undefined, p.x + s.ox - left, p.y + s.oy);
+    const water = (x: number, y: number) => !g.inside(x, y) || g.isWater(x, y);
+    for (let cx = 0; cx < totalW; cx += CHUNK) {
+      const w = Math.min(CHUNK, totalW - cx);
+      const rt = this.add.renderTexture(left + cx, 0, w, h).setOrigin(0).setDepth(D_GROUND);
+      rt.beginDraw();
+      for (let y = 0; y < MAP_H; y++) {
+        for (let x = 0; x < MAP_W; x++) {
+          const p = toScreen(x * TILE, y * TILE);
+          const px = p.x + s.ox - left - cx;
+          if (px < -40 || px > w + 8) continue;
+          const t = g.terrain[g.key(x, y)];
+          const hash = Math.abs((x * 7349 + y * 3571) ^ (x * y * 113));
+          let frame: string;
+          if (t === WATER) {
+            const m = (water(x, y - 1) ? 0 : 1) | (water(x + 1, y) ? 0 : 2) | (water(x, y + 1) ? 0 : 4) | (water(x - 1, y) ? 0 : 8);
+            frame = `water_${m}`;
+          } else if (t === ROCK) frame = `rock_${hash % 4}`;
+          else frame = `ground_${hash % n}`;
+          rt.batchDrawFrame(frame, undefined, px, p.y + s.oy);
+        }
       }
+      rt.endDraw();
     }
-    this.ground.endDraw();
   }
 
   private place(name: string, wx: number, wy: number, depth: number) {
@@ -293,6 +314,8 @@ export class GameScene extends Phaser.Scene {
     this.updateSignals();
     this.updateTrains();
     this.people.update(dt);
+    const wv = this.cameras.main.worldView;
+    this.animals.update(dt, this.g.speed, this.g.paused, new Phaser.Geom.Rectangle(wv.x - 40, wv.y - 40, wv.width + 80, wv.height + 80));
     this.drawHint(dt);
     this.drawGhost();
     this.showFx();
@@ -310,6 +333,7 @@ export class GameScene extends Phaser.Scene {
       for (let x = 0; x < g.w; x++) {
         const c = g.get(x, y)!;
         if (c.track && c.piece === null) this.staticObjs.push(this.place('track', x * TILE, y * TILE, D_TRACK + x + y));
+        if ((c.track || c.piece !== null) && g.isWater(x, y)) this.staticObjs.push(this.place('rail_bridge', x * TILE, y * TILE, D_TRACK + x + y + 0.2));
         if (c.platform) {
           const cy = toScreen(x * TILE + 8, y * TILE + 8).y;
           const n = rail(g.get(x, y - 1)), s = rail(g.get(x, y + 1));
@@ -330,12 +354,19 @@ export class GameScene extends Phaser.Scene {
     for (const p of g.pieces.values()) {
       this.staticObjs.push(this.place(`piece_${p.key}`, p.x * TILE, p.y * TILE, D_TRACK + p.x + p.y + 0.5));
     }
+    // Gebäude & Natur: Bilder bleiben erhalten, solange sich nichts ändert (tausende Bäume)
+    for (const [id, c] of this.buildingImgs) {
+      const b = g.buildings.get(id);
+      if (!b || b.key !== c.key || b.x !== c.x || b.y !== c.y) { c.img.destroy(); this.buildingImgs.delete(id); }
+    }
     for (const b of g.buildings.values()) {
       const d = BUILDINGS[b.key];
-      const fx = b.x + d.w - 1, fy = b.y + d.h - 1;
-      let depth = toScreen(fx * TILE + 8, fy * TILE + 8).y + (d.onPlatform ? 0.32 : 0.3);
-      if (b.key === 'bld_hump') depth = D_TRACK + b.x + b.y + 0.7;
-      this.staticObjs.push(this.place(b.key, b.x * TILE, b.y * TILE, depth));
+      if (!this.buildingImgs.has(b.id)) {
+        const fx = b.x + d.w - 1, fy = b.y + d.h - 1;
+        let depth = toScreen(fx * TILE + 8, fy * TILE + 8).y + (d.onPlatform ? 0.32 : 0.3);
+        if (b.key === 'bld_hump') depth = D_TRACK + b.x + b.y + 0.7;
+        this.buildingImgs.set(b.id, { key: b.key, x: b.x, y: b.y, img: this.place(b.key, b.x * TILE, b.y * TILE, depth) });
+      }
       if (b.name) {
         const c = toScreen((b.x + d.w / 2) * TILE, (b.y + d.h / 2) * TILE);
         const label = this.add.text(c.x, c.y - 30, b.name, {

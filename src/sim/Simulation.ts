@@ -1,4 +1,4 @@
-import { ACC, CAR_LEN, DEC, MAIN_ROW, MAP_W, SECOND_ROW, START_TIME, TILE } from '../config';
+import { ACC, CAR_LEN, DEC, LOOP_SLACK, MAIN_ROW, MAP_W, PASSING_LOOPS, SECOND_ROW, START_TIME, TILE } from '../config';
 import { Dir, Edge, edgeRow, isOut, Network, ParkKind, SortRun } from '../world/Network';
 import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS, TAKT } from './Operators';
 
@@ -189,7 +189,7 @@ export class Simulation {
       id: this.nextId++, op, cars, length, dir,
       number: `${op.short} ${op.numberBase + this.counter[op.id]++ * 2 - (dir === 'E' ? 1 : 0)}`,
       plannedSpawn,
-      plannedExit: plannedSpawn + dist / op.vmax + stopLoss + layover * 60 + 120, // 2 min Fahrzeitreserve
+      plannedExit: plannedSpawn + dist / op.vmax + stopLoss + layover * 60 + 120 + PASSING_LOOPS.length * LOOP_SLACK, // Reserve + Kreuzungen
       route: [], start: [], s: SPAWN_HEAD, v: 0, committed: 0,
       state: 'queued', jobs, dwellLeft: 0, waiting: false,
       passengers, capacity, reserved: new Set(),
@@ -254,9 +254,14 @@ export class Simulation {
   private wouldDeadlock(t: Train, blocks: Set<number>, tRemaining: Edge[]) {
     const ownerOf = (b: number) => (blocks.has(b) ? t.id : this.blockOwner(b));
     const byId = new Map(this.trains.map((x) => [x.id, x]));
+    /** nur bis zur nächsten Kreuzungsstelle schauen: dort können sich Züge ausweichen */
+    const horizon = (es: Edge[]) => {
+      const i = es.findIndex((e) => this.isLoopEdge(e));
+      return i < 0 ? es : es.slice(0, i);
+    };
     const waitsFor = (x: Train): number[] => {
       if (x.state === 'rolling' || x.state === 'stored') return [];
-      const rest = x === t ? tRemaining : [...x.route.slice(x.committed + 1), ...(x.ahead ?? [])];
+      const rest = horizon(x === t ? tRemaining : [...x.route.slice(x.committed + 1), ...(x.ahead ?? [])]);
       const res = new Set<number>();
       for (const e of rest) {
         if (e.block < 0) continue;
@@ -519,6 +524,18 @@ export class Simulation {
         const vi = ahead <= 0 ? this.switchV : Math.sqrt(this.switchV * this.switchV + 2 * DEC * ahead);
         v = Math.min(v, vi);
       }
+    }
+    return v;
+  }
+
+  private loopEdges = new Map<string, boolean>();
+  /** Kante liegt ganz in einer Kreuzungsstelle des Netzbetreibers */
+  private isLoopEdge(e: Edge) {
+    let v = this.loopEdges.get(e.key);
+    if (v === undefined) {
+      const g = this.net.grid;
+      v = e.cells.length > 0 && e.cells.every((k) => { const p = g.xy(k); return g.isLoopCell(p.x, p.y); });
+      this.loopEdges.set(e.key, v);
     }
     return v;
   }

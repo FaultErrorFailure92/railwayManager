@@ -10,7 +10,7 @@ export function loadSave(): GameSave | undefined {
     const raw = localStorage.getItem(KEY);
     if (!raw) return undefined;
     const s = JSON.parse(raw) as GameSave;
-    return s.v === 4 ? s : undefined;
+    return s.v === 4 || s.v === 5 ? s : undefined;
   } catch {
     return undefined;
   }

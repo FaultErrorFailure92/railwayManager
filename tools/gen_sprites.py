@@ -398,6 +398,28 @@ NATURE["bld_bush0"] = bg.bush(30)
 for name, (img, ox, oy) in NATURE.items():
     save(name, img, ox, oy + 8)  # Anker = Tile-Ecke, Baum steht in der Tile-Mitte (Bildschirm +8)
 
+# ---------------------------------------------------------------- Landschaft: Wasser, Fels, Berge, Brücke, Tiere
+import terraingen as trg  # noqa: E402
+
+for m in range(16):
+    save(f"water_{m}", trg.water(m), -16, 0)
+for v in range(4):
+    save(f"rock_{v}", trg.rock(v), -16, 0)
+for name, args in {"bld_mtn0": (3, 3, 50, 71), "bld_mtn1": (2, 2, 30, 72), "bld_mtn2": (3, 3, 38, 73), "bld_mtn3": (2, 2, 22, 74)}.items():
+    w, h, height, seed = args
+    img, ox, oy = trg.mountain(w, h, height, seed, snow=height >= 30)
+    save(name, img, ox, oy)
+for i in range(2):
+    img, ox, oy = trg.boulder(80 + i)
+    save(f"bld_rock{i}", img, ox, oy)
+img, ox, oy = trg.rail_bridge()
+save("rail_bridge", img, ox, oy)
+manifest["animals"] = {}
+for name in trg.ANIMALS:
+    img, w, h = trg.animal_sheet(name)
+    img.save(os.path.join(OUT, f"animal_{name}.png"))
+    manifest["animals"][name] = {"file": f"animal_{name}.png", "w": w, "h": h, "frames": 3}
+
 # ---------------------------------------------------------------- Stimmung, Icons, Pfeil
 bg.emote_sheet().save(os.path.join(OUT, "emotes.png"))
 manifest["emotes"] = {"file": "emotes.png", "w": 9, "h": 10, "names": bg.EMOTES}

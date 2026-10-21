@@ -735,6 +735,195 @@
    "w": 14,
    "h": 10
   },
+  "water_0": {
+   "file": "water_0.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_1": {
+   "file": "water_1.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_2": {
+   "file": "water_2.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_3": {
+   "file": "water_3.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_4": {
+   "file": "water_4.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_5": {
+   "file": "water_5.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_6": {
+   "file": "water_6.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_7": {
+   "file": "water_7.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_8": {
+   "file": "water_8.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_9": {
+   "file": "water_9.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_10": {
+   "file": "water_10.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_11": {
+   "file": "water_11.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_12": {
+   "file": "water_12.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_13": {
+   "file": "water_13.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_14": {
+   "file": "water_14.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "water_15": {
+   "file": "water_15.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "rock_0": {
+   "file": "rock_0.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "rock_1": {
+   "file": "rock_1.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "rock_2": {
+   "file": "rock_2.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "rock_3": {
+   "file": "rock_3.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "bld_mtn0": {
+   "file": "bld_mtn0.png",
+   "ox": -51,
+   "oy": -57,
+   "w": 102,
+   "h": 108
+  },
+  "bld_mtn1": {
+   "file": "bld_mtn1.png",
+   "ox": -35,
+   "oy": -37,
+   "w": 70,
+   "h": 72
+  },
+  "bld_mtn2": {
+   "file": "bld_mtn2.png",
+   "ox": -51,
+   "oy": -45,
+   "w": 102,
+   "h": 96
+  },
+  "bld_mtn3": {
+   "file": "bld_mtn3.png",
+   "ox": -35,
+   "oy": -29,
+   "w": 70,
+   "h": 64
+  },
+  "bld_rock0": {
+   "file": "bld_rock0.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "bld_rock1": {
+   "file": "bld_rock1.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "rail_bridge": {
+   "file": "rail_bridge.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
   "arrow": {
    "file": "arrow.png",
    "ox": -5,
@@ -2440,6 +2629,38 @@
   "h": 7,
   "variants": 16,
   "frames": 3
+ },
+ "animals": {
+  "cow": {
+   "file": "animal_cow.png",
+   "w": 10,
+   "h": 7,
+   "frames": 3
+  },
+  "sheep": {
+   "file": "animal_sheep.png",
+   "w": 7,
+   "h": 7,
+   "frames": 3
+  },
+  "deer": {
+   "file": "animal_deer.png",
+   "w": 8,
+   "h": 8,
+   "frames": 3
+  },
+  "hare": {
+   "file": "animal_hare.png",
+   "w": 5,
+   "h": 5,
+   "frames": 3
+  },
+  "fox": {
+   "file": "animal_fox.png",
+   "w": 7,
+   "h": 6,
+   "frames": 3
+  }
  },
  "emotes": {
   "file": "emotes.png",

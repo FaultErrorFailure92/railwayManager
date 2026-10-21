@@ -15,6 +15,8 @@ export interface BuildingDef {
   demolish: number;
   /** steht über einem geraden Gleis (Remise, Werkstatt, Waschanlage, Abrollberg) */
   onTrack?: boolean;
+  /** Teil der Landschaft, kann nicht abgerissen werden (Berge) */
+  fixed?: boolean;
 }
 
 const defs: BuildingDef[] = [
@@ -33,6 +35,12 @@ const defs: BuildingDef[] = [
   { key: 'bld_workshop', label: 'Werkstatt', effect: 'repariert abgestellte Züge (+400 €)', w: 5, h: 1, cost: 6000, onPlatform: false, group: 'facility', demolish: 0, onTrack: true },
   { key: 'bld_wash', label: 'Waschanlage', effect: 'Durchfahrt wäscht den Zug (+150 €)', w: 3, h: 1, cost: 3500, onPlatform: false, group: 'facility', demolish: 0, onTrack: true },
   { key: 'bld_hump', label: 'Abrollberg', effect: 'Zerlegezüge enden hier, Wagen rollen in Richtungsgleise', w: 2, h: 1, cost: 5000, onPlatform: false, group: 'facility', demolish: 0, onTrack: true },
+  { key: 'bld_mtn0', label: 'Berg', effect: 'Landschaft', w: 3, h: 3, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
+  { key: 'bld_mtn1', label: 'Berg', effect: 'Landschaft', w: 2, h: 2, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
+  { key: 'bld_mtn2', label: 'Berg', effect: 'Landschaft', w: 3, h: 3, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
+  { key: 'bld_mtn3', label: 'Hügel', effect: 'Landschaft', w: 2, h: 2, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
+  { key: 'bld_rock0', label: 'Felsbrocken', effect: 'Landschaft', w: 1, h: 1, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
+  { key: 'bld_rock1', label: 'Felsbrocken', effect: 'Landschaft', w: 1, h: 1, cost: 0, onPlatform: false, group: 'nature', demolish: 0, fixed: true },
   { key: 'bld_bush0', label: 'Busch', effect: 'Deko', w: 1, h: 1, cost: 20, onPlatform: false, group: 'nature', demolish: 10 },
 ];
 

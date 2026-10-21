@@ -1,4 +1,4 @@
-import { COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW, START_MONEY } from '../config';
+import { COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW, START_MONEY } from '../config';
 import { OperatorId, OPERATORS, SORT_DESTS } from '../sim/Operators';
 import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, newContracts, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './Research';
@@ -52,7 +52,7 @@ const STATION_NAMES = ['Donaufeld', 'Mühlbach', 'Lindenau', 'Am Steinfeld', 'Gr
   'Auhof', 'Bachstetten', 'Rosental', 'Marchegg Nord', 'Eichgraben', 'Sonnleiten', 'Hainfeld West', 'Wolfsthal'];
 
 export interface GameSave {
-  v: 4;
+  v: 4 | 5;
   links: { id: number; kind: 'tunnel' | 'bridge'; x: number; y0: number; y1: number }[];
   sortDest: (number | null)[];
   company: string;
@@ -77,6 +77,12 @@ export const fmtTime = (t: number) => {
   const m = Math.floor(t / 60) % (24 * 60);
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
+
+/** Zell-Bits aus dem Spielstand */
+const unpackCell = (b: number, sortDest: number | null) => ({
+  track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
+  wire: !!(b & 32), siding: !!(b & 64), sortDest,
+});
 
 const newStats = (): Stats => ({
   handled: 0, punctual: 0, streak: 0, stopsRegio: 0, stopsIC: 0, passengers: 0, missed: 0, maxDwellSince: 0, secondRuns: 0, turnbacks: 0, parks: 0, services: 0, sortedWagons: 0, recent: [],
@@ -105,18 +111,20 @@ export class Game {
   readonly fx: FxEvent[] = [];
 
   constructor(save?: GameSave) {
-    this.grid = new Grid(!save);
+    const old = save?.v === 4;
+    this.grid = new Grid(!save || old);
     if (save) {
       const g = this.grid;
-      save.cells.forEach((b, k) => Object.assign(g.cells[k], {
-        track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
-        wire: !!(b & 32), siding: !!(b & 64), sortDest: save.sortDest?.[k] ?? null,
-      }));
-      save.links?.forEach((l) => g.addLink(l.kind, l.x, l.y0, l.y1, l.id));
-      save.pieces.forEach((p) => g.addPiece(p.key, p.x, p.y, p.id));
-      save.buildings.forEach((b) => { g.addBuilding(b.key, b.x, b.y, b.decor, b.id).name = b.name; });
-      save.owned.forEach((o, i) => (g.owned[i] = o));
-      g.mainRows = save.mainRows;
+      if (old) this.loadSmallMap(save);
+      else {
+        save.cells.forEach((b, k) => Object.assign(g.cells[k], unpackCell(b, save.sortDest?.[k] ?? null)));
+        save.links?.forEach((l) => g.addLink(l.kind, l.x, l.y0, l.y1, l.id));
+        save.pieces.forEach((p) => g.addPiece(p.key, p.x, p.y, p.id));
+        save.buildings.forEach((b) => { g.addBuilding(b.key, b.x, b.y, b.decor, b.id).name = b.name; });
+        save.owned.forEach((o, i) => (g.owned[i] = o));
+        g.mainRows = save.mainRows;
+        g.markFixedLoops();
+      }
       Object.assign(this, {
         company: save.company, money: save.money, stats: { ...newStats(), ...save.stats }, missionBase: { ...newStats(), ...save.missionBase },
         missionIdx: save.missionIdx, log: save.log,
@@ -125,13 +133,40 @@ export class Game {
       save.unlocked.forEach((u) => this.unlocked.add(u));
       if (save.research) this.research = save.research;
       else this.migrateResearch(save);
+      if (old) this.missionIdx = Math.min(this.missionIdx, MISSIONS.length);
       if (save.contracts) Object.assign(this.contracts, save.contracts);
     }
     this.net = new Network(this.grid);
-    this.sim = new Simulation(this.net, save?.sim);
+    this.sim = new Simulation(this.net, old ? undefined : save?.sim);
+    if (old && save) {
+      this.sim.time = save.sim.time;
+      this.sim.setLevel(save.sim.level);
+    }
     this.sim.contractActive = (id) => this.contracts[id].active;
     this.applySwitchSpeed();
     this.lastHour = Math.floor(this.sim.time / 3600);
+  }
+
+  /** Spielstand der kleinen Karte (96x32) mittig in die große Welt setzen */
+  private loadSmallMap(save: GameSave) {
+    const g = this.grid, OW = 96, OH = 32, dx = OLD_OFFSET.x, dy = OLD_OFFSET.y;
+    const inRect = (x: number, y: number) => x >= dx && x < dx + OW && y >= dy && y < dy + OH;
+    for (const p of [...g.pieces.values()]) if (g.pieceCells(p).some((k) => { const q = g.xy(k); return inRect(q.x, q.y); })) { g.removePiece(p.id); g.fixedPieces.delete(p.id); }
+    for (const b of [...g.buildings.values()]) if (g.buildingCells(b).some((k) => { const p = g.xy(k); return inRect(p.x, p.y); })) g.removeBuilding(b.id);
+    for (let y = 0; y < OH; y++) {
+      for (let x = 0; x < OW; x++) {
+        const k = y * OW + x;
+        Object.assign(g.get(x + dx, y + dy)!, unpackCell(save.cells[k], save.sortDest?.[k] ?? null), { piece: null, building: null });
+      }
+    }
+    save.links?.forEach((l) => g.addLink(l.kind, l.x + dx, l.y0 + dy, l.y1 + dy));
+    save.pieces.forEach((p) => g.addPiece(p.key, p.x + dx, p.y + dy));
+    save.buildings.forEach((b) => { g.addBuilding(b.key, b.x + dx, b.y + dy, b.decor).name = b.name; });
+    const opw = OW / PARCEL;
+    save.owned.forEach((o, i) => { if (o) g.buyParcel((i % opw) + dx / PARCEL, Math.floor(i / opw) + dy / PARCEL); });
+    // Kreuzungsstellen im alten Bereich neu setzen, wo Platz ist
+    g.addPassingLoops();
+    if (save.mainRows.length > 1) g.expandLine();
   }
 
   /** alte Spielstände ohne Forschung: Bekanntes als erforscht übernehmen */
@@ -140,7 +175,7 @@ export class Game {
     if (save.unlocked.includes('access')) done.add('access');
     if (save.unlocked.includes('wire')) done.add('wire');
     if (save.unlocked.includes('facility')) (['siding', 'wash', 'remise', 'workshop', 'hump'] as ResearchId[]).forEach((r) => done.add(r));
-    if (save.mainRows.includes(SECOND_ROW)) done.add('double');
+    if (save.mainRows.length > 1) done.add('double');
     if (this.count('bld_station') > 1) done.add('stations');
     this.research.done = [...done];
     if (this.missionIdx >= 2) this.unlocked.add('research');
@@ -150,7 +185,7 @@ export class Game {
   save(): GameSave {
     const g = this.grid;
     return {
-      v: 4,
+      v: 5,
       company: this.company,
       cells: g.cells.map((c) => (+c.track) | (+c.fixed << 1) | (+c.platform << 2) | (+c.signal << 3) | (+c.signalW << 4)
         | (+c.wire << 5) | (+c.siding << 6)),
@@ -519,6 +554,11 @@ export class Game {
       return fail(this.researched('stations') ? 'Mehr Bahnhöfe gehen nicht' : 'Erst erforschen: Weitere Bahnhöfe');
     }
     const notOwned = (cs: XY[]) => cs.some((c) => !g.isOwned(c.x, c.y));
+    /** Wasser oder Fels unter den Feldern? */
+    const rough = (cs: XY[]) => {
+      const c = cs.find((q) => !g.isGround(q.x, q.y) && !g.get(q.x, q.y)?.track);
+      return !c ? null : g.isWater(c.x, c.y) ? 'Wasser – hier kann man nicht bauen' : 'Felsen – hier kann man nicht bauen';
+    };
     let cost = 0;
     let shown = cells;
     switch (tool) {
@@ -533,6 +573,7 @@ export class Game {
       }
       case 'platform': {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
+        if (rough(cells)) return fail(rough(cells)!);
         if (cells.some((c) => g.get(c.x, c.y)!.track || g.get(c.x, c.y)!.piece !== null)) return fail('Bahnsteig nicht auf Gleis');
         if (cells.some((c) => g.get(c.x, c.y)!.building !== null)) return fail('Gebäude im Weg');
         cost = cells.filter((c) => !g.get(c.x, c.y)!.platform).length * COST.platform;
@@ -540,6 +581,7 @@ export class Game {
       }
       case 'track': {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
+        if (rough(cells)) return fail(rough(cells)!);
         if (cells.some((c) => g.get(c.x, c.y)!.platform || g.get(c.x, c.y)!.piece !== null)) return fail('Feld ist belegt');
         if (cells.some((c) => g.get(c.x, c.y)!.building !== null)) return fail('Gebäude im Weg');
         cost = cells.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track;
@@ -565,6 +607,7 @@ export class Game {
             const cell = g.get(c.x, c.y)!;
             fp.push(c);
             if (!g.isOwned(c.x, c.y)) return fail('Fläche nicht gekauft', fp);
+            if (rough([c])) return fail(rough([c])!, fp);
             if (cell.platform) return fail('Bahnsteig im Weg', fp);
             if (cell.building !== null) return fail('Gebäude im Weg', fp);
             if (cell.piece !== null) return fail('Überschneidet anderes Gleisteil', fp);
@@ -588,6 +631,7 @@ export class Game {
           const cell = g.get(c.x, c.y);
           if (!cell) return fail('Außerhalb der Karte', fp);
           if (!g.isOwned(c.x, c.y)) return fail('Fläche nicht gekauft', fp);
+          if (rough([c])) return fail(rough([c])!, fp);
           if (cell.building !== null) return fail('Hier steht schon etwas', fp);
           if (cell.track || cell.piece !== null) return fail('Gleis im Weg', fp);
           if (def.onPlatform && !cell.platform) return fail('Nur auf dem Bahnsteig', fp);
@@ -641,11 +685,13 @@ export class Game {
       case 'remove': {
         const c = g.get(cells[0].x, cells[0].y)!;
         if (!g.isOwned(cells[0].x, cells[0].y)) return fail('Fläche nicht gekauft');
+        if ((c.signal || c.signalW) && g.isLoopCell(cells[0].x, cells[0].y)) return fail('Signal gehört dem Netzbetreiber');
         if (c.signal || c.signalW) { cost = -COST.signal * REFUND; break; }
         const link = g.linkAt(cells[0].x, cells[0].y);
         if (c.building !== null) {
           const b = g.buildings.get(c.building)!;
           const def = BUILDINGS[b.key];
+          if (def.fixed) return fail(`${def.label} kann nicht entfernt werden`);
           if (def.onTrack && g.buildingCells(b).some((k) => this.sim.owner[k] !== 0)) return fail('Gleis ist gerade befahren');
           return { ok: this.money >= (b.decor ? def.demolish : 0), cost: b.decor ? def.demolish : -def.cost * REFUND,
             reason: 'Zu wenig Geld', cells: g.buildingCells(b).map((k) => g.xy(k)) };
@@ -660,6 +706,7 @@ export class Game {
         if (c.piece !== null) {
           const p = g.pieces.get(c.piece)!;
           const pc = g.pieceCells(p);
+          if (g.fixedPieces.has(p.id)) return fail('Weiche gehört dem Netzbetreiber');
           if (pc.some((k) => this.sim.owner[k] !== 0)) return fail('Gleisteil ist gerade befahren');
           return { ok: true, cost: -PIECES[p.key].cost * REFUND, cells: pc.map((k) => g.xy(k)) };
         }
