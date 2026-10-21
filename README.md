@@ -41,7 +41,7 @@ npm run sprites
 | --- | --- |
 | Maus ziehen / WASD | Karte verschieben |
 | Mausrad | Zoom |
-| 1–9, 0, B, N, X | Werkzeuge |
+| 1–8, B, N, X | Werkzeuge |
 | R | Variante bzw. Fahrtrichtung wechseln |
 | Rechtsklick | Abbrechen |
 | Leertaste | Pause |

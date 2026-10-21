@@ -1,7 +1,8 @@
 import type { Game } from './Game';
 import type { ToolId } from './Missions';
 
-export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump';
+export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump'
+  | 'crossing' | 'railBridge';
 
 export interface ResearchDef {
   id: ResearchId;
@@ -43,6 +44,10 @@ export const RESEARCH: ResearchDef[] = [
     col: 2, row: 0, cost: 6000, fp: 8, hours: 6, requires: ['double'] },
   { id: 'hump', name: 'Rangierbahnhof', info: 'Abrollberg und Richtungsgleise – Güterwagen sortieren', icon: 'bld_hump',
     col: 2, row: 1, cost: 8000, fp: 10, hours: 8, requires: ['double'] },
+  { id: 'crossing', name: 'Gleiskreuzungen', info: 'Diagonale Gleise dürfen gerade Gleise kreuzen', icon: 'piece_cross_desc0',
+    col: 0, row: 3, cost: 2000, fp: 4, hours: 2, requires: [] },
+  { id: 'railBridge', name: 'Eisenbahnbrücken', info: 'Gleise über Flüsse und Seen bauen', icon: 'rail_bridge_icon',
+    col: 2, row: 2, cost: 5000, fp: 7, hours: 5, requires: ['double'] },
   { id: 'workshop', name: 'Werkstatt', info: 'Verschlissene Züge reparieren', icon: 'bld_workshop',
     col: 2, row: 3, cost: 6000, fp: 8, hours: 5, requires: ['remise'] },
 ];

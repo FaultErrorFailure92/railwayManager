@@ -10,7 +10,7 @@ import { Animals, preloadAnimals } from './Animals';
 import { SORT_DESTS } from '../sim/Operators';
 import { BUILD_MENU, BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
-import { PIECES_BY_GROUP } from '../world/pieces';
+import { PIECES, PIECES_BY_GROUP } from '../world/pieces';
 import { People } from './People';
 
 type SpriteInfo = { file: string; ox: number; oy: number; w: number; h: number };
@@ -197,6 +197,8 @@ export class GameScene extends Phaser.Scene {
       const d = this.g.diagSteps(s.x, s.y, h.x, h.y, variant);
       return { cells: d.anchors, variant: d.key };
     }
+    // Gleis: bei mindestens 2 Reihen Versatz automatisch mit Kurven/Diagonale/Weichen
+    if (t === 'track' && this.dragStart && Math.abs(h.y - this.dragStart.y) >= 2) return { cells: [this.dragStart, h], variant };
     const line = t === 'platform' || t === 'track' || t === 'wire' || t === 'access' || (t === 'facility' && variant.startsWith('mark_'));
     if (line && this.dragStart) {
       return { cells: this.g.lineCells(t, this.dragStart.x, this.dragStart.y, h.x, h.y), variant };
@@ -407,9 +409,15 @@ export class GameScene extends Phaser.Scene {
       }
     }
     for (const p of g.pieces.values()) {
-      if (g.pieceCells(p).every((k) => g.cells[k].wire)) {
-        const fx = p.x + (p.key.startsWith('diag') ? 0 : 2), fy = p.y + 1;
+      if (g.pieceCells(p).every((k) => g.cells[k].wire) && SPRITES[`wire_piece_${p.key}`]) {
+        const fx = p.x + (p.key.startsWith('diag') || p.key.startsWith('cross') ? 0 : 2), fy = p.y + 1;
         this.staticObjs.push(this.place(`wire_piece_${p.key}`, p.x * TILE, p.y * TILE, objDepth(fx, fy, 0.45)));
+      } else {
+        // nur das durchgehende gerade Gleis hat Fahrdraht
+        for (const k of g.pieceCells(p)) {
+          const q = g.xy(k);
+          if (g.cells[k].wire && PIECES[p.key].through.includes(q.y - p.y)) this.staticObjs.push(this.place('wire_span', q.x * TILE, q.y * TILE, objDepth(q.x, q.y, 0.45)));
+        }
       }
     }
     for (const l of g.links.values()) {
@@ -588,6 +596,9 @@ export class GameScene extends Phaser.Scene {
     };
     if (tool === 'switch' || tool === 'curve' || tool === 'diag') {
       a.cells.forEach((c, i) => ghostImg(i, `piece_${a.variant}`, c.x * TILE, c.y * TILE));
+    }
+    if (tool === 'track' && plan.pieces) {
+      plan.pieces.forEach((p, i) => ghostImg(i, `piece_${p.key}`, p.x * TILE, p.y * TILE));
     }
     if (tool === 'building' || (tool === 'facility' && !a.variant.startsWith('mark_'))) ghostImg(0, a.variant, a.cells[0].x * TILE, a.cells[0].y * TILE);
     if (tool === 'signal') {

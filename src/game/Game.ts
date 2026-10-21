@@ -33,7 +33,14 @@ export interface BuildPlan {
   cost: number;
   reason?: string;
   cells: { x: number; y: number }[];
+  /** automatischer Gleisbau: gesetzte Gleisteile (für die Vorschau) */
+  pieces?: PiecePlace[];
 }
+
+export interface PiecePlace { key: string; x: number; y: number }
+
+/** Gleisbau mit automatischer Richtung: gerade Felder + Gleisteile */
+export interface TrackLayout { straight: XY[]; pieces: PiecePlace[] }
 
 /** Ereignisse für die Oberfläche (Banner, Münzen …) */
 export type UiEvent =
@@ -79,6 +86,9 @@ export const fmtTime = (t: number) => {
 };
 
 /** Zell-Bits aus dem Spielstand */
+/** Werkzeuge, die Bäume und Büsche automatisch fällen */
+const CLEARING = new Set<ToolId>(['platform', 'switch', 'curve', 'diag', 'building']);
+
 const unpackCell = (b: number, sortDest: number | null) => ({
   track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
   wire: !!(b & 32), siding: !!(b & 64), sortDest,
@@ -517,6 +527,54 @@ export class Game {
     return out.filter((c) => this.grid.inside(c.x, c.y));
   }
 
+  /**
+   * Gleis mit automatischer Richtung von a nach b: gerade – Kurve – Diagonale – Kurve – gerade.
+   * Der Bogen liegt am Startpunkt. Liegt dort schon ein Gleis, wird automatisch eine Weiche gesetzt;
+   * kreuzt die Diagonale ein Gleis, eine Gleiskreuzung.
+   */
+  trackLayout(a: XY, b: XY): TrackLayout | string {
+    const g = this.grid;
+    const dr = b.y - a.y;
+    if (Math.abs(dr) === 1) return 'Eine Reihe Versatz: dafür einen Gleiswechsel (Weiche) setzen';
+    const m = Math.abs(dr) - 2;
+    const width = 6 + m;
+    const xL = Math.min(a.x, b.x), xR = Math.max(a.x, b.x);
+    if (xR - xL + 1 < width) return `Zu steil – mindestens ${width} Felder weit ziehen`;
+    const fromLeft = a.x <= b.x;
+    // Reihe links und rechts
+    const rl = fromLeft ? a.y : b.y, rr = fromLeft ? b.y : a.y;
+    const xc = fromLeft ? xL : xR - width + 1;
+    const plain = (x: number, y: number) => { const c = g.get(x, y); return !!c && c.track && c.piece === null; };
+    const anyTrack = (x: number, y: number) => [0, 1, 2].some((i) => plain(x + i, y));
+    const straight: XY[] = [];
+    for (let x = xL; x < xc; x++) straight.push({ x, y: rl });
+    for (let x = xc + width; x <= xR; x++) straight.push({ x, y: rr });
+    const pieces: PiecePlace[] = [];
+    const down = rr > rl;
+    if (down) {
+      pieces.push({ key: anyTrack(xc, rl) ? 'branch_divDown' : 'curve_divDown', x: xc, y: rl });
+      for (let i = 0; i < m; i++) {
+        const ax = xc + 3 + i, ay = rl + 1 + i;
+        const k = plain(ax, ay) ? 'cross_desc0' : plain(ax, ay + 1) ? 'cross_desc1' : 'diag_desc';
+        if (plain(ax, ay) && plain(ax, ay + 1)) return 'Diagonale würde zwei Gleise kreuzen';
+        pieces.push({ key: k, x: ax, y: ay });
+      }
+      const ex = xc + 3 + m, ey = rl + 1 + m;
+      pieces.push({ key: anyTrack(ex, ey + 1) ? 'branch_mergeAbove' : 'curve_mergeAbove', x: ex, y: ey });
+    } else {
+      pieces.push({ key: anyTrack(xc, rl) ? 'branch_divUp' : 'curve_divUp', x: xc, y: rl - 1 });
+      for (let i = 0; i < m; i++) {
+        const ax = xc + 3 + i, ay = rl - 2 - i;
+        const k = plain(ax, ay) ? 'cross_asc0' : plain(ax, ay + 1) ? 'cross_asc1' : 'diag_asc';
+        if (plain(ax, ay) && plain(ax, ay + 1)) return 'Diagonale würde zwei Gleise kreuzen';
+        pieces.push({ key: k, x: ax, y: ay });
+      }
+      const ex = xc + 3 + m, ey = rl - 2 - m;
+      pieces.push({ key: anyTrack(ex, ey) ? 'branch_mergeBelow' : 'curve_mergeBelow', x: ex, y: ey });
+    }
+    return { straight, pieces };
+  }
+
   /** Diagonale ziehen: Ankerzellen der einzelnen Schritte + Teiltyp */
   diagSteps(x0: number, y0: number, x1: number, y1: number, fallback: string): { key: string; anchors: XY[] } {
     const dx = x1 - x0, dy = y1 - y0;
@@ -555,9 +613,41 @@ export class Game {
     }
     const notOwned = (cs: XY[]) => cs.some((c) => !g.isOwned(c.x, c.y));
     /** Wasser oder Fels unter den Feldern? */
+    /** Baum oder Busch: wird beim Bauen automatisch gefällt */
+    const solid = (c?: { building: number | null }) => !!c && c.building !== null && !this.clearable(c.building);
+    const rails = tool === 'track' || tool === 'switch' || tool === 'curve' || tool === 'diag';
     const rough = (cs: XY[]) => {
-      const c = cs.find((q) => !g.isGround(q.x, q.y) && !g.get(q.x, q.y)?.track);
-      return !c ? null : g.isWater(c.x, c.y) ? 'Wasser – hier kann man nicht bauen' : 'Felsen – hier kann man nicht bauen';
+      const c = cs.find((q) => !g.isGround(q.x, q.y) && !g.get(q.x, q.y)?.track && !(rails && g.isWater(q.x, q.y) && this.researched('railBridge')));
+      return !c ? null : g.isWater(c.x, c.y) ? (rails ? 'Wasser – erst Eisenbahnbrücken erforschen' : 'Wasser – hier kann man nicht bauen')
+        : 'Felsen – hier kann man nicht bauen';
+    };
+    /** Aufpreis für Brückenfelder */
+    const bridgeCost = (cs: XY[]) => cs.filter((q) => g.isWater(q.x, q.y) && !g.get(q.x, q.y)!.track && g.get(q.x, q.y)!.piece === null).length * COST.railBridge;
+    /** Gleisteile prüfen: Kosten oder Grund */
+    const checkPieces = (list: PiecePlace[], fp: XY[]): string | number => {
+      let c = 0;
+      for (const a of list) {
+        const def = PIECES[a.key];
+        if (!def) return 'Unbekanntes Gleisteil';
+        if (def.key.startsWith('cross_') && !this.researched('crossing')) return 'Kreuzt ein Gleis – erst Gleiskreuzungen erforschen';
+        for (const q of g.footprint(a.key, a.x, a.y)) {
+          if (!g.inside(q.x, q.y)) return 'Außerhalb der Karte';
+          const cell = g.get(q.x, q.y)!;
+          fp.push(q);
+          if (!g.isOwned(q.x, q.y)) return 'Fläche nicht gekauft';
+          if (rough([q])) return rough([q])!;
+          if (cell.platform) return 'Bahnsteig im Weg';
+          if (solid(cell)) return 'Gebäude im Weg';
+          if (cell.piece !== null) return 'Überschneidet anderes Gleisteil';
+          if (cell.signal || cell.signalW) return 'Signal im Weg';
+          if (this.reserved(q.x, q.y)) return 'Gleis ist gerade befahren';
+          const through = def.through.includes(q.y - a.y);
+          if (cell.track && !through) return 'Gerades Gleis im Weg';
+          if (through && !cell.track) c += COST.track;
+        }
+        c += def.cost + bridgeCost(g.footprint(a.key, a.x, a.y));
+      }
+      return c;
     };
     let cost = 0;
     let shown = cells;
@@ -575,17 +665,30 @@ export class Game {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
         if (rough(cells)) return fail(rough(cells)!);
         if (cells.some((c) => g.get(c.x, c.y)!.track || g.get(c.x, c.y)!.piece !== null)) return fail('Bahnsteig nicht auf Gleis');
-        if (cells.some((c) => g.get(c.x, c.y)!.building !== null)) return fail('Gebäude im Weg');
+        if (cells.some((c) => solid(g.get(c.x, c.y)))) return fail('Gebäude im Weg');
         cost = cells.filter((c) => !g.get(c.x, c.y)!.platform).length * COST.platform;
         break;
       }
       case 'track': {
-        if (notOwned(cells)) return fail('Fläche nicht gekauft');
-        if (rough(cells)) return fail(rough(cells)!);
-        if (cells.some((c) => g.get(c.x, c.y)!.platform || g.get(c.x, c.y)!.piece !== null)) return fail('Feld ist belegt');
-        if (cells.some((c) => g.get(c.x, c.y)!.building !== null)) return fail('Gebäude im Weg');
-        cost = cells.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track;
-        break;
+        let straight = cells, pieces: PiecePlace[] = [];
+        if (cells.length === 2 && cells[0].y !== cells[1].y) {
+          const lay = this.trackLayout(cells[0], cells[1]);
+          if (typeof lay === 'string') return fail(lay);
+          straight = lay.straight;
+          pieces = lay.pieces;
+        }
+        if (notOwned(straight)) return fail('Fläche nicht gekauft', straight);
+        if (rough(straight)) return fail(rough(straight)!, straight);
+        if (straight.some((c) => g.get(c.x, c.y)!.platform || g.get(c.x, c.y)!.piece !== null)) return fail('Feld ist belegt', straight);
+        if (straight.some((c) => solid(g.get(c.x, c.y)))) return fail('Gebäude im Weg', straight);
+        cost = straight.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track + bridgeCost(straight);
+        const fp: XY[] = [...straight];
+        const pc = checkPieces(pieces, fp);
+        if (typeof pc === 'string') return { ok: false, cost: 0, reason: pc, cells: fp, pieces };
+        cost += pc;
+        cost += this.clearCost(fp);
+        if (cost > this.money) return { ok: false, cost, reason: 'Zu wenig Geld', cells: fp, pieces };
+        return { ok: true, cost, cells: fp, pieces };
       }
       case 'signal': {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
@@ -598,27 +701,11 @@ export class Game {
       case 'switch':
       case 'curve':
       case 'diag': {
-        const def = PIECES[variant];
-        if (!def) return fail('');
+        if (!PIECES[variant]) return fail('');
         const fp: XY[] = [];
-        for (const a of cells) {
-          for (const c of g.footprint(variant, a.x, a.y)) {
-            if (!g.inside(c.x, c.y)) return fail('Außerhalb der Karte', fp);
-            const cell = g.get(c.x, c.y)!;
-            fp.push(c);
-            if (!g.isOwned(c.x, c.y)) return fail('Fläche nicht gekauft', fp);
-            if (rough([c])) return fail(rough([c])!, fp);
-            if (cell.platform) return fail('Bahnsteig im Weg', fp);
-            if (cell.building !== null) return fail('Gebäude im Weg', fp);
-            if (cell.piece !== null) return fail('Überschneidet anderes Gleisteil', fp);
-            if (cell.signal || cell.signalW) return fail('Signal im Weg', fp);
-            if (this.reserved(c.x, c.y)) return fail('Gleis ist gerade befahren', fp);
-            const through = def.through.includes(c.y - a.y);
-            if (cell.track && !through) return fail('Gerades Gleis im Weg', fp);
-            if (through && !cell.track) cost += COST.track;
-          }
-          cost += def.cost;
-        }
+        const pc = checkPieces(cells.map((a) => ({ key: variant, x: a.x, y: a.y })), fp);
+        if (typeof pc === 'string') return fail(pc, fp);
+        cost = pc;
         shown = fp;
         break;
       }
@@ -632,7 +719,7 @@ export class Game {
           if (!cell) return fail('Außerhalb der Karte', fp);
           if (!g.isOwned(c.x, c.y)) return fail('Fläche nicht gekauft', fp);
           if (rough([c])) return fail(rough([c])!, fp);
-          if (cell.building !== null) return fail('Hier steht schon etwas', fp);
+          if (solid(cell)) return fail('Hier steht schon etwas', fp);
           if (cell.track || cell.piece !== null) return fail('Gleis im Weg', fp);
           if (def.onPlatform && !cell.platform) return fail('Nur auf dem Bahnsteig', fp);
           if (!def.onPlatform && cell.platform) return fail('Nicht auf dem Bahnsteig', fp);
@@ -721,14 +808,32 @@ export class Game {
       default:
         return fail('');
     }
+    if (CLEARING.has(tool)) cost += this.clearCost(shown);
     if (cost > this.money) return { ok: false, cost, reason: 'Zu wenig Geld', cells: shown };
     return { ok: true, cost, cells: shown };
+  }
+
+  /** Bäume/Büsche, die beim Bauen weg müssen */
+  private clearable(id: number) {
+    const b = this.grid.buildings.get(id);
+    return !!b && b.decor && BUILDINGS[b.key].group === 'nature' && !BUILDINGS[b.key].fixed;
+  }
+
+  private natureIn(cells: XY[]) {
+    const ids = new Set<number>();
+    for (const c of cells) { const id = this.grid.get(c.x, c.y)?.building; if (id != null && this.clearable(id)) ids.add(id); }
+    return [...ids];
+  }
+
+  private clearCost(cells: XY[]) {
+    return this.natureIn(cells).reduce((a, id) => a + BUILDINGS[this.grid.buildings.get(id)!.key].demolish, 0);
   }
 
   build(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const p = this.plan(tool, cells, variant);
     if (!p.ok) return p;
     const g = this.grid;
+    if (CLEARING.has(tool) || tool === 'track') this.natureIn(p.cells).forEach((id) => g.removeBuilding(id));
     switch (tool) {
       case 'land': {
         const { px, py } = g.parcelOf(cells[0].x, cells[0].y);
@@ -736,7 +841,14 @@ export class Game {
         break;
       }
       case 'platform': cells.forEach((c) => (g.get(c.x, c.y)!.platform = true)); break;
-      case 'track': cells.forEach((c) => (g.get(c.x, c.y)!.track = true)); break;
+      case 'track':
+        p.cells.forEach((c) => { const cc = g.get(c.x, c.y)!; if (cc.piece === null && !p.pieces?.length) cc.track = true; });
+        if (p.pieces?.length) {
+          const lay = this.trackLayout(cells[0], cells[1]) as TrackLayout;
+          lay.straight.forEach((c) => (g.get(c.x, c.y)!.track = true));
+          lay.pieces.forEach((a) => g.addPiece(a.key, a.x, a.y));
+        }
+        break;
       case 'signal': {
         const c = g.get(cells[0].x, cells[0].y)!;
         if (variant === 'W') c.signalW = true; else c.signal = true;

@@ -62,6 +62,13 @@ const defs: PieceDef[] = [
     paths: [{ from: D(0, 0), to: D(1, 1), pts: P('diag_desc'), diverging: false }] },
   { key: 'diag_asc', group: 'diag', label: 'Diagonale nach hinten', w: 1, h: 2, through: [], cost: COST.diag,
     paths: [{ from: A(0, 1), to: A(1, 0), pts: P('diag_asc'), diverging: false }] },
+  ...(['desc', 'asc'] as const).flatMap((d) => [0, 1].map((row): PieceDef => ({
+    key: `cross_${d}${row}`, group: 'diag', label: 'Gleiskreuzung', w: 1, h: 2, through: [row], cost: COST.crossing,
+    paths: [
+      d === 'desc' ? { from: D(0, 0), to: D(1, 1), pts: P('diag_desc'), diverging: false } : { from: A(0, 1), to: A(1, 0), pts: P('diag_asc'), diverging: false },
+      { from: S(0, row), to: S(1, row), pts: [{ x: 0, y: row * 16 + 8 }, { x: 16, y: row * 16 + 8 }], diverging: false },
+    ],
+  }))),
 ];
 
 export const PIECES: Record<string, PieceDef> = Object.fromEntries(defs.map((d) => [d.key, d]));

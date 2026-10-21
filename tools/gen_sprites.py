@@ -149,6 +149,11 @@ for key, tracks in PIECES.items():
 for key, P in (("diag_desc", DD), ("diag_asc", DA)):
     img, (sx, sy) = tg.render([(P, True, tg.DIAG_OFF, tg.DIAG_STEP)], (0, 0, 16, 32))
     save("piece_" + key, img, sx, sy)
+# Gleiskreuzungen: Diagonale über ein gerades Gleis (oben oder unten)
+for d, P in (("desc", DD), ("asc", DA)):
+    for row in (0, 1):
+        img, (sx, sy) = tg.render([(tg.main_path(8 + 16 * row, 0, 16), True), (P, False, tg.DIAG_OFF, tg.DIAG_STEP)], (0, 0, 16, 32))
+        save(f"piece_cross_{d}{row}", img, sx, sy)
 
 # ---------------------------------------------------------------- Bahnsteig
 def platform(line_n, line_s):
@@ -475,7 +480,7 @@ icon_save("signal_W", compose([("track", 0, 0), ("signal_green", 0, 0)], T1).tra
 for key in ("xover_down", "xover_up", "branch_divDown", "branch_divUp", "branch_mergeAbove", "branch_mergeBelow",
             "curve_divDown", "curve_divUp", "curve_mergeAbove", "curve_mergeBelow"):
     icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], T32))
-for key in ("diag_desc", "diag_asc"):
+for key in ("diag_desc", "diag_asc", "cross_desc0", "cross_asc1"):
     icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], [(0, 0), (0, 1)]))
 for name in BUILDINGS:
     d = {"bld_station": (3, 2), "bld_houseA": (2, 2), "bld_houseB": (2, 2)}.get(name, (1, 1))
@@ -487,6 +492,7 @@ for name in NATURE:
 for n in ("cursor", "flag", "shovel", "house"):
     ic = Image.open(os.path.join(OUT, "ui", n + ".png"))
     icon_save("tool_" + n, ic.resize((36, 36), Image.NEAREST))
+icon_save("rail_bridge_icon", compose([("water_10", 0, 0), ("water_10", 1, 0), ("track", 0, 0), ("track", 1, 0), ("rail_bridge", 0, 0), ("rail_bridge", 1, 0)], []))
 
 # ---------------------------------------------------------------- Oberleitung, Prellbock, Zugänge, Anlagen
 for name, (img, ox, oy) in {
