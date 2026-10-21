@@ -1,0 +1,106 @@
+import { acceptChance, cancelRisk, fairPrice, TRANSIT_FEE } from '../game/Contracts';
+import type { Game } from '../game/Game';
+import { fmtTime } from '../game/Game';
+import { RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research';
+import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
+
+const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
+const ICON = (name: string) => `assets/gen/icons/${name}.png`;
+const CARD_W = 236, CARD_H = 132, GAP_X = 64, GAP_Y = 16;
+
+const hm = (sec: number) => {
+  const m = Math.max(0, Math.ceil(sec / 60));
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+};
+
+/** Zustand für das Neuzeichnen (nur bei Änderung) */
+export function researchKey(g: Game, quest?: string) {
+  const r = g.research;
+  return `${r.done.join()}|${r.current?.id}|${r.current ? Math.ceil(r.current.left / 300) : 0}|${r.points}|${Math.floor(g.money / 100)}|${quest}`;
+}
+
+export function researchHtml(g: Game, quest?: string) {
+  const cols = Math.max(...RESEARCH.map((r) => r.col)) + 1;
+  const rows = Math.max(...RESEARCH.map((r) => r.row)) + 1;
+  const W = cols * CARD_W + (cols - 1) * GAP_X, H = rows * CARD_H + (rows - 1) * GAP_Y;
+  const pos = (id: ResearchId) => {
+    const r = RESEARCH_BY_ID[id];
+    return { x: r.col * (CARD_W + GAP_X), y: r.row * (CARD_H + GAP_Y) };
+  };
+  const lines = RESEARCH.flatMap((r) => r.requires.map((q) => {
+    const a = pos(q), b = pos(r.id);
+    const x1 = a.x + CARD_W, y1 = a.y + CARD_H / 2, x2 = b.x, y2 = b.y + CARD_H / 2, xm = x1 + GAP_X / 2;
+    const on = g.researched(q);
+    return `<path d="M${x1} ${y1} H${xm} V${y2} H${x2}" class="${on ? 'on' : ''}" />`;
+  })).join('');
+  const cards = RESEARCH.map((r) => {
+    const p = pos(r.id);
+    const done = g.researched(r.id);
+    const cur = g.research.current?.id === r.id ? g.research.current : null;
+    const block = g.researchBlock(r.id);
+    const state = done ? 'done' : cur ? 'running' : !block ? 'ready' : r.requires.every((q) => g.researched(q)) ? 'open' : 'locked';
+    let foot: string;
+    if (done) foot = '<span class="ok">✓ erforscht</span>';
+    else if (cur) {
+      const pct = 100 - (cur.left / (r.hours * 3600)) * 100;
+      foot = `<div class="rs-prog"><div style="width:${pct.toFixed(1)}%"></div></div><span>noch ${hm(cur.left)}</span>`;
+    } else if (!block) foot = `<button class="btn rs-go" data-research="${r.id}">Erforschen</button>`;
+    else foot = `<span class="no">${block}</span>`;
+    return `<div class="rs-card ${state}${quest === r.id && !done ? ' quest' : ''}" style="left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${CARD_H}px">
+      <div class="rs-top"><span class="slot"><img src="${ICON(r.icon)}" alt="" /></span><div><b>${r.name}</b><small>${r.info}</small></div></div>
+      <div class="rs-cost"><span><img src="assets/gen/ui/flask.png" alt="" />${r.fp}</span><span><img src="assets/gen/ui/coin.png" alt="" />${eur(r.cost)}</span><span><img src="assets/gen/ui/clock.png" alt="" />${r.hours} h</span></div>
+      <div class="rs-foot">${foot}</div>
+    </div>`;
+  }).join('');
+  return `<div class="rs-wrap" style="width:${W}px;height:${H}px"><svg width="${W}" height="${H}">${lines}</svg>${cards}</div>`;
+}
+
+/** Unternehmen für die Vertragsliste */
+function contractOps(g: Game) {
+  const act = new Set(g.activeOperators().map((o) => o.id));
+  return Object.values(OPERATORS).filter((o) => o.kind !== 'sort' && (act.has(o.id) || !g.contracts[o.id].active));
+}
+
+export function contractsKey(g: Game) {
+  return contractOps(g).map((o) => {
+    const c = g.contracts[o.id];
+    return `${o.id}${c.active}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
+  }).join('|');
+}
+
+export function contractsHtml(g: Game) {
+  const ops = contractOps(g);
+  if (!ops.length) return '<div class="ct-empty">Noch keine Unternehmen unterwegs.</div>';
+  const rows = ops.map((o) => {
+    const c = g.contracts[o.id];
+    const sat = Math.round(g.satisfaction[o.id]);
+    const price = (cls: 'short' | 'long') => {
+      const fair = fairPrice(o, cls);
+      const v = c.price[cls];
+      const tone = v > fair * 1.15 ? 'no' : v < fair * 0.95 ? 'ok' : '';
+      return `<div class="ct-price"><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="-10">−</button>
+        <span class="${tone}">${eur(v)} €</span><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="10">+</button>
+        <small>fair ${eur(fair)}</small></div>`;
+    };
+    let status: string;
+    if (c.active) {
+      const risk = cancelRisk(o, c, sat);
+      status = risk > 0 ? `<span class="no">⚠ Kündigung droht (${Math.round(risk * 100)} %/h)</span>` : '<span class="ok">Vertrag läuft</span>';
+    } else if (g.sim.time < c.talkAfter) {
+      status = `<span class="no">gekündigt · Gespräch ab ${fmtTime(c.talkAfter)}</span>`;
+    } else {
+      const ch = Math.round(acceptChance(o, c, sat) * 100);
+      status = `<button class="btn ct-offer" data-offer="${o.id}">Angebot senden · ${ch} %</button>`;
+    }
+    return `<div class="ct-row${c.active ? '' : ' off'}">
+      <div class="ct-name"><span class="dot" style="background:${o.color}"></span><div><b>${o.name}</b><small>${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}</small></div></div>
+      <div><small class="ct-lbl">kurzer Zug</small>${price('short')}</div>
+      <div><small class="ct-lbl">langer Zug</small>${price('long')}</div>
+      <div class="ct-sat"><small class="ct-lbl">Zufriedenheit</small><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
+      <div class="ct-status">${status}</div>
+    </div>`;
+  }).join('');
+  return rows;
+}
+
+export { TRANSIT_FEE };

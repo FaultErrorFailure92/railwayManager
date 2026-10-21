@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bahnhofsmanager</title>
+</head>
+<body>
+  <div id="game"></div>
+
+  <header id="topbar" class="panel">
+    <button id="company" class="company" title="Namen ändern">
+      <img src="assets/gen/ui/train.png" alt="" /><span id="company-name">Bahn</span>
+    </button>
+    <div class="sep"></div>
+    <div class="stat clock"><img src="assets/gen/ui/clock.png" alt="" /><span id="clock">06:00</span></div>
+    <div class="speed" id="speed">
+      <button class="btn" data-speed="0" title="Pause (Leertaste)">II</button>
+      <button class="btn" data-speed="1" title="Normal (+/−)">▶</button>
+      <button class="btn" data-speed="2" title="Schnell">▶▶</button>
+      <button class="btn" data-speed="4" title="Sehr schnell">▶▶▶</button>
+      <button class="btn" data-speed="8" title="Maximal">×8</button>
+    </div>
+    <div class="sep"></div>
+    <div class="stat" title="Kasse"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span></div>
+    <div class="stat" title="Pünktlichkeit"><img src="assets/gen/ui/check.png" alt="" /><span id="punct">–</span></div>
+    <div class="stat" title="Fahrgäste gesamt"><img src="assets/gen/ui/person.png" alt="" /><span id="pax">0</span></div>
+    <div class="stat" title="Stimmung am Bahnsteig"><img src="assets/gen/ui/smile.png" alt="" /><span id="mood">–</span></div>
+    <div class="sep"></div>
+    <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
+    <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" />Verträge<span class="tb-warn" id="ct-warn"></span></button>
+    <div class="grow"></div>
+    <button class="btn small" id="btn-save">Speichern</button>
+    <button class="btn small" id="btn-menu" title="Hauptmenü (Esc)">Menü</button>
+  </header>
+
+  <aside id="right">
+    <section id="quest" class="panel">
+      <div class="q-ribbon" id="q-ribbon">NEUER AUFTRAG!</div>
+      <div class="q-head"><img src="assets/gen/ui/quest.png" alt="" /><span id="q-count">AUFTRAG 1/6</span></div>
+      <div class="q-title" id="q-title"></div>
+      <div class="q-short" id="q-short"></div>
+      <div class="q-bar" id="q-bar"></div>
+      <div class="q-foot">
+        <span class="q-num" id="q-num"></span>
+        <span class="q-reward" id="q-reward"></span>
+      </div>
+      <button class="btn q-show" id="q-show">▼ Zeig mir wo</button>
+    </section>
+    <section class="panel fold" id="p-trains">
+      <h3 data-fold="p-trains">Zugverkehr</h3>
+      <ul id="trains"></ul>
+    </section>
+    <section class="panel fold closed" id="p-log">
+      <h3 data-fold="p-log">Meldungen</h3>
+      <ul id="log"></ul>
+    </section>
+    <section class="panel fold closed" id="p-sat">
+      <h3 data-fold="p-sat">Bahnunternehmen</h3>
+      <div id="sat"></div>
+    </section>
+  </aside>
+
+  <div id="bottom">
+    <div id="tooltip" class="panel"></div>
+    <div id="variants" class="panel"></div>
+    <nav id="hotbar" class="panel"></nav>
+  </div>
+
+  <div id="research" class="screen hidden">
+    <div class="panel sc-box">
+      <div class="sc-head">
+        <h2>Forschung</h2>
+        <div class="sc-stats"><span><img src="assets/gen/ui/flask.png" alt="" /><b id="rs-fp">0</b> Forschungspunkte</span><span><img src="assets/gen/ui/coin.png" alt="" /><b id="rs-money">0</b> €</span></div>
+        <button class="btn" data-close="research">✕</button>
+      </div>
+      <div class="sc-hint">Forschungspunkte gibt es für pünktliche Züge und erledigte Aufträge. Es läuft immer nur eine Forschung.</div>
+      <div id="rs-tree"></div>
+    </div>
+  </div>
+
+  <div id="contracts" class="screen hidden">
+    <div class="panel sc-box">
+      <div class="sc-head">
+        <h2>Verträge</h2>
+        <div class="sc-stats"><span>Preis je Zug bei pünktlicher Abfertigung</span></div>
+        <button class="btn" data-close="contracts">✕</button>
+      </div>
+      <div class="sc-hint">Zu hohe Preise machen Unternehmen unzufrieden – dann kündigen sie und fahren nur noch für <span id="ct-transit">40</span> € durch.</div>
+      <div id="ct-table"></div>
+    </div>
+  </div>
+
+  <div id="event" class="hidden">
+    <div id="ev-confetti"></div>
+    <div class="panel ev-box">
+      <div id="ev-body"></div>
+      <button class="btn big" id="ev-ok">Weiter</button>
+    </div>
+  </div>
+  <div id="traincard" class="panel hidden"></div>
+
+  <div id="menu" class="hidden">
+    <div class="m-box">
+      <img class="m-logo" src="assets/gen/ui/train.png" alt="" />
+      <h1>BAHNHOFS<br />MANAGER</h1>
+      <div class="m-sub" id="m-sub"></div>
+      <div class="m-buttons">
+        <button class="btn big" id="m-continue">Weiterspielen</button>
+        <button class="btn big" id="m-new">Neues Spiel</button>
+        <button class="btn big" id="m-help">Steuerung</button>
+      </div>
+      <div class="panel m-help hidden" id="m-helpbox">
+        <div><b>Maus ziehen</b> Karte verschieben</div>
+        <div><b>Mausrad</b> Zoom</div>
+        <div><b>1–9, 0, B, N, X</b> Werkzeuge</div>
+        <div><b>R</b> Variante / Richtung</div>
+        <div><b>Rechtsklick</b> Abbrechen</div>
+        <div><b>Leertaste</b> Pause</div>
+        <div><b>+ / −</b> Tempo</div>
+        <div><b>Esc</b> Werkzeug weg · Menü</div>
+        <div><b>Zug anfahren</b> Infos</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="hidden">
+    <div class="panel dialog">
+      <h2>Deine Bahngesellschaft</h2>
+      <p>Wie soll dein Unternehmen heißen?</p>
+      <input id="name-input" maxlength="28" placeholder="z.B. Donaubahn AG" />
+      <button class="btn big" id="name-ok">Los geht's!</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
