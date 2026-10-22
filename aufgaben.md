@@ -63,5 +63,14 @@
 
 
 ===
-- Anzeige zu aktuelle Kosten pro Tag
-- Kredit-Funktion. Wenn man unter 0€ kommt, dann nimmt man automatisch einen kredit, zahlt aber dann täglich zinsen, bis man wieder im Plus ist. bei -50k€ ist das spiel dann automatisch game over 
+- [x] Anzeige zu aktuelle Kosten pro Tag *(oben neben der Kasse: Instandhaltung + Zinsen)*
+- [x] Kredit-Funktion. Wenn man unter 0€ kommt, dann nimmt man automatisch einen kredit, zahlt aber dann täglich zinsen, bis man wieder im Plus ist. bei -50k€ ist das spiel dann automatisch game over *(3 % Zinsen pro Tag, „KREDIT“-Hinweis an der Kasse, Game Over „Pleite“)*
+===
+- [x] Zeitung mit Anfragen: Fan-Sonderzug (Prämie 1 500 € / Strafe 800 €), Bahnhofsfest sponsern
+- [x] Verspätete Züge mit roter Uhr, Zugkarte zeigt „Wartet: …“
+- [x] Erfolge (14 Stück) mit Sammlung in der Statistik
+- [x] Wetter: Regen, Schnee (Züge langsamer)
+- [x] Störungen an eigenen Weichen/Signalen – anklicken → Störtrupp (300 €, 20 min)
+- [x] Statistik-Seite: Tagesbilanz 7 Tage, Pünktlichkeit je Unternehmen
+- [x] Schnellspeichern F5 / Strg+S, Autosave alle 3 Spielstunden
+- [x] Geräusche: Gong bei Halt, Pfiff bei Abfahrt (Knopf „Ton“)

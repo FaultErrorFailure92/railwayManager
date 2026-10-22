@@ -14,6 +14,8 @@ import { pointOnEdge } from '../world/Network';
 import { PIECES, PIECES_BY_GROUP } from '../world/pieces';
 import { People } from './People';
 import { Lighting } from './Lighting';
+import { Weather } from './Weather';
+import { Sound } from './Sound';
 
 type SpriteInfo = { file: string; ox: number; oy: number; w: number; h: number };
 const SPRITES = manifest.sprites as Record<string, SpriteInfo>;
@@ -126,6 +128,7 @@ export class GameScene extends Phaser.Scene {
     this.ghost = this.add.graphics().setDepth(D_UI);
     this.people = new People(this, this.g);
     this.lighting = new Lighting(this, this.g, D_OVERLAY - 10);
+    this.weatherFx = new Weather(this, this.g, D_OVERLAY - 8);
     this.animals = new Animals(this, this.g);
 
     const cam = this.cameras.main;
@@ -253,6 +256,7 @@ export class GameScene extends Phaser.Scene {
         this.downAt = null;
         if (d && Math.hypot(p.x - d.x, p.y - d.y) < 5 && this.ui.tool === 'select') {
           const c = this.cellAt(p.x, p.y);
+          if (c && this.g.repairFault(c.x, c.y)) return;
           const id = c ? this.g.grid.get(c.x, c.y)?.building : null;
           if (id != null && PANEL_BUILDING(this.g.grid.buildings.get(id)?.key)) this.ui.stationClick = id;
         }
@@ -337,6 +341,8 @@ export class GameScene extends Phaser.Scene {
     const wv = this.cameras.main.worldView;
     this.animals.update(dt, this.g.speed, this.g.paused, new Phaser.Geom.Rectangle(wv.x - 40, wv.y - 40, wv.width + 80, wv.height + 80));
     this.updateLights();
+    this.weatherFx.update(dt, this.cameras.main.worldView, this.cameras.main.zoom);
+    this.updateMarkers();
     this.drawHint(dt);
     this.drawGhost();
     this.showFx();
@@ -562,6 +568,45 @@ export class GameScene extends Phaser.Scene {
   }
 
   private lighting!: Lighting;
+  private weatherFx!: Weather;
+  private markerPool: Phaser.GameObjects.Image[] = [];
+  private lastState = new Map<number, string>();
+
+  /** rote Uhr über verspäteten Zügen, Warnzeichen an Störungen, Geräusche bei Halt/Abfahrt */
+  private updateMarkers() {
+    let used = 0;
+    const put = (key: string, wx: number, wy: number, alpha = 1) => {
+      let img = this.markerPool[used];
+      if (!img) { img = this.add.image(0, 0, key).setOrigin(0).setDepth(D_OVERLAY + 4); this.markerPool.push(img); }
+      used++;
+      const s = SPRITES[key], p = toScreen(wx, wy);
+      if (img.texture.key !== key) img.setTexture(key);
+      img.setPosition(Math.round(p.x + s.ox), Math.round(p.y + s.oy)).setAlpha(alpha).setVisible(true);
+    };
+    const sim = this.g.sim;
+    const view = this.cameras.main.worldView;
+    for (const t of sim.trains) {
+      if (t.state === 'stored' || t.state === 'rolling' || !t.route.length) continue;
+      const head = this.worldOnTrain(t, 4);
+      const sp = toScreen(head.x, head.y);
+      const visible = view.contains(sp.x, sp.y);
+      // Geräusche nur für Züge im Bild
+      const prev = this.lastState.get(t.id);
+      if (visible && prev !== t.state) {
+        if (t.state === 'dwell' && t.jobs[0]?.k === 'stop') Sound.gong();
+        if (prev === 'dwell' && t.state === 'running') Sound.whistle();
+      }
+      this.lastState.set(t.id, t.state);
+      if (sim.delayNow(t) >= 3) put('late_icon', head.x, head.y - 14);
+    }
+    if (this.lastState.size > 200) for (const id of [...this.lastState.keys()]) if (!sim.trains.some((t) => t.id === id)) this.lastState.delete(id);
+    const blink = Math.floor(this.time0 / 400) % 2 === 0;
+    for (const f of this.g.faults) {
+      const q = this.g.grid.xy(f.k);
+      put('warn', q.x * TILE + 8, q.y * TILE + 8, f.repairAt ? 0.5 : blink ? 1 : 0.35);
+    }
+    for (let i = used; i < this.markerPool.length; i++) this.markerPool[i].setVisible(false);
+  }
   private updateLights() {
     const scr = (p: XY) => toScreen(p.x, p.y);
     const trains = this.g.sim.trains.filter((t) => t.state !== 'stored' && t.state !== 'done' && t.route.length).map((t) => ({

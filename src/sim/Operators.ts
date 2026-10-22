@@ -1,6 +1,6 @@
 import { TILE } from '../config';
 
-export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs' | 'tt' | 'sw' | 'mn';
+export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs' | 'tt' | 'sw' | 'mn' | 'fx';
 export type TrainKind = 'regio' | 'ic' | 'freight' | 'sbahn' | 'night' | 'museum' | 'sort';
 export type Traction = 'electric' | 'diesel' | 'steam';
 
@@ -39,6 +39,8 @@ export interface Operator {
   takt: number;
   /** Privatbahn: fährt zum Ladegleis dieses Betriebs, lädt und fährt zurück */
   industry?: string;
+  /** einmaliger Sonderzug (ohne Vertrag, auf Bestellung) */
+  special?: boolean;
   /** Hochgeschwindigkeitszug: nur gerade Strecke und Schnellfahrweichen */
   highSpeed?: boolean;
   /** maximale Zahl Wagen (ohne Lok) bei langen Bahnsteigen */
@@ -111,6 +113,11 @@ export const OPERATORS: Record<OperatorId, Operator> = {
     cars: ['loco', 'wagon', 'wagon', 'wagon'], traction: 'diesel', vmax: tpm(10), needsStop: false, turnback: true, dwell: 900,
     fee: 140, pax: [0, 0], numberBase: 81000, industry: 'sawmill',
   },
+  fx: {
+    takt: 120, id: 'fx', name: 'Sonderzug', category: 'Fan-/Sonderzug', short: 'SZ', color: '#e05a9a', kind: 'ic',
+    cars: ['loco', 'coach', 'coach', 'coach'], long: ['loco', 'coach', 'coach', 'coach', 'coach', 'coach'], longShare: 0.8, traction: 'diesel', vmax: tpm(18),
+    needsStop: true, dwell: 120, fee: 0, pax: [260, 480], numberBase: 13000, special: true,
+  },
   mn: {
     takt: 120, id: 'mn', name: 'Bergwerk Erzleiten', category: 'Privatbahn · Erz', short: 'BE', color: '#6c6f78', kind: 'freight',
     cars: ['loco', 'wagon', 'wagon', 'wagon', 'wagon'], traction: 'diesel', vmax: tpm(9), needsStop: false, turnback: true, dwell: 900,
@@ -126,7 +133,7 @@ export const SORT_DESTS = [
 ];
 
 const T = (t: Partial<Record<OperatorId, number>>): Record<OperatorId, number> =>
-  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, tt: 0, sw: 0, mn: 0, ...t });
+  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, tt: 0, sw: 0, mn: 0, fx: 0, ...t });
 
 /** alter Takt je Stufe – nur noch für alte Spielstände (Verträge übernehmen) */
 export const TAKT: Record<number, Record<OperatorId, number>> = {

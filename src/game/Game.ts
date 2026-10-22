@@ -5,6 +5,7 @@ import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { INDUSTRIES } from '../world/industries';
+import { ACHIEVEMENTS } from './Achievements';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
@@ -27,7 +28,15 @@ export interface Stats {
   recent: boolean[];
   /** Bahnsteiggleise, an denen schon ein Zug abgefertigt wurde */
   platformRuns: string[];
+  /** je Unternehmen: abgefertigt / pünktlich */
+  opStats?: Record<string, { handled: number; punctual: number }>;
+  repairs?: number;
+  specialsOk?: number;
+  wasDebt?: boolean;
 }
+
+/** Tageswerte für die Statistik */
+export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number }
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
 
@@ -54,9 +63,11 @@ export type UiEvent =
   | { type: 'contract'; op: OperatorId; kind: 'cancel' | 'accept' | 'reject' }
   | { type: 'offer' }
   | { type: 'deadlock' }
-  | { type: 'gameover' }
+  | { type: 'gameover'; reason?: 'deadlock' | 'debt' }
   | { type: 'autosave'; label: string }
-  | { type: 'news'; title: string; text: string; tag: string };
+  | { type: 'news'; title: string; text: string; tag: string }
+  | { type: 'decision'; title: string; text: string; yes: string; no: string }
+  | { type: 'achievement'; id: string };
 
 /** Effekte auf der Karte (schwebende Beträge) */
 export interface FxEvent { amount: number; x: number; y: number; train?: number; label?: string }
@@ -87,6 +98,10 @@ export interface GameSave {
   research?: ResearchState;
   contracts?: Record<OperatorId, Contract>;
   shopPrices?: Record<string, number>;
+  history?: DayStat[];
+  achievements?: string[];
+  weather?: Game['weather'];
+  faults?: Game['faults'];
   offers?: Game['offers'];
   news?: Game['news'];
 }
@@ -99,6 +114,9 @@ export const fmtTime = (t: number) => {
 /** Zell-Bits aus dem Spielstand */
 /** Werkzeuge, die Bäume und Büsche automatisch fällen */
 const CLEARING = new Set<ToolId>(['platform', 'switch', 'curve', 'diag', 'building']);
+
+/** Störtrupp-Kosten */
+const REPAIR_COST = 300;
 
 /** Stau: so lange (Spielsekunden) bleibt Zeit zum Lösen */
 const DEADLOCK_LIMIT = 3600;
@@ -119,7 +137,28 @@ export class Game {
   net: Network;
   readonly sim: Simulation;
   company = '';
-  money = START_MONEY;
+  private _money = START_MONEY;
+  /** Kasse – jede Änderung landet in der Tagesstatistik */
+  get money() { return this._money; }
+  set money(v: number) {
+    const d = v - this._money;
+    this._money = v;
+    if (!this.sim || !d) return;
+    const t = this.today();
+    if (d > 0) t.income += d; else t.expense -= d;
+  }
+  /** letzte 14 Tage */
+  history: DayStat[] = [];
+  today(): DayStat {
+    const day = Math.floor(this.sim.time / 86400);
+    let t = this.history[this.history.length - 1];
+    if (!t || t.day !== day) {
+      t = { day, income: 0, expense: 0, handled: 0, punctual: 0, pax: 0 };
+      this.history.push(t);
+      if (this.history.length > 14) this.history.shift();
+    }
+    return t;
+  }
   speed = 1;
   paused = false;
   /** steigt bei jeder Änderung an Gleisen/Gebäuden/Fläche (für Renderer) */
@@ -141,7 +180,18 @@ export class Game {
   /** Werkzeuge, die im aktuellen Auftrag schon benutzt wurden (dann kein „!“ mehr in der Leiste) */
   readonly questUsed = new Set<string>();
   /** Zeitungsmeldungen: nächste Meldung, Vandalismus am Bahnhof bis, letzte abgerechnete Tag */
-  news = { nextAt: 0, stationUntil: 0, lastDay: -1, dayMoney: NaN, lastBalance: NaN };
+  news = { nextAt: 0, stationUntil: 0, lastDay: -1, dayMoney: NaN, lastBalance: NaN, deals: {} as Record<number, { reward: number; penalty: number }> };
+  /** freigespielte Erfolge */
+  achievements: string[] = [];
+  /** Wetter */
+  weather = { kind: 'sun' as 'sun' | 'rain' | 'snow', until: 0 };
+  /** Störungen an Weichen/Signalen */
+  faults: { k: number; kind: 'switch' | 'signal'; since: number; repairAt?: number }[] = [];
+  /** offene Entscheidung aus der Zeitung */
+  decision: { id: 'fans' | 'sponsor'; at?: number; dir?: 'E' | 'W'; reward?: number; penalty?: number; cost?: number } | null = null;
+  get repairs() { return this.stats.repairs ?? 0; }
+  get specialsOk() { return this.stats.specialsOk ?? 0; }
+  get wasInDebt() { return !!this.stats.wasDebt; }
   readonly uiEvents: UiEvent[] = [];
   readonly fx: FxEvent[] = [];
 
@@ -184,6 +234,12 @@ export class Game {
     if (save && !save.offers) this.migrateContracts(save);
     if (save?.offers) Object.assign(this.offers, save.offers);
     if (save?.news) Object.assign(this.news, save.news);
+    if (save?.history) this.history = save.history;
+    if (save?.achievements) this.achievements = save.achievements;
+    if (save?.weather) Object.assign(this.weather, save.weather);
+    if (save?.faults) this.faults = save.faults;
+    this.faults.forEach((f) => this.sim.faultCells.add(f.k));
+    this.applyWeather();
     this.clampTakts();
     this.updatePlatformLength();
     this.sim.fillTimetable();
@@ -244,6 +300,7 @@ export class Game {
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults,
     };
   }
 
@@ -370,6 +427,7 @@ export class Game {
     const hour = Math.floor(this.sim.time / 3600);
     if (hour !== this.lastHour) { this.lastHour = hour; this.hourly(); }
     this.checkOffers();
+    this.tickFaults();
     this.checkDeadlock();
     for (const ev of this.sim.events.splice(0)) {
       if (ev.type === 'note') { this.addLog(ev.text, 'bad'); continue; }
@@ -462,7 +520,13 @@ export class Game {
       this.fx.push({ amount: income, x: 0, y: 0, train: t.id, label: 'Durchfahrt' });
       return;
     }
-    if (missed) {
+    const deal = t.op.special ? this.news.deals?.[t.id] : undefined;
+    if (deal) {
+      income = punctual ? deal.reward : -deal.penalty;
+      if (punctual) this.stats.specialsOk = (this.stats.specialsOk ?? 0) + 1;
+      delete this.news.deals[t.id];
+      this.addLog(`${t.number} Sonderzug ${punctual ? 'pünktlich – Prämie' : 'zu spät – Strafe'} · ${income >= 0 ? '+' : ''}${income} €`, punctual ? 'good' : 'bad');
+    } else if (missed) {
       income = -MISSED_STOP_PENALTY;
       this.stats.missed++;
       this.satisfaction[t.op.id] -= 12;
@@ -483,6 +547,13 @@ export class Game {
     this.money += income;
     this.stats.handled++;
     if (punctual) { this.stats.punctual++; this.stats.streak++; } else this.stats.streak = 0;
+    const os = ((this.stats.opStats ??= {})[t.op.id] ??= { handled: 0, punctual: 0 });
+    os.handled++;
+    if (punctual) os.punctual++;
+    const td = this.today();
+    td.handled++;
+    if (punctual) td.punctual++;
+    td.pax += t.passengers;
     this.stats.recent.push(punctual);
     if (this.stats.recent.length > 50) this.stats.recent.shift();
   }
@@ -638,12 +709,146 @@ export class Game {
     this.uiEvents.push({ type: 'offer' });
   }
 
+  // ------------------------------------------------------------ Wetter, Störungen, Erfolge, Entscheidungen
+  applyWeather() {
+    this.sim.weatherV = this.weather.kind === 'snow' ? 0.85 : this.weather.kind === 'rain' ? 0.95 : 1;
+  }
+
+  private updateWeather() {
+    const t = this.sim.time;
+    if (t < this.weather.until) return;
+    const r = Math.random();
+    const kind = r < 0.62 ? 'sun' : r < 0.9 ? 'rain' : 'snow';
+    const was = this.weather.kind;
+    this.weather = { kind, until: t + (3 + Math.random() * 6) * 3600 };
+    this.applyWeather();
+    if (kind !== was) {
+      if (kind === 'snow') this.addLog('Schneefall: Züge fahren langsamer', 'bad');
+      else if (kind === 'rain') this.addLog('Regen zieht auf', 'info');
+      else this.addLog('Das Wetter klart auf', 'good');
+    }
+  }
+
+  /** ab und zu fällt eine eigene Weiche oder ein eigenes Signal aus */
+  private maybeFault() {
+    if (this.faults.length || Math.random() > 0.05) return;
+    const g = this.grid;
+    const cand: { k: number; kind: 'switch' | 'signal' }[] = [];
+    for (const p of g.pieces.values()) {
+      if (g.fixedPieces.has(p.id) || PIECES[p.key].group !== 'switch') continue;
+      const cells = g.pieceCells(p);
+      cand.push({ k: cells[Math.floor(cells.length / 2)], kind: 'switch' });
+    }
+    g.cells.forEach((c, k) => { if ((c.signal || c.signalW) && !c.fixed && g.isOwned(g.xy(k).x, g.xy(k).y)) cand.push({ k, kind: 'signal' }); });
+    if (cand.length < 2) return;
+    const f = cand[Math.floor(Math.random() * cand.length)];
+    if (this.sim.owner[f.k] !== 0) return;
+    this.faults.push({ ...f, since: this.sim.time });
+    this.sim.faultCells.add(f.k);
+    const p = g.xy(f.k);
+    this.addLog(`Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – anklicken, um den Störtrupp zu schicken (${REPAIR_COST} €)`, 'bad');
+    this.fx.push({ amount: 0, x: p.x, y: p.y, label: 'STÖRUNG!' });
+  }
+
+  faultAt(x: number, y: number) {
+    const g = this.grid;
+    const c = g.get(x, y);
+    if (!c) return undefined;
+    const keys = new Set<number>([g.key(x, y)]);
+    if (c.piece !== null) g.pieceCells(g.pieces.get(c.piece)!).forEach((k) => keys.add(k));
+    return this.faults.find((f) => keys.has(f.k));
+  }
+
+  /** Störtrupp schicken: kostet, braucht 20 Spielminuten */
+  repairFault(x: number, y: number) {
+    const f = this.faultAt(x, y);
+    if (!f || f.repairAt) return false;
+    this.money -= REPAIR_COST;
+    f.repairAt = this.sim.time + 20 * 60;
+    this.addLog(`Störtrupp unterwegs (−${REPAIR_COST} €), fertig in 20 min`, 'info');
+    this.fx.push({ amount: -REPAIR_COST, x, y, label: 'Störtrupp' });
+    return true;
+  }
+
+  private tickFaults() {
+    if (!this.faults.length) return;
+    const t = this.sim.time;
+    for (const f of [...this.faults]) {
+      // ohne Trupp nach 4 Stunden von selbst (aber die Unternehmen sind sauer)
+      const auto = !f.repairAt && t - f.since > 4 * 3600;
+      if ((f.repairAt && t >= f.repairAt) || auto) {
+        this.faults.splice(this.faults.indexOf(f), 1);
+        this.sim.faultCells.delete(f.k);
+        if (auto) {
+          for (const o of this.activeOperators()) this.satisfaction[o.id] = Math.max(0, this.satisfaction[o.id] - 5);
+          this.addLog('Störung nach Stunden endlich behoben – die Unternehmen sind verärgert', 'bad');
+        } else {
+          this.stats.repairs = (this.stats.repairs ?? 0) + 1;
+          this.addLog('Störung behoben', 'good');
+        }
+      }
+    }
+  }
+
+  private checkAchievements() {
+    for (const a of ACHIEVEMENTS) {
+      if (this.achievements.includes(a.id) || !a.check(this)) continue;
+      this.achievements.push(a.id);
+      this.addLog(`Erfolg: ${a.name}!`, 'good');
+      this.uiEvents.push({ type: 'achievement', id: a.id });
+    }
+  }
+
+  /** Entscheidung aus der Zeitung annehmen oder ablehnen */
+  decide(yes: boolean) {
+    const d = this.decision;
+    this.decision = null;
+    if (!d || !yes) return;
+    if (d.id === 'fans' && d.at !== undefined && d.dir) {
+      const tr = this.sim.addSpecial('fx', d.at, d.dir);
+      this.news.deals[tr.id] = { reward: d.reward ?? 0, penalty: d.penalty ?? 0 };
+      this.addLog(`Sonderzug ${tr.number} bestellt: Ankunft um ${fmtTime(d.at)}`, 'good');
+    }
+    if (d.id === 'sponsor' && d.cost) {
+      this.money -= d.cost;
+      this.sim.festUntil = this.sim.time + 12 * 3600;
+      for (const o of this.activeOperators()) this.satisfaction[o.id] = Math.min(100, this.satisfaction[o.id] + 8);
+      this.addLog('Bahnhofsfest gesponsert – 12 Stunden mehr Fahrgäste, Unternehmen zufrieden', 'good');
+    }
+  }
+
   // ------------------------------------------------------------ Stau / Game Over
   /** Spielzeit, seit der sich Züge gegenseitig blockieren (0 = kein Stau) */
   deadlockSince = 0;
   gameOver = false;
 
+  /** Kredit: unter 0 € automatisch, Zinsen täglich; ab dieser Schuld ist Schluss */
+  static readonly DEBT_LIMIT = -50000;
+  static readonly LOAN_RATE = 0.03;
+
+  private checkDebt() {
+    if (this.gameOver) return;
+    if (this.money < 0 && !this.inDebt) {
+      this.inDebt = true;
+      this.stats.wasDebt = true;
+      this.addLog(`Kasse leer – automatischer Kredit, ${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag`, 'bad');
+    } else if (this.money >= 0 && this.inDebt) {
+      this.inDebt = false;
+      this.addLog('Kredit zurückgezahlt!', 'good');
+    }
+    if (this.money <= Game.DEBT_LIMIT) {
+      this.gameOver = true;
+      this.paused = true;
+      this.uiEvents.push({ type: 'gameover', reason: 'debt' });
+    }
+  }
+  inDebt = false;
+
+  /** Zinsen für heute (bei Schulden) */
+  get interest() { return this.money < 0 ? Math.max(10, Math.round(-this.money * Game.LOAN_RATE)) : 0; }
+
   private checkDeadlock() {
+    this.checkDebt();
     if (this.gameOver) return;
     if (!this.sim.deadlock) { this.deadlockSince = 0; return; }
     if (!this.deadlockSince) {
@@ -654,7 +859,7 @@ export class Game {
     if (this.sim.time - this.deadlockSince > DEADLOCK_LIMIT) {
       this.gameOver = true;
       this.paused = true;
-      this.uiEvents.push({ type: 'gameover' });
+      this.uiEvents.push({ type: 'gameover', reason: 'deadlock' });
     }
   }
 
@@ -750,6 +955,11 @@ export class Game {
       this.money -= cost;
       this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
     }
+    const zins = this.interest;
+    if (zins) {
+      this.money -= zins;
+      this.addLog(`Kreditzinsen: −${zins.toLocaleString('de-AT')} €`, 'bad');
+    }
     // Tagesbilanz (alles, was die Kasse heute bewegt hat)
     if (Number.isFinite(this.news.dayMoney)) {
       const bal = Math.round(this.money - this.news.dayMoney);
@@ -765,7 +975,25 @@ export class Game {
     if (!this.stations().length) return;
     if (!this.news.nextAt) { this.news.nextAt = t + (20 + Math.random() * 16) * 3600; return; }
     if (t < this.news.nextAt) return;
-    this.news.nextAt = t + (24 + Math.random() * 24) * 3600;
+    this.news.nextAt = t + (14 + Math.random() * 18) * 3600;
+    // Entscheidungen
+    const q = Math.random();
+    if (q < 0.25 && this.stations().length && !this.decision) {
+      const at = Math.round((t + (3 + Math.random() * 3) * 3600) / 600) * 600;
+      const dir: 'E' | 'W' = Math.random() < 0.5 ? 'E' : 'W';
+      this.decision = { id: 'fans', at, dir, reward: 1500, penalty: 800 };
+      this.uiEvents.push({ type: 'decision', title: 'Fußball-Fans brauchen einen Sonderzug',
+        text: `Der Fanclub fragt an: Ein langer Sonderzug soll um ${fmtTime(at)} Uhr bei dir halten. Pünktlich gibt es 1 500 € Prämie – kommt er zu spät, kostet es 800 € Strafe.`,
+        yes: 'Annehmen', no: 'Ablehnen' });
+      return;
+    }
+    if (q < 0.4 && this.stations().length && !this.decision && this.money > 4000) {
+      this.decision = { id: 'sponsor', cost: 2000 };
+      this.uiEvents.push({ type: 'decision', title: 'Bürgermeister plant ein Bahnhofsfest',
+        text: 'Ob du 2 000 € beisteuern willst? Dafür kommen 12 Stunden lang viel mehr Fahrgäste, und alle Bahnunternehmen sind zufriedener.',
+        yes: 'Sponsern (2 000 €)', no: 'Nein danke' });
+      return;
+    }
     const r = Math.random();
     const trains = this.researched('wash') && r < 0.4;
     if (!trains && r < 0.7) {
@@ -792,6 +1020,10 @@ export class Game {
     if (this.news.lastDay < 0) this.news.lastDay = day;
     if (day !== this.news.lastDay) { this.news.lastDay = day; this.daily(); }
     this.checkNews();
+    this.updateWeather();
+    this.maybeFault();
+    this.checkAchievements();
+    if (this.stations().length && Math.floor(this.sim.time / 3600) % 3 === 0) this.uiEvents.push({ type: 'autosave', label: `Autosave ${fmtTime(this.sim.time)}` });
     for (const o of this.activeOperators()) {
       const c = this.contracts[o.id];
       if (o.kind === 'sort') continue;

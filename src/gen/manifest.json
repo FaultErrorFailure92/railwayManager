@@ -231,6 +231,13 @@
    "w": 5,
    "h": 16
   },
+  "late_icon": {
+   "file": "late_icon.png",
+   "ox": -4,
+   "oy": -9,
+   "w": 9,
+   "h": 9
+  },
   "shsig_red": {
    "file": "shsig_red.png",
    "ox": -2,
@@ -954,6 +961,48 @@
   },
   "car_hs_coach_2": {
    "file": "car_hs_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_fx_loco_0": {
+   "file": "car_fx_loco_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_fx_loco_1": {
+   "file": "car_fx_loco_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_fx_loco_2": {
+   "file": "car_fx_loco_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_fx_coach_0": {
+   "file": "car_fx_coach_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_fx_coach_1": {
+   "file": "car_fx_coach_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_fx_coach_2": {
+   "file": "car_fx_coach_2.png",
    "ox": -12,
    "oy": -16,
    "w": 25,

@@ -1,6 +1,8 @@
 import { COST, STATION_UPGRADE } from '../config';
 import { Game, fmtTime } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
+import { ACHIEVEMENTS } from '../game/Achievements';
+import { Sound } from '../render/Sound';
 import { MISSIONS, ToolId } from '../game/Missions';
 import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
 import { OPERATORS } from '../sim/Operators';
@@ -8,7 +10,7 @@ import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research'
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
 import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
-import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTipHtml, TRANSIT_FEE } from './Screens';
+import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { GameScene, UiState } from '../render/GameScene';
 import { VARIANTS, typing, variantOf } from '../render/GameScene';
@@ -110,6 +112,13 @@ export class Hud {
     $('m-help').onclick = () => $('m-helpbox').classList.toggle('hidden');
 
     $('ev-ok').onclick = () => this.closeEvent();
+    $('ev-body').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-decide]') as HTMLElement | null;
+      if (!b) return;
+      this.g.decide(b.dataset.decide === '1');
+      b.parentElement!.remove();
+      this.closeEvent();
+    });
     $('offer').addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       const a = t.closest('[data-accept]') as HTMLElement | null;
@@ -118,6 +127,10 @@ export class Hud {
     });
     $('btn-research').onclick = () => this.openScreen('research');
     $('btn-contracts').onclick = () => this.openScreen('contracts');
+    $('btn-stats').onclick = () => this.openScreen('stats');
+    const soundLabel = () => { $('btn-sound').textContent = Sound.muted ? 'Stumm' : 'Ton'; };
+    soundLabel();
+    $('btn-sound').onclick = () => { Sound.toggle(); soundLabel(); };
     $('btn-timetable').onclick = () => this.openScreen('timetable');
     this.timetable = new Timetable(this.g);
     $('bpanel').addEventListener('click', (e) => this.onPanelClick(e as MouseEvent));
@@ -157,6 +170,8 @@ export class Hud {
       this.renderScreen(true);
     });
     window.addEventListener('keydown', (e) => {
+      // Schnellspeichern
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's')) { e.preventDefault(); if (this.g.company) $('btn-save').click(); return; }
       if (!$('event').classList.contains('hidden')) {
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); this.closeEvent(); }
         return;
@@ -288,7 +303,7 @@ export class Hud {
   }
 
   // ------------------------------------------------------------ Forschung / Verträge
-  private screen: 'research' | 'contracts' | 'timetable' | null = null;
+  private screen: 'research' | 'contracts' | 'timetable' | 'stats' | null = null;
   private timetable!: Timetable;
   private rsTipId?: string;
   private maintVersion = -1;
@@ -296,7 +311,7 @@ export class Hud {
   private pausedBeforeScreen = false;
   private screenKey = '';
 
-  private openScreen(name: 'research' | 'contracts' | 'timetable') {
+  private openScreen(name: 'research' | 'contracts' | 'timetable' | 'stats') {
     if (name === 'research' && !this.g.unlocked.has('research')) return;
     if (this.screen === name) { this.closeScreen(); return; }
     if (!this.screen) { this.pausedBeforeScreen = this.g.paused; this.g.paused = true; }
@@ -320,14 +335,15 @@ export class Hud {
     if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); return; }
     const mt = this.g.missionTool();
     const quest = mt?.tool === 'research' ? mt.variant : undefined;
-    const key = this.screen === 'research' ? researchKey(this.g, quest) : contractsKey(this.g);
+    const key = this.screen === 'research' ? researchKey(this.g, quest) : this.screen === 'stats' ? statsKey(this.g) : contractsKey(this.g);
     if (!force && key === this.screenKey) return;
     this.screenKey = key;
     if (this.screen === 'research') {
       $('rs-fp').textContent = String(this.g.research.points);
       $('rs-money').textContent = eur(this.g.money);
       $('rs-tree').innerHTML = researchHtml(this.g, quest);
-    } else $('ct-table').innerHTML = contractsHtml(this.g);
+    } else if (this.screen === 'stats') $('st-body').innerHTML = statsHtml(this.g);
+    else $('ct-table').innerHTML = contractsHtml(this.g);
   }
 
   // ------------------------------------------------------------ Infofenster für Bahnhof / Laden
@@ -423,6 +439,7 @@ export class Hud {
     this.pausedBeforeEvent = this.g.paused;
     this.g.paused = true;
     $('ev-body').innerHTML = html;
+    $('ev-ok').classList.toggle('hidden', html.includes('data-decide'));
     const conf = $('ev-confetti');
     conf.innerHTML = !confetti || html.startsWith('<div class="news"') ? '' : Array.from({ length: 40 }, (_, i) => {
       const c = ['#ffd23c', '#ff6a5a', '#7dff8a', '#5ab4ff', '#ffffff'][i % 5];
@@ -432,6 +449,8 @@ export class Hud {
   }
 
   private closeEvent() {
+    // offene Zeitungs-Anfrage ohne Antwort = abgelehnt
+    if ($('ev-body').querySelector('[data-decide]')) this.g.decide(false);
     $('event').classList.add('hidden');
     $('event').classList.remove('top');
     this.g.paused = this.pausedBeforeEvent;
@@ -560,6 +579,8 @@ export class Hud {
     if (t.op.kind !== 'sort' && t.state !== 'rolling' && t.state !== 'stored') {
       rows.push(`<div class="tc-row"><span>Fahrplan</span><span class="${delay > 3 ? 'no' : 'ok'}">${delay > 0 ? `+${delay} min` : 'pünktlich'}</span></div>`);
     }
+    const why = this.g.sim.waitReason(t);
+    if (why) rows.push(`<div class="tc-row"><span>Wartet</span><span class="no">${why}</span></div>`);
     if (isPax) rows.push(`<div class="tc-row"><span>Auslastung</span>${this.bar(load, load > 85 ? '#d9534f' : '#6cc04a')}<span>${t.passengers}/${t.capacity}</span></div>`);
     rows.push(`<div class="tc-row"><span>Antrieb</span><span>${t.op.traction === 'electric' ? '⚡ elektrisch' : '⛽ Diesel'}</span></div>`);
     rows.push(`<div class="tc-row"><span>Schmutz</span>${this.bar(t.dirt, '#9a7a4a')}<span>${Math.round(t.dirt)}</span></div>`);
@@ -602,9 +623,13 @@ export class Hud {
     $('clock').textContent = fmtTime(sim.time);
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
+    $('loan').classList.toggle('hidden', g.money >= 0);
     if (g.version !== this.maintVersion || now > this.maintAt) {
       this.maintVersion = g.version; this.maintAt = now + 5000;
       const m = g.maintenance();
+      const zins = g.interest;
+      const dc = m.total * (m.vandal ? 2 : 1) + zins;
+      $('daycost').textContent = dc ? `−${eur(dc)}/Tag` : '0/Tag';
       const bal = g.news.lastBalance;
       ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}${Number.isFinite(bal) ? ` · gestern: ${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €` : ''}`;
     }
@@ -756,12 +781,33 @@ export class Hud {
       if (ev.type === 'station') { this.askStation(ev.id); continue; }
       if (ev.type === 'offer' || ev.type === 'deadlock') continue;
       if (ev.type === 'autosave') { writeSlot(ev.label, true, this.g.save()); this.savedFlash = now + 1500; continue; }
-      if (ev.type === 'gameover') { $('gameover').classList.remove('hidden'); continue; }
+      if (ev.type === 'gameover') {
+        const debt = ev.reason === 'debt';
+        $('go-title').textContent = debt ? 'Pleite!' : 'Deine Strecke ist dicht.';
+        $('go-info').textContent = debt ? `Die Schulden haben ${eur(-Game.DEBT_LIMIT)} € erreicht – die Bank dreht den Hahn zu. Lade einen Spielstand oder fang neu an.`
+          : 'Die Züge haben sich eine Stunde lang gegenseitig blockiert. Lade einen Spielstand oder fang neu an.';
+        $('gameover').classList.remove('hidden');
+        continue;
+      }
       if (ev.type === 'research') {
         const r = RESEARCH_BY_ID[ev.id];
         this.showEvent(`<h1 class="blue">FORSCHUNG FERTIG!</h1>
           <div class="ev-tools"><div class="ev-tool big"><span class="slot"><img src="${ICON(r.icon)}" alt="" /></span></div></div>
           <div class="ev-title">${r.name}</div><div class="ev-info">${r.info}</div>`);
+        continue;
+      }
+      if (ev.type === 'decision') {
+        const day = Math.floor(g.sim.time / 86400) + 1;
+        this.showEvent(`<div class="news"><div class="nw-head">DONAU-KURIER</div><div class="nw-date">Tag ${day} · ${fmtTime(g.sim.time)} Uhr · Anfrage</div>
+          <div class="nw-title">${ev.title}</div><div class="nw-text">${ev.text}</div></div>
+          <div class="dc-btns"><button class="btn big" data-decide="1">${ev.yes}</button><button class="btn" data-decide="0">${ev.no}</button></div>`, false);
+        continue;
+      }
+      if (ev.type === 'achievement') {
+        const a = ACHIEVEMENTS.find((x) => x.id === ev.id);
+        Sound.coin();
+        if (a) this.showEvent(`<h1>ERFOLG!</h1><div class="ev-tools"><div class="ev-tool big"><span class="slot"><img src="${ICON(a.icon)}" alt="" /></span></div></div>
+          <div class="ev-title">${a.name}</div><div class="ev-info">${a.info}</div>`);
         continue;
       }
       if (ev.type === 'news') {

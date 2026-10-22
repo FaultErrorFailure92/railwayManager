@@ -343,3 +343,35 @@ ul { list-style: none; margin: 0; padding: 0; }
 #event.top { z-index: 70; }
 .ev-changes { text-align: left; font-size: 20px; color: #d8d2c4; margin: 8px auto 14px; max-width: 460px; padding-left: 22px; line-height: 1.2; }
 .ev-changes li { margin: 2px 0; }
+
+.loan { margin-left: 6px; padding: 0 5px; background: var(--bad); color: #fff; font-size: 15px; line-height: 18px; }
+.loan.hidden { display: none; }
+.stat.daycost { color: #e8a0a0; font-size: 17px; }
+
+.dc-btns { display: flex; gap: 12px; justify-content: center; margin: 14px 0 6px; }
+#ev-ok.hidden { display: none; }
+
+/* Statistik */
+.st-sec { font-size: 22px; color: var(--gold); margin: 12px 0 6px; }
+.st-sec small { font-size: 16px; color: var(--muted); }
+.st-days { display: flex; gap: 10px; align-items: flex-end; }
+.st-day { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 92px; font-size: 16px; }
+.st-day b { font-weight: 400; font-size: 18px; }
+.st-day small { color: var(--muted); font-size: 14px; }
+.st-bars { height: 120px; width: 60px; display: flex; gap: 4px; align-items: flex-end; background: #222; box-shadow: 0 0 0 2px var(--edge); padding: 0 4px; }
+.st-in { flex: 1; background: #6cc04a; } .st-out { flex: 1; background: #d9534f; }
+.st-ops { display: flex; flex-direction: column; gap: 4px; }
+.st-op { display: grid; grid-template-columns: 14px 240px 90px 1fr 60px; gap: 8px; align-items: center; font-size: 18px; }
+.st-op .bar { height: 10px; background: #222; box-shadow: 0 0 0 2px var(--edge); }
+.st-op .bar div { height: 100%; }
+.st-achs { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.st-ach { display: grid; grid-template-columns: 40px 1fr; grid-template-rows: auto auto; column-gap: 8px; padding: 4px; background: var(--slot); box-shadow: 0 0 0 2px var(--edge); opacity: .4; filter: grayscale(1); }
+.st-ach.on { opacity: 1; filter: none; box-shadow: 0 0 0 2px var(--gold); }
+.st-ach .slot { grid-row: span 2; width: 40px; height: 40px; }
+.st-ach .slot img { width: 40px; height: 40px; image-rendering: pixelated; }
+.st-ach b { font-weight: 400; font-size: 18px; color: var(--gold); }
+.st-ach small { font-size: 14px; color: #d8d2c4; }
+#st-body { max-height: 70vh; overflow: auto; padding-right: 6px; }
+
+#topbar .stat { white-space: nowrap; }
+#topbar .btn { white-space: nowrap; }

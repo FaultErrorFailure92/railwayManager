@@ -3,6 +3,7 @@ import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
 import { RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research';
 import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
+import { ACHIEVEMENTS } from '../game/Achievements';
 
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
@@ -48,6 +49,38 @@ export function researchHtml(g: Game, quest?: string) {
     </div>`;
   }).join('');
   return `<div class="rs-wrap" style="width:${W}px;height:${H}px"><svg width="${W}" height="${H}">${lines}</svg>${cards}</div>`;
+}
+
+/** Statistik: Tagesbilanz, Pünktlichkeit je Unternehmen, Erfolge */
+export function statsKey(g: Game) {
+  const h = g.history[g.history.length - 1];
+  return `${g.history.length}|${h ? Math.round(h.income / 50) + ',' + Math.round(h.expense / 50) + ',' + h.handled : ''}|${g.achievements.length}|${g.stats.handled}`;
+}
+
+export function statsHtml(g: Game) {
+  const days = g.history.slice(-7);
+  const max = Math.max(1, ...days.map((d) => Math.max(d.income, d.expense)));
+  const bars = days.map((d) => {
+    const bal = d.income - d.expense;
+    return `<div class="st-day"><div class="st-bars"><div class="st-in" style="height:${(d.income / max) * 100}%" title="Einnahmen ${eur(d.income)} €"></div><div class="st-out" style="height:${(d.expense / max) * 100}%" title="Ausgaben ${eur(d.expense)} €"></div></div>
+      <b class="${bal >= 0 ? 'ok' : 'no'}">${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))}</b><small>Tag ${d.day + 1}</small>
+      <small>${d.handled ? Math.round((d.punctual / d.handled) * 100) + ' % pünktl.' : '–'}</small></div>`;
+  }).join('') || '<div class="ct-empty">Noch keine Tage gespielt.</div>';
+  const ops = Object.entries(g.stats.opStats ?? {}).filter(([, s]) => s.handled > 0)
+    .sort((a, b) => b[1].handled - a[1].handled)
+    .map(([id, s]) => {
+      const o = OPERATORS[id as keyof typeof OPERATORS];
+      const p = Math.round((s.punctual / s.handled) * 100);
+      return `<div class="st-op"><span class="dot" style="background:${o.color}"></span><span>${o.name}</span><span>${s.handled} Züge</span>
+        <div class="bar"><div style="width:${p}%;background:${p < 70 ? '#d9534f' : o.color}"></div></div><span class="${p < 70 ? 'no' : 'ok'}">${p} %</span></div>`;
+    }).join('') || '<div class="ct-empty">Noch keine Züge abgefertigt.</div>';
+  const ach = ACHIEVEMENTS.map((a) => {
+    const on = g.achievements.includes(a.id);
+    return `<div class="st-ach${on ? ' on' : ''}" title="${a.info}"><span class="slot"><img src="${ICON(a.icon)}" alt="" /></span><b>${a.name}</b><small>${a.info}</small></div>`;
+  }).join('');
+  return `<div class="st-sec">Tagesbilanz <small>(grün Einnahmen, rot Ausgaben)</small></div><div class="st-days">${bars}</div>
+    <div class="st-sec">Pünktlichkeit je Unternehmen</div><div class="st-ops">${ops}</div>
+    <div class="st-sec">Erfolge ${g.achievements.length}/${ACHIEVEMENTS.length}</div><div class="st-achs">${ach}</div>`;
 }
 
 /** Tooltip einer Forschung */

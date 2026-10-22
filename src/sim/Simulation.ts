@@ -202,7 +202,7 @@ export class Simulation {
       }
     }
     const cars = base.map((c) => (c === 'wagon' ? `wagon${Math.floor(Math.random() * 3)}` : c));
-    const contract = this.contractActive(op.id);
+    const contract = this.contractActive(op.id) || !!op.special;
     const length = cars.length * CAR_LEN;
     const back: Dir = dir === 'E' ? 'W' : 'E';
     const vandal = at < this.vandalUntil && op.needsStop;
@@ -270,8 +270,19 @@ export class Simulation {
     return 0;
   }
 
+  /** gestörte Zellen (Weiche/Signal defekt) – ihr Block ist gesperrt */
+  faultCells = new Set<number>();
+  /** Wetter: Faktor auf die Höchstgeschwindigkeit */
+  weatherV = 1;
+  private faultBlocks() {
+    const s = new Set<number>();
+    for (const k of this.faultCells) { const b = this.blockOfCell(k); if (b >= 0) s.add(b); }
+    return s;
+  }
+
   blockFree(b: number, id: number) {
     if (b < 0) return true;
+    if (this.faultCells.size && this.faultBlocks().has(b)) return false;
     const cells = this.net.blockCells.get(b);
     return !cells || cells.every((k) => this.owner[k] === 0 || this.owner[k] === id);
   }
@@ -390,7 +401,8 @@ export class Simulation {
     // Suche: Züge rücken von Warteplatz zu Warteplatz vor (Kreuzungsgleis, Halt). Wessen ganzer restlicher Weg frei ist,
     // kommt sicher durch und gibt alles frei. Findet sich eine Reihenfolge, in der alle durchkommen, gibt es keinen Stau.
     const n = agents.length;
-    const free0 = (held: Set<number>[], b: number, i: number) => { for (let j = 0; j < n; j++) if (j !== i && held[j].has(b)) return false; return true; };
+    const faults = this.faultBlocks();
+    const free0 = (held: Set<number>[], b: number, i: number) => { if (faults.has(b)) return false; for (let j = 0; j < n; j++) if (j !== i && held[j].has(b)) return false; return true; };
     const canFinish = (held: Set<number>[], pos: number[], i: number) => {
       const secs = agents[i].sections;
       for (let k = pos[i]; k < secs.length; k++) {
@@ -797,7 +809,7 @@ export class Simulation {
 
   private vmax(t: Train) {
     if (t.rake) return SHUNT_V;
-    let v = t.op.vmax * (t.wear > 80 ? 0.75 : 1);
+    let v = t.op.vmax * (t.wear > 80 ? 0.75 : 1) * this.weatherV;
     const hi = this.edgeIndexAt(t, Math.max(0, t.s - 0.01));
     const head = t.route[hi];
     if (head?.wash || t.departure && t.s < 300) v = Math.min(v, t.op.vmax * 0.35);
@@ -834,6 +846,32 @@ export class Simulation {
       this.loopEdges.set(e.key, v);
     }
     return v;
+  }
+
+  /** worauf ein stehender Zug wartet (für die Zugkarte) */
+  waitReason(t: Train): string | null {
+    if (t.state !== 'running' || !t.waiting || t.committed + 1 >= t.route.length) return null;
+    const idx = this.section(t.route, t.committed + 1);
+    const faults = this.faultBlocks();
+    const others = new Set<string>();
+    for (const b of this.sectionBlocks(t.route, idx)) {
+      if (faults.has(b)) return 'Störung – Störtrupp schicken!';
+      for (const k of this.net.blockCells.get(b) ?? []) {
+        const o = this.owner[k];
+        if (o && o !== t.id) { const x = this.trains.find((y) => y.id === o); if (x) others.add(x.number); }
+      }
+    }
+    if (others.size) return `Gleis belegt von ${[...others].join(', ')}`;
+    if (faults.size && t.route.slice(t.committed + 1, t.committed + 40).some((e) => faults.has(e.block))) return 'Störung voraus – Störtrupp schicken!';
+    return 'Fahrdienstleiter: lässt erst einen anderen Zug durch';
+  }
+
+  /** einmaliger Sonderzug */
+  addSpecial(id: OperatorId, at: number, dir: Dir) {
+    const t = this.createTrain(OPERATORS[id], at, dir);
+    const i = this.queue.findIndex((q) => q.plannedSpawn > at);
+    if (i < 0) this.queue.push(t); else this.queue.splice(i, 0, t);
+    return t;
   }
 
   /** Vertrag geändert: wartende Züge des Unternehmens neu planen */
@@ -1145,6 +1183,7 @@ export class Simulation {
    */
   /** Züge, die sich gegenseitig blockieren (Kreis), sonst null */
   private findDeadlock(): number[] | null {
+    if (this.faultCells.size) return null; // Störung: Züge warten auf die Reparatur, kein Stau
     const stuck = this.trains.filter((t) => t.state === 'running' && !t.rake && t.waiting && t.waitSince !== undefined && this.time - t.waitSince > 240);
     if (stuck.length < 2) return null;
     // wer wartet auf wen (nächster Abschnitt belegt)?

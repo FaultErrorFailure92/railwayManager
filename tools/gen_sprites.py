@@ -196,6 +196,18 @@ save("signal_red", signal((230, 40, 40, 255)), -2, -15)
 save("signal_green", signal((60, 230, 90, 255)), -2, -15)
 
 
+def late_icon():
+    """rote Uhr über verspäteten Zügen"""
+    img = Image.new("RGBA", (9, 9), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse([0, 0, 8, 8], fill=(220, 50, 40, 255), outline=(90, 20, 16, 255))
+    d.ellipse([2, 2, 6, 6], fill=(250, 246, 236, 255))
+    d.line([(4, 4), (4, 2)], fill=(40, 30, 30, 255))
+    d.line([(4, 4), (6, 4)], fill=(40, 30, 30, 255))
+    return img
+save("late_icon", late_icon(), -4, -9)
+
+
 def shunt_signal(color):
     """Rangiersignal: niedriges Zwergsignal am Boden"""
     img = Image.new("RGBA", (5, 6), (0, 0, 0, 0))
@@ -379,6 +391,8 @@ SCHEMES = {
            "wagon2": ((132, 96, 58), (170, 128, 80), None)},
     "hs": {"pcar": ((240, 240, 236), (60, 64, 72), (200, 16, 46, 255)),
            "coach": ((240, 240, 236), (150, 156, 164), (200, 16, 46, 255))},
+    "fx": {"loco": ((224, 90, 154), (90, 90, 96), (250, 240, 120, 255)),
+           "coach": ((236, 226, 232), (140, 140, 150), (224, 90, 154, 255))},
     "sw": {"loco": ((168, 116, 60), (90, 90, 94), (240, 220, 160, 255)),
            "wagon0": ((132, 90, 52), (176, 128, 76), None),
            "wagon1": ((120, 82, 48), (166, 118, 70), None),

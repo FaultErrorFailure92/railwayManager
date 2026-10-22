@@ -23,16 +23,19 @@
       <button class="btn" data-speed="8" title="Maximal">×8</button>
     </div>
     <div class="sep"></div>
-    <div class="stat" title="Kasse"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span></div>
+    <div class="stat" title="Kasse"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span><span class="loan hidden" id="loan" title="Automatischer Kredit – täglich Zinsen, bei −50 000 € ist Schluss">KREDIT</span></div>
+    <div class="stat daycost" title="Laufende Kosten pro Tag (Instandhaltung + Zinsen)"><span id="daycost">−0 €/Tag</span></div>
     <div class="stat" title="Pünktlichkeit"><img src="assets/gen/ui/check.png" alt="" /><span id="punct">–</span></div>
     <div class="stat" title="Fahrgäste gesamt"><img src="assets/gen/ui/person.png" alt="" /><span id="pax">0</span></div>
     <div class="stat" title="Stimmung am Bahnsteig"><img src="assets/gen/ui/smile.png" alt="" /><span id="mood">–</span></div>
     <div class="sep"></div>
     <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
     <button class="btn small tb" id="btn-timetable" title="Fahrplan (T)"><img src="assets/gen/ui/clock.png" alt="" />Fahrplan</button>
+    <button class="btn small tb" id="btn-stats" title="Statistik und Erfolge"><img src="assets/gen/ui/check.png" alt="" />Stats</button>
     <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" />Verträge<span class="tb-warn" id="ct-warn"></span></button>
     <div class="grow"></div>
-    <button class="btn small" id="btn-save">Speichern</button>
+    <button class="btn small" id="btn-sound" title="Geräusche an/aus">Ton an</button>
+    <button class="btn small" id="btn-save" title="Speichern (F5 / Strg+S)">Speichern</button>
     <button class="btn small" id="btn-menu" title="Hauptmenü (Esc)">Menü</button>
   </header>
 
@@ -93,6 +96,17 @@
     </div>
   </div>
 
+  <div id="stats" class="screen hidden">
+    <div class="panel sc-box">
+      <div class="sc-head">
+        <h2>Statistik</h2>
+        <div class="sc-stats"><span>Einnahmen und Ausgaben der letzten Tage, Pünktlichkeit, Erfolge</span></div>
+        <button class="btn" data-close="stats">✕</button>
+      </div>
+      <div id="st-body"></div>
+    </div>
+  </div>
+
   <div id="timetable" class="screen hidden">
     <div class="panel sc-box">
       <div class="sc-head">
@@ -120,8 +134,8 @@
   <div id="gameover" class="hidden">
     <div class="panel ev-box">
       <h1 class="red">GAME OVER</h1>
-      <div class="ev-title">Deine Strecke ist dicht.</div>
-      <div class="ev-info">Die Züge haben sich eine Stunde lang gegenseitig blockiert. Lade einen Spielstand oder fang neu an.</div>
+      <div class="ev-title" id="go-title">Deine Strecke ist dicht.</div>
+      <div class="ev-info" id="go-info">Die Züge haben sich eine Stunde lang gegenseitig blockiert. Lade einen Spielstand oder fang neu an.</div>
       <div class="m-buttons"><button class="btn big" id="go-load">Spielstand laden</button><button class="btn big" id="go-new">Neues Spiel</button></div>
       <div class="panel slots hidden" id="go-slots"></div>
     </div>
