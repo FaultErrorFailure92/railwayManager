@@ -13,6 +13,7 @@ import { BUILD_MENU, BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
 import { PIECES, PIECES_BY_GROUP } from '../world/pieces';
 import { People } from './People';
+import { Lighting } from './Lighting';
 
 type SpriteInfo = { file: string; ox: number; oy: number; w: number; h: number };
 const SPRITES = manifest.sprites as Record<string, SpriteInfo>;
@@ -31,6 +32,8 @@ export const VARIANTS: Partial<Record<ToolId, Variant[]>> = {
   signal: [
     { key: 'E', label: 'Signal für Fahrtrichtung →', icon: 'signal_E' },
     { key: 'W', label: 'Signal für Fahrtrichtung ←', icon: 'signal_W' },
+    { key: 'SE', label: 'Rangiersignal → (nur im Verschubbereich)', icon: 'shsig_E', cost: COST.shuntSignal },
+    { key: 'SW', label: 'Rangiersignal ← (nur im Verschubbereich)', icon: 'shsig_W', cost: COST.shuntSignal },
   ],
   switch: PIECES_BY_GROUP('switch').map((d) => ({ key: d.key, label: d.label, icon: `piece_${d.key}`, cost: d.cost })),
   curve: PIECES_BY_GROUP('curve').map((d) => ({ key: d.key, label: d.label, icon: `piece_${d.key}`, cost: d.cost })),
@@ -41,6 +44,7 @@ export const VARIANTS: Partial<Record<ToolId, Variant[]>> = {
     { key: 'bridge', label: 'Fußgängerbrücke', icon: 'access_bridge', cost: COST.bridge, info: 'von Bahnsteig zu Bahnsteig ziehen' },
   ],
   facility: [
+    { key: 'mark_shunt', label: 'Verschubbereich markieren', icon: 'mark_shunt', cost: COST.marker, info: 'Schrittgeschwindigkeit, Rangiersignale erlaubt' },
     { key: 'mark_siding', label: 'Abstellgleis markieren', icon: 'mark_siding', cost: COST.marker, info: 'Wendezüge warten hier ihre Wendezeit ab' },
     ...['bld_remise', 'bld_workshop', 'bld_wash', 'bld_hump'].map((k) => ({ key: k, label: BUILDINGS[k].label, icon: k, cost: BUILDINGS[k].cost, info: BUILDINGS[k].effect })),
     ...SORT_DESTS.map((d, i) => ({ key: `mark_sort${i}`, label: `Richtungsgleis ${d.name}`, icon: `mark_sort${i}`, cost: COST.marker, info: 'Wagen dieser Farbe rollen hierher' })),
@@ -83,7 +87,7 @@ export class GameScene extends Phaser.Scene {
   private downAt: XY | null = null;
   private animals!: Animals;
   private buildingImgs = new Map<number, { key: string; x: number; y: number; img: Phaser.GameObjects.Image }>();
-  private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W' }[] = [];
+  private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W'; sh?: boolean }[] = [];
   private trainSprites = new Map<number, Phaser.GameObjects.Image[]>();
   private lastTrainPos = new Map<number, XY>();
   private overlay!: Phaser.GameObjects.Graphics;
@@ -121,6 +125,7 @@ export class GameScene extends Phaser.Scene {
     this.hintArrow = this.add.image(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
     this.ghost = this.add.graphics().setDepth(D_UI);
     this.people = new People(this, this.g);
+    this.lighting = new Lighting(this, this.g, D_OVERLAY - 10);
     this.animals = new Animals(this, this.g);
 
     const cam = this.cameras.main;
@@ -261,9 +266,17 @@ export class GameScene extends Phaser.Scene {
       const res = this.g.build(this.ui.tool, a.cells, a.variant);
       this.ui.message = res.ok ? '' : res.reason ?? '';
     });
+    // Mausrad/Trackpad: Bewegung sammeln, erst nach einer ganzen Raststufe zoomen, dann kurz Pause
+    let wheelAcc = 0, wheelBlock = 0;
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      const now = this.time.now;
+      if (now < wheelBlock) { wheelAcc = 0; return; }
+      wheelAcc += dy;
+      if (Math.abs(wheelAcc) < 100) return;
       const cam = this.cameras.main;
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom + (dy > 0 ? -1 : 1), 1, 6));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom + (wheelAcc > 0 ? -1 : 1), 1, 6));
+      wheelAcc = 0;
+      wheelBlock = now + 220;
     });
   }
 
@@ -323,6 +336,7 @@ export class GameScene extends Phaser.Scene {
     this.people.update(dt);
     const wv = this.cameras.main.worldView;
     this.animals.update(dt, this.g.speed, this.g.paused, new Phaser.Geom.Rectangle(wv.x - 40, wv.y - 40, wv.width + 80, wv.height + 80));
+    this.updateLights();
     this.drawHint(dt);
     this.drawGhost();
     this.showFx();
@@ -355,11 +369,11 @@ export class GameScene extends Phaser.Scene {
         // Signale stehen rechts vom Gleis in Fahrtrichtung
         if (c.signal) {
           const wx = (x + 1) * TILE - 2, wy = y * TILE + 15;
-          this.signals.push({ img: this.place('signal_red', wx, wy, toScreen(wx, wy).y + 0.1), k: g.key(x, y), dir: 'E' });
+          this.signals.push({ img: this.place(c.shuntSig ? 'shsig_red' : 'signal_red', wx, wy, toScreen(wx, wy).y + 0.1), k: g.key(x, y), dir: 'E', sh: c.shuntSig });
         }
         if (c.signalW) {
           const wx = x * TILE + 2, wy = y * TILE + 1;
-          this.signals.push({ img: this.place('signal_red', wx, wy, toScreen(wx, wy).y + 0.1), k: g.key(x, y), dir: 'W' });
+          this.signals.push({ img: this.place(c.shuntSig ? 'shsig_red' : 'signal_red', wx, wy, toScreen(wx, wy).y + 0.1), k: g.key(x, y), dir: 'W', sh: c.shuntSig });
         }
       }
     }
@@ -409,11 +423,11 @@ export class GameScene extends Phaser.Scene {
         if (!into.has(`ES:${x},${y}`)) this.staticObjs.push(this.place('buffer_W', x * TILE, y * TILE, objDepth(x, y, 0.1)));
         if (!net.out.has(`ES:${x + 1},${y}`)) this.staticObjs.push(this.place('buffer_E', x * TILE, y * TILE, objDepth(x, y, 0.1)));
         // Markierungen
-        const mark = c.siding ? 'siding' : c.sortDest !== null ? `sort${c.sortDest}` : null;
+        const mark = c.siding ? 'siding' : c.sortDest !== null ? `sort${c.sortDest}` : c.shunt ? 'shunt' : null;
         if (mark) {
           this.staticObjs.push(this.place(`mark_${mark}`, x * TILE, y * TILE, D_TRACK + x + y + 0.8));
           const prev = g.get(x - 1, y);
-          const prevMark = prev && prev.track ? (prev.siding ? 'siding' : prev.sortDest !== null ? `sort${prev.sortDest}` : null) : null;
+          const prevMark = prev && prev.track ? (prev.siding ? 'siding' : prev.sortDest !== null ? `sort${prev.sortDest}` : prev.shunt ? 'shunt' : null) : null;
           if (prevMark !== mark) this.staticObjs.push(this.place(`sign_${mark}`, x * TILE, y * TILE, objDepth(x, y, 0.15)));
         }
       }
@@ -541,9 +555,22 @@ export class GameScene extends Phaser.Scene {
       const a = own[s.k];
       const nx = s.dir === 'E' ? x + 1 : x - 1;
       const next = g.inside(nx, y) ? own[g.key(nx, y)] : a;
-      const tex = a !== 0 && next === a && dirOf.get(a) === s.dir ? 'signal_green' : 'signal_red';
+      const go = a !== 0 && next === a && dirOf.get(a) === s.dir;
+      const tex = s.sh ? (go ? 'shsig_green' : 'shsig_red') : go ? 'signal_green' : 'signal_red';
       if (s.img.texture.key !== tex) s.img.setTexture(tex);
     }
+  }
+
+  private lighting!: Lighting;
+  private updateLights() {
+    const scr = (p: XY) => toScreen(p.x, p.y);
+    const trains = this.g.sim.trains.filter((t) => t.state !== 'stored' && t.state !== 'done' && t.route.length).map((t) => ({
+      head: scr(this.worldOnTrain(t, 2)),
+      tail: scr(this.worldOnTrain(t, t.length - 2)),
+      cars: t.cars.map((_, i) => scr(this.worldOnTrain(t, (i + 0.5) * 16))),
+      pax: t.op.needsStop && t.op.kind !== 'freight' && !t.rake,
+    }));
+    this.lighting.update(this.cameras.main.worldView, trains);
   }
 
   private worldOnTrain(t: Train, back: number) {
@@ -566,7 +593,9 @@ export class GameScene extends Phaser.Scene {
         const a = this.worldOnTrain(t, back - 5), b = this.worldOnTrain(t, back + 5);
         const dx = a.x - b.x, dy = a.y - b.y;
         const o = Math.abs(dy) < 0.4 * Math.abs(dx) ? 0 : dx * dy > 0 ? 1 : 2;
-        const key = `car_${t.op.id}_${kind}_${o}`;
+        // Triebzug-Führerstand: Nase zeigt an beiden Zugenden nach außen
+        const sk = kind === 'ecab' ? ((i === 0) === (dx > 0) ? 'ecabE' : 'ecabW') : kind;
+        const key = `car_${t.op.id}_${sk}_${o}`;
         const s = SPRITES[key];
         const p = toScreen(c.x, c.y);
         const img = sprites![i];

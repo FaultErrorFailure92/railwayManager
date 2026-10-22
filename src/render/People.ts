@@ -34,8 +34,8 @@ const MAX_PEOPLE = 350;
 const WALK = 7; // Welt-Einheiten pro echter Sekunde bei 1×
 const PLATFORM_Z = 4;
 const PER_CELL = 2;
-/** Grundgeduld in Spielsekunden */
-const PATIENCE = 12 * 60;
+/** Grundgeduld in Spielsekunden – gezählt wird nur, solange ein Zug überfällig ist */
+const PATIENCE = 5 * 60;
 const { variants: VARIANTS, frames: FRAMES } = manifest.people;
 const EMOTES = manifest.emotes.names as Emote[];
 
@@ -48,6 +48,7 @@ export class People {
   /** Geduld-Faktor je Feld (Wartehalle, Bank, Kiosk in der Nähe) */
   private comfort = new Map<string, number>();
   private kioskNear = new Set<string>();
+  private hasWc = false;
 
   constructor(private scene: Phaser.Scene, private g: Game) {}
 
@@ -65,6 +66,7 @@ export class People {
     this.comfortVersion = this.g.version;
     this.comfort.clear();
     this.kioskNear.clear();
+    this.hasWc = [...this.g.grid.buildings.values()].some((b) => b.key === 'bld_wc' && !b.decor);
     const add = (x: number, y: number, r: number, f: number) => {
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         const k = `${x + dx},${y + dy}`;
@@ -118,7 +120,7 @@ export class People {
 
   private patience(p: Person) {
     const c = this.cellOf(p);
-    return PATIENCE * (this.comfort.get(`${c.x},${c.y}`) ?? 1);
+    return PATIENCE * (this.comfort.get(`${c.x},${c.y}`) ?? 1) * (this.hasWc ? 1.2 : 1);
   }
 
   update(dtReal: number) {
@@ -127,6 +129,8 @@ export class People {
     const dt = dtReal * this.g.speed;
     const dtGame = dt * GAME_SEC_PER_REAL_SEC;
     const sim = this.g.sim;
+    // geärgert wird nur, wenn ein Zug zu spät ist – nicht über den Takt
+    const overdue = sim.overdue() > 240;
     const plats: { x: number; y: number }[] = [];
     // nur Bahnsteige mit Zugang vom Empfangsgebäude
     this.g.grid.cells.forEach((c, k) => { if (c.platform && c.building === null && this.g.net.accessible.has(k)) plats.push(this.g.grid.xy(k)); });
@@ -190,8 +194,9 @@ export class People {
         p.state = 'board';
         p.tx = best.x + (Math.random() - 0.5) * 4;
         p.ty = best.y;
-        const pat = this.patience(p);
-        const mood = p.waited > 2 * pat ? -1 : p.waited < pat * 0.6 ? 1 : 0;
+        const comfort = this.patience(p) / PATIENCE;
+        const delay = sim.boardDelay(t);
+        const mood = delay >= 6 * comfort || p.waited > 2 * this.patience(p) ? -1 : delay < 2 ? 1 : 0;
         this.g.passengerMood(t.op.id as OperatorId, mood);
         if (mood > 0) this.say(p, 'heart', 1.2);
       }
@@ -202,7 +207,8 @@ export class People {
     for (const p of this.list) {
       let moving = false;
       if (p.state === 'idle' || p.state === 'walk' || p.state === 'arrive') {
-        p.waited += dtGame;
+        if (overdue) p.waited += dtGame;
+        else p.waited = Math.max(0, p.waited - dtGame * 0.5);
         const pat = this.patience(p);
         p.blink -= dt;
         if (p.waited > 2 * pat) {

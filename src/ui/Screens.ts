@@ -6,7 +6,7 @@ import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
 
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
-const CARD_W = 272, CARD_H = 134, GAP_X = 52, GAP_Y = 14;
+const CARD_W = 92, CARD_H = 92, GAP_X = 44, GAP_Y = 18;
 
 const hm = (sec: number) => {
   const m = Math.max(0, Math.ceil(sec / 60));
@@ -39,20 +39,29 @@ export function researchHtml(g: Game, quest?: string) {
     const cur = g.research.current?.id === r.id ? g.research.current : null;
     const block = g.researchBlock(r.id);
     const state = done ? 'done' : cur ? 'running' : !block ? 'ready' : r.requires.every((q) => g.researched(q)) ? 'open' : 'locked';
-    let foot: string;
-    if (done) foot = '<span class="ok">✓ erforscht</span>';
-    else if (cur) {
-      const pct = 100 - (cur.left / (r.hours * 3600)) * 100;
-      foot = `<div class="rs-prog"><div style="width:${pct.toFixed(1)}%"></div></div><span>noch ${hm(cur.left)}</span>`;
-    } else if (!block) foot = `<button class="btn rs-go" data-research="${r.id}">Erforschen</button>`;
-    else foot = `<span class="no">${block}</span>`;
-    return `<div class="rs-card ${state}${quest === r.id && !done ? ' quest' : ''}" style="left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${CARD_H}px">
-      <div class="rs-top"><span class="slot"><img src="${ICON(r.icon)}" alt="" /></span><div><b>${r.name}</b><small>${r.info}</small></div></div>
-      <div class="rs-cost"><span><img src="assets/gen/ui/flask.png" alt="" />${r.fp}</span><span><img src="assets/gen/ui/coin.png" alt="" />${eur(r.cost)}</span><span><img src="assets/gen/ui/clock.png" alt="" />${r.hours} h</span></div>
-      <div class="rs-foot">${foot}</div>
+    const pct = cur ? 100 - (cur.left / (r.hours * 3600)) * 100 : 0;
+    const mark = done ? '<span class="rs-mark ok">✓</span>' : !block && !cur ? '<span class="rs-mark gold">!</span>' : '';
+    // nur das Feld; alles andere steht im Tooltip. Klick = erforschen (wenn möglich)
+    return `<div class="rs-card ${state}${quest === r.id && !done ? ' quest' : ''}" data-tip="${r.id}"${!block && !done && !cur ? ` data-research="${r.id}"` : ''} style="left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${CARD_H}px">
+      <img class="rs-icon" src="${ICON(r.icon)}" alt="" />${mark}
+      ${cur ? `<div class="rs-prog"><div style="width:${pct.toFixed(1)}%"></div></div>` : ''}
     </div>`;
   }).join('');
   return `<div class="rs-wrap" style="width:${W}px;height:${H}px"><svg width="${W}" height="${H}">${lines}</svg>${cards}</div>`;
+}
+
+/** Tooltip einer Forschung */
+export function researchTipHtml(g: Game, id: ResearchId) {
+  const r = RESEARCH_BY_ID[id];
+  const done = g.researched(id);
+  const cur = g.research.current?.id === id ? g.research.current : null;
+  const block = g.researchBlock(id);
+  const foot = done ? '<span class="ok">✓ erforscht</span>' : cur ? `<span>läuft · noch ${hm(cur.left)}</span>`
+    : !block ? '<span class="gold">Klicken zum Erforschen</span>' : `<span class="no">${block}</span>`;
+  const req = r.requires.length ? `<small>braucht: ${r.requires.map((q) => RESEARCH_BY_ID[q].name).join(', ')}</small>` : '';
+  return `<b>${r.name}</b><div>${r.info}</div>
+    <div class="rs-cost"><span><img src="assets/gen/ui/flask.png" alt="" />${r.fp}</span><span><img src="assets/gen/ui/coin.png" alt="" />${eur(r.cost)}</span><span><img src="assets/gen/ui/clock.png" alt="" />${r.hours} h</span></div>
+    ${req}<div>${foot}</div>`;
 }
 
 /** Unternehmen für die Vertragsliste */
@@ -113,7 +122,7 @@ export function offerHtml(g: Game) {
   const cards = o.ops.map((id) => {
     const op = OPERATORS[id];
     const block = g.canRun(id);
-    const cars = op.cars.map((c) => `<img src="assets/gen/car_${op.id}_${c === 'wagon' ? 'wagon0' : c}_0.png" alt="" />`).join('');
+    const cars = op.cars.map((c, i) => `<img src="assets/gen/car_${op.id}_${c === 'wagon' ? 'wagon0' : c === 'ecab' ? (i ? 'ecabW' : 'ecabE') : c}_0.png" alt="" />`).join('');
     const fair = (cls: 'short' | 'long') => eur(fairPrice(op, cls));
     return `<div class="of-card${block ? ' off' : ''}">
       <div class="tc-head"><span class="dot" style="background:${op.color}"></span><b>${op.name}</b></div>

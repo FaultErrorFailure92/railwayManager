@@ -68,6 +68,14 @@ export interface Edge {
   sortRun?: SortRun;
   atPlatform: boolean;
   diverging: boolean;
+  /** liegt (teilweise) im Verschubbereich */
+  shunt?: boolean;
+  /** Ladegleis eines Privatbahn-Betriebs */
+  industry?: string;
+  /** abzweigend über eine Schnellfahrweiche */
+  fast: boolean;
+  /** nicht gerade (Bogen, Diagonale, normaler Weichenabzweig) – für Hochgeschwindigkeitszüge gesperrt */
+  curvy: boolean;
   /** komplett unter Oberleitung */
   electrified: boolean;
   wash: boolean;
@@ -82,7 +90,7 @@ function makeEdge(key: string, dir: Dir, from: string, to: string, pts: Vec[], c
     cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
   }
   return { key, dir, from, to, pts, cum, len: cum[cum.length - 1], cells, block: -1, signalAtEnd: false, atPlatform: false, diverging,
-    electrified: true, wash: false, hump: false, path: cells };
+    fast: false, curvy: false, electrified: true, wash: false, hump: false, path: cells };
 }
 
 /** Punkt auf einer Kante bei Distanz d (außerhalb wird linear verlängert) */
@@ -138,7 +146,7 @@ export class Network {
 
   /** legt eine Gleisverbindung für beide Fahrtrichtungen an (pts in +x-Richtung) */
   private addBoth(key: string, a: { t: PortType; x: number; y: number }, b: { t: PortType; x: number; y: number },
-    pts: Vec[], cells: number[], diverging = false) {
+    pts: Vec[], cells: number[], diverging = false, fast = false, curvy = false) {
     const e = makeEdge(`${key}>`, 'E', port('E', a.t, a.x, a.y), port('E', b.t, b.x, b.y), pts, cells, diverging);
     const w = makeEdge(`${key}<`, 'W', port('W', b.t, b.x, b.y), port('W', a.t, a.x, a.y), [...pts].reverse(), cells, diverging);
     // befahrene Zellen aus der Geometrie
@@ -155,6 +163,8 @@ export class Network {
     const el = path.every((k) => g.cells[k].wire);
     e.path = w.path = path;
     e.electrified = w.electrified = el;
+    e.fast = w.fast = fast;
+    e.curvy = w.curvy = curvy;
     this.add(e);
     this.add(w);
     for (const p of [`${a.t}:${a.x},${a.y}`, `${b.t}:${b.x},${b.y}`]) {
@@ -205,8 +215,16 @@ export class Network {
         this.addBoth(`q:${p.id}:${i}`,
           { t: lp.from.t, x: p.x + lp.from.dx, y: p.y + lp.from.dy },
           { t: lp.to.t, x: p.x + lp.to.dx, y: p.y + lp.to.dy },
-          lp.pts.map((v) => ({ x: v.x + p.x * TILE, y: v.y + p.y * TILE })), cells, lp.diverging);
+          lp.pts.map((v) => ({ x: v.x + p.x * TILE, y: v.y + p.y * TILE })), cells, lp.diverging, !!d.fast && lp.diverging,
+          lp.from.t !== 'S' || lp.to.t !== 'S' || (lp.diverging && !d.fast));
       });
+    }
+
+    // --- Ladegleise der Privatbahn-Betriebe, Verschubbereiche
+    for (const e of this.edges.values()) {
+      if (e.cells.some((k) => g.cells[k].shunt)) e.shunt = true;
+      const id = e.cells.length ? g.industryCells.get(e.cells[0]) : undefined;
+      if (id && e.cells.every((k) => g.industryCells.get(k) === id)) e.industry = id;
     }
 
     // --- Blöcke: Zellen, die über Ports verbunden sind; Signale trennen

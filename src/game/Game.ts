@@ -4,6 +4,7 @@ import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
+import { INDUSTRIES } from '../world/industries';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
@@ -54,7 +55,8 @@ export type UiEvent =
   | { type: 'offer' }
   | { type: 'deadlock' }
   | { type: 'gameover' }
-  | { type: 'autosave'; label: string };
+  | { type: 'autosave'; label: string }
+  | { type: 'news'; title: string; text: string; tag: string };
 
 /** Effekte auf der Karte (schwebende Beträge) */
 export interface FxEvent { amount: number; x: number; y: number; train?: number; label?: string }
@@ -86,6 +88,7 @@ export interface GameSave {
   contracts?: Record<OperatorId, Contract>;
   shopPrices?: Record<string, number>;
   offers?: Game['offers'];
+  news?: Game['news'];
 }
 
 export const fmtTime = (t: number) => {
@@ -104,7 +107,7 @@ export const CANCEL_COST = 500;
 
 const unpackCell = (b: number, sortDest: number | null) => ({
   track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
-  wire: !!(b & 32), siding: !!(b & 64), road: !!(b & 128), sortDest,
+  wire: !!(b & 32), siding: !!(b & 64), road: !!(b & 128), shunt: !!(b & 256), shuntSig: !!(b & 512), sortDest,
 });
 
 const newStats = (): Stats => ({
@@ -135,6 +138,8 @@ export class Game {
   private loopCheck = 0;
   contracts = newContracts();
   private lastHour = 0;
+  /** Zeitungsmeldungen: nächste Meldung, Vandalismus am Bahnhof bis, letzte abgerechnete Tag */
+  news = { nextAt: 0, stationUntil: 0, lastDay: -1 };
   readonly uiEvents: UiEvent[] = [];
   readonly fx: FxEvent[] = [];
 
@@ -152,6 +157,7 @@ export class Game {
         save.owned.forEach((o, i) => (g.owned[i] = o));
         g.mainRows = save.mainRows;
         g.markFixedLoops();
+        g.placeIndustries();
       }
       Object.assign(this, {
         company: save.company, money: save.money, stats: { ...newStats(), ...save.stats }, missionBase: { ...newStats(), ...save.missionBase },
@@ -175,6 +181,7 @@ export class Game {
     this.sim.taktOf = (id) => (this.contracts[id].status === 'none' ? 0 : this.contracts[id].takt);
     if (save && !save.offers) this.migrateContracts(save);
     if (save?.offers) Object.assign(this.offers, save.offers);
+    if (save?.news) Object.assign(this.news, save.news);
     this.clampTakts();
     this.updatePlatformLength();
     this.sim.fillTimetable();
@@ -224,7 +231,7 @@ export class Game {
       v: 5,
       company: this.company,
       cells: g.cells.map((c) => (+c.track) | (+c.fixed << 1) | (+c.platform << 2) | (+c.signal << 3) | (+c.signalW << 4)
-        | (+c.wire << 5) | (+c.siding << 6) | (+c.road << 7)),
+        | (+c.wire << 5) | (+c.siding << 6) | (+c.road << 7) | (+c.shunt << 8) | (+c.shuntSig << 9)),
       sortDest: g.cells.map((c) => c.sortDest),
       links: [...g.links.values()].map((l) => ({ ...l })),
       pieces: [...g.pieces.values()].map((p) => ({ ...p })),
@@ -234,7 +241,7 @@ export class Game {
       money: this.money, stats: this.stats, missionBase: this.missionBase,
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
-      research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers,
+      research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
     };
   }
 
@@ -525,7 +532,7 @@ export class Game {
   }
 
   private applySwitchSpeed() {
-    this.sim.switchV = ((this.researched('fastSwitch') ? 20 : 10) * 16) / 60;
+    this.sim.switchV = (10 * 16) / 60;
   }
 
   get maxStations() { return this.researched('stations') ? 4 : 1; }
@@ -594,6 +601,7 @@ export class Game {
     const o = OPERATORS[op];
     if (o.traction === 'electric' && !this.researched('wire')) return 'braucht Oberleitung';
     if (o.kind === 'sort' && !this.researched('hump')) return 'braucht Rangierbahnhof';
+    if (o.highSpeed && !this.researched('fastSwitch')) return 'braucht Schnellfahrweichen';
     return null;
   }
 
@@ -679,7 +687,7 @@ export class Game {
     }
     // 3. danach melden sich immer wieder Unternehmen (E-Züge erst mit Oberleitung)
     if (!this.offers.done.includes('freight') || t < this.offers.nextInquiry) return;
-    const order: OperatorId[] = ['wx', 'cd', 'sb', 'rx', 'nj', 'ro', 'lb', 'tx', 'hv', 'dm', 'cs', 'hs'];
+    const order: OperatorId[] = ['wx', 'cd', 'sb', 'tt', 'rx', 'nj', 'ro', 'lb', 'tx', 'hv', 'dm', 'cs', 'hs'];
     const cand = order.find((op) => none(op) && !this.canRun(op) && (this.contracts[op].declinedUntil ?? 0) <= t
       && (op !== 'hs' || this.grid.mainRows.includes(SECOND_ROW)));
     if (!cand) { this.offers.nextInquiry = t + 3600; return; }
@@ -706,8 +714,68 @@ export class Game {
     this.sim.maxPlatform = Math.max(0, ...this.net.runs.filter((r) => r.accessible).map((r) => r.len));
   }
 
+  // ------------------------------------------------------------ Instandhaltung & Zeitung
+  /** tägliche Instandhaltung: jedes Gleis, jede Weiche, jeder Bahnsteig, jedes Gebäude kostet */
+  maintenance() {
+    const g = this.grid;
+    let track = 0, plat = 0, sig = 0, wire = 0;
+    g.cells.forEach((c, k) => {
+      const p = g.xy(k);
+      if (!g.isOwned(p.x, p.y)) return;
+      if (c.track && !c.fixed) track++;
+      if (c.platform) plat++;
+      if (c.signal) sig++;
+      if (c.signalW) sig++;
+      if (c.wire && !c.fixed) wire++;
+    });
+    let pieces = 0;
+    for (const pc of g.pieces.values()) if (g.isOwned(pc.x, pc.y)) pieces++;
+    let bld = 0;
+    for (const b of g.buildings.values()) {
+      const d = BUILDINGS[b.key];
+      if (!b.decor && d && (d.group === 'func' || d.group === 'facility' || d.group === 'road')) bld += d.cost * 0.01;
+    }
+    const base = { Gleise: track * 2 + pieces * 10 + sig * 2 + wire, Bahnsteige: plat * 3, Gebäude: Math.round(bld) };
+    const total = base.Gleise + base.Bahnsteige + base.Gebäude;
+    return { ...base, total, vandal: this.sim.time < this.news.stationUntil };
+  }
+
+  /** um Mitternacht abrechnen */
+  private daily() {
+    const m = this.maintenance();
+    const cost = m.total * (m.vandal ? 2 : 1);
+    if (!cost) return;
+    this.money -= cost;
+    this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
+  }
+
+  /** ab und zu eine Zeitungsmeldung mit Folgen */
+  private checkNews() {
+    const t = this.sim.time;
+    if (!this.stations().length) return;
+    if (!this.news.nextAt) { this.news.nextAt = t + (20 + Math.random() * 16) * 3600; return; }
+    if (t < this.news.nextAt) return;
+    this.news.nextAt = t + (24 + Math.random() * 24) * 3600;
+    const trains = this.researched('wash') && Math.random() < 0.6;
+    if (trains) {
+      this.sim.vandalUntil = t + 8 * 3600;
+      this.uiEvents.push({ type: 'news', tag: 'vandal-trains', title: 'Sprayer-Serie: Züge über Nacht beschmiert',
+        text: 'In den Abstellanlagen der Umgebung wurden zahlreiche Garnituren besprüht. In den nächsten Stunden kommen viele verschmutzte Züge an. Wendezüge, die bei dir enden, fahren zur Waschanlage – das bringt Geld und zufriedene Fahrgäste.' });
+      this.addLog('Zeitung: viele verschmutzte Züge in den nächsten 8 Stunden', 'info');
+    } else {
+      this.news.stationUntil = t + 24 * 3600;
+      this.uiEvents.push({ type: 'news', tag: 'vandal-station', title: 'Vandalen wüten am Bahnhof',
+        text: 'Zerkratzte Scheiben, beschmierte Wände, kaputte Bänke: Heute Nacht hat es auch deinen Bahnhof erwischt. Die Instandhaltung kostet für einen Tag doppelt.' });
+      this.addLog('Zeitung: Vandalismus am Bahnhof – Instandhaltung heute doppelt', 'bad');
+    }
+  }
+
   /** stündlich: Zufriedenheit je nach Preis, Kündigungen */
   private hourly() {
+    const day = Math.floor(this.sim.time / 86400);
+    if (this.news.lastDay < 0) this.news.lastDay = day;
+    if (day !== this.news.lastDay) { this.news.lastDay = day; this.daily(); }
+    this.checkNews();
     for (const o of this.activeOperators()) {
       const c = this.contracts[o.id];
       if (o.kind === 'sort') continue;
@@ -967,14 +1035,20 @@ export class Game {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
         const c = g.get(cells[0].x, cells[0].y)!;
         if (!c.track || c.piece !== null) return fail('Signal nur auf geradem Gleis');
-        if (variant === 'W' ? c.signalW : c.signal) return fail('Hier steht schon ein Signal');
-        cost = COST.signal;
+        const west = variant.endsWith('W');
+        if (west ? c.signalW : c.signal) return fail('Hier steht schon ein Signal');
+        const shuntSig = variant.startsWith('S');
+        if (shuntSig && !c.shunt) return fail('Rangiersignale nur im Verschubbereich');
+        if (shuntSig && !this.researched('shunt')) return fail('Verschubbereiche erst erforschen');
+        if (c.shuntSig !== shuntSig && (c.signal || c.signalW)) return fail('Hier steht schon ein anderes Signal');
+        cost = shuntSig ? COST.shuntSignal : COST.signal;
         break;
       }
       case 'switch':
       case 'curve':
       case 'diag': {
         if (!PIECES[variant]) return fail('');
+        if (PIECES[variant].fast && !this.researched('fastSwitch')) return fail('Schnellfahrweichen erst erforschen');
         const fp: XY[] = [];
         const pc = checkPieces(cells.map((a) => ({ key: variant, x: a.x, y: a.y })), fp);
         if (typeof pc === 'string') return fail(pc, fp);
@@ -1029,6 +1103,12 @@ export class Game {
       case 'facility': {
         if (variant.startsWith('mark_')) {
           if (notOwned(cells)) return fail('Fläche nicht gekauft');
+          if (variant === 'mark_shunt') {
+            if (cells.some((c) => { const cc = g.get(c.x, c.y)!; return !cc.track && cc.piece === null; })) return fail('Nur auf Gleisen');
+            if (cells.some((c) => g.get(c.x, c.y)!.fixed)) return fail('Strecke gehört dem Netzbetreiber');
+            cost = cells.length * COST.marker;
+            break;
+          }
           const plain = cells.filter((c) => { const cc = g.get(c.x, c.y)!; return cc.track && cc.piece === null; });
           if (plain.length !== cells.length) return fail('Nur auf geradem Gleis');
           cost = cells.length * COST.marker;
@@ -1071,7 +1151,7 @@ export class Game {
         }
         if (c.platform) { cost = -COST.platform * REFUND; break; }
         if (c.road) { cost = -COST.road * REFUND; break; }
-        if (c.siding || c.sortDest !== null) { cost = 0; break; }
+        if (c.siding || c.sortDest !== null || c.shunt) { cost = 0; break; }
         if (c.piece !== null) {
           const p = g.pieces.get(c.piece)!;
           const pc = g.pieceCells(p);
@@ -1133,7 +1213,8 @@ export class Game {
         break;
       case 'signal': {
         const c = g.get(cells[0].x, cells[0].y)!;
-        if (variant === 'W') c.signalW = true; else c.signal = true;
+        if (variant.endsWith('W')) c.signalW = true; else c.signal = true;
+        c.shuntSig = variant.startsWith('S');
         break;
       }
       case 'switch':
@@ -1157,19 +1238,21 @@ export class Game {
       case 'access': g.addLink(variant as 'tunnel' | 'bridge', cells[0].x, cells[0].y, cells[cells.length - 1].y); break;
       case 'facility':
         if (variant === 'mark_siding') cells.forEach((c) => Object.assign(g.get(c.x, c.y)!, { siding: true, sortDest: null }));
+        else if (variant === 'mark_shunt') cells.forEach((c) => (g.get(c.x, c.y)!.shunt = true));
         else if (variant.startsWith('mark_sort')) cells.forEach((c) => Object.assign(g.get(c.x, c.y)!, { siding: false, sortDest: Number(variant.slice(9)) }));
         else g.addBuilding(variant, cells[0].x, cells[0].y);
         break;
       case 'remove': {
         const c = g.get(cells[0].x, cells[0].y)!;
         const link = g.linkAt(cells[0].x, cells[0].y);
-        if (c.signal) c.signal = false;
-        else if (c.signalW) c.signalW = false;
+        if (c.signal) { c.signal = false; if (!c.signalW) c.shuntSig = false; }
+        else if (c.signalW) { c.signalW = false; c.shuntSig = false; }
         else if (c.building !== null) g.removeBuilding(c.building);
         else if (link) g.links.delete(link.id);
         else if (c.platform) c.platform = false;
         else if (c.road) c.road = false;
         else if (c.siding || c.sortDest !== null) { c.siding = false; c.sortDest = null; }
+        else if (c.shunt) c.shunt = false;
         else if (c.piece !== null) g.removePiece(c.piece);
         else if (c.track) { c.track = false; c.wire = false; }
         break;
@@ -1186,6 +1269,33 @@ export class Game {
     this.net = new Network(this.grid);
     this.sim.setNetwork(this.net);
     this.updatePlatformLength();
+    this.checkIndustries();
     this.version++;
+  }
+
+  /** Ladegleis über eigene Gleise mit der Strecke verbunden? */
+  industryConnected(id: string) {
+    return this.net.entries.some((en) => this.net.pathsTo(en.to, (e) => e.industry === id, false, 5).length > 0);
+  }
+
+  /** Privatbahnen: angeschlossen → fahren und zahlen; getrennt → fahren nicht mehr */
+  private checkIndustries() {
+    for (const ind of INDUSTRIES) {
+      const c = this.contracts[ind.op];
+      const on = this.industryConnected(ind.id);
+      if (on && c.status !== 'active') {
+        c.status = 'active';
+        c.takt = OPERATORS[ind.op].takt;
+        this.satisfaction[ind.op] = 70;
+        this.sim.retime(ind.op);
+        this.addLog(`${ind.name} ist angeschlossen – Privatzüge fahren alle ${c.takt} min`, 'good');
+        this.uiEvents.push({ type: 'news', tag: 'industry', title: `${ind.name} am Netz`,
+          text: `Das Ladegleis ist jetzt mit deiner Strecke verbunden. Ab sofort holen Privatzüge dort ihre Ladung ab und zahlen dir für jede Fahrt über deine Gleise.` });
+      } else if (!on && c.status === 'active') {
+        c.status = 'none';
+        this.sim.retime(ind.op);
+        this.addLog(`${ind.name}: Anschluss unterbrochen – keine Privatzüge mehr`, 'bad');
+      }
+    }
   }
 }

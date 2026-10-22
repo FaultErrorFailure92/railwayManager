@@ -25,6 +25,8 @@ export interface PieceDef {
   through: number[];
   paths: LocalPath[];
   cost: number;
+  /** Schnellfahrweiche: abzweigender Strang schnell befahrbar (braucht Forschung) */
+  fast?: boolean;
 }
 
 const P = (name: keyof typeof manifest.paths): Vec[] =>
@@ -32,9 +34,9 @@ const P = (name: keyof typeof manifest.paths): Vec[] =>
 const S = (dx: number, dy: number): LocalPort => ({ t: 'S', dx, dy });
 const D = (dx: number, dy: number): LocalPort => ({ t: 'D', dx, dy });
 const A = (dx: number, dy: number): LocalPort => ({ t: 'A', dx, dy });
-const straight = (row: number): LocalPath => ({
-  from: S(0, row), to: S(3, row), diverging: false,
-  pts: [{ x: 0, y: row * 16 + 8 }, { x: 48, y: row * 16 + 8 }],
+const straight = (row: number, w = 3): LocalPath => ({
+  from: S(0, row), to: S(w, row), diverging: false,
+  pts: [{ x: 0, y: row * 16 + 8 }, { x: w * 16, y: row * 16 + 8 }],
 });
 
 const defs: PieceDef[] = [
@@ -42,6 +44,10 @@ const defs: PieceDef[] = [
     paths: [straight(0), straight(1), { from: S(0, 0), to: S(3, 1), pts: P('xover_down'), diverging: true }] },
   { key: 'xover_up', group: 'switch', label: 'Gleiswechsel nach hinten', w: 3, h: 2, through: [0, 1], cost: COST.switch,
     paths: [straight(0), straight(1), { from: S(0, 1), to: S(3, 0), pts: P('xover_up'), diverging: true }] },
+  { key: 'xover_down_fast', group: 'switch', label: 'Schnellfahr-Gleiswechsel nach vorne (Forschung)', w: 6, h: 2, through: [0, 1], cost: COST.switch * 2, fast: true,
+    paths: [straight(0, 6), straight(1, 6), { from: S(0, 0), to: S(6, 1), pts: P('xover_down_fast'), diverging: true }] },
+  { key: 'xover_up_fast', group: 'switch', label: 'Schnellfahr-Gleiswechsel nach hinten (Forschung)', w: 6, h: 2, through: [0, 1], cost: COST.switch * 2, fast: true,
+    paths: [straight(0, 6), straight(1, 6), { from: S(0, 1), to: S(6, 0), pts: P('xover_up_fast'), diverging: true }] },
   { key: 'branch_divDown', group: 'switch', label: 'Abzweig nach vorne', w: 3, h: 2, through: [0], cost: COST.switch,
     paths: [straight(0), { from: S(0, 0), to: D(3, 1), pts: P('c1'), diverging: true }] },
   { key: 'branch_divUp', group: 'switch', label: 'Abzweig nach hinten', w: 3, h: 2, through: [1], cost: COST.switch,

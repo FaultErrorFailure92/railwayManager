@@ -1,3 +1,4 @@
+import { INDUSTRIES } from './industries';
 import { MAIN_ROW, MAP_H, MAP_W, OLD_OFFSET, PARCEL, PARCEL_BASE_PRICE, PARCEL_STEP_PRICE, PASSING_LOOPS, SECOND_ROW, START_PARCELS } from '../config';
 
 /** Bodenart */
@@ -29,6 +30,10 @@ export interface Cell {
   sortDest: number | null;
   /** Straße */
   road: boolean;
+  /** Verschubbereich: langsam, Rangiersignale erlaubt */
+  shunt: boolean;
+  /** Signale auf diesem Feld sind Rangiersignale */
+  shuntSig: boolean;
 }
 
 /** Bahnsteigzugang quer über die Gleise */
@@ -85,7 +90,7 @@ export class Grid {
   constructor(fresh = true) {
     for (let i = 0; i < this.w * this.h; i++) {
       this.cells.push({ track: false, fixed: false, platform: false, signal: false, signalW: false, piece: null, building: null,
-        wire: false, siding: false, sortDest: null, road: false });
+        wire: false, siding: false, sortDest: null, road: false, shunt: false, shuntSig: false });
     }
     this.owned = new Array(this.pw * this.ph).fill(false);
     this.terrain = new Uint8Array(this.w * this.h);
@@ -97,6 +102,27 @@ export class Grid {
     }
     this.addPassingLoops();
     this.generateLandscape();
+    this.placeIndustries();
+  }
+
+  /** Zelle -> Betrieb (Ladegleis) */
+  readonly industryCells = new Map<number, string>();
+
+  /** Privatbahn-Betriebe mit Ladegleis setzen (auch in alten Spielständen nachrüsten) */
+  placeIndustries() {
+    for (const ind of INDUSTRIES) {
+      for (let x = ind.x0; x <= ind.x1; x++) this.industryCells.set(this.key(x, ind.row), ind.id);
+      if ([...this.buildings.values()].some((b) => b.key === ind.key)) continue;
+      const area: [number, number][] = [];
+      for (let y = Math.min(ind.y, ind.row); y <= Math.max(ind.y + 1, ind.row); y++) for (let x = ind.x0; x <= ind.x1; x++) area.push([x, y]);
+      for (const [x, y] of area) {
+        const c = this.get(x, y)!;
+        if (c.building !== null) { const b = this.buildings.get(c.building); if (b && !BUILDINGS[b.key]?.fixed) this.removeBuilding(b.id); }
+        this.terrain[this.key(x, y)] = GRASS;
+      }
+      this.addBuilding(ind.key, ind.x, ind.y, true);
+      for (let x = ind.x0; x <= ind.x1; x++) Object.assign(this.get(x, ind.row)!, { track: true, fixed: true });
+    }
   }
 
   isWater(x: number, y: number) { return this.inside(x, y) && this.terrain[this.key(x, y)] === WATER; }
@@ -148,7 +174,7 @@ export class Grid {
 
   /** Netzbetreiber elektrifiziert alle Streckengleise (fest verlegte Gleise) */
   electrifyLine() {
-    for (const c of this.cells) if (c.fixed && c.track) c.wire = true;
+    this.cells.forEach((c, k) => { if (c.fixed && c.track && !this.industryCells.has(k)) c.wire = true; });
     for (const id of this.fixedPieces) for (const k of this.pieceCells(this.pieces.get(id)!)) this.cells[k].wire = true;
   }
 

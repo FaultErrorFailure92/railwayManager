@@ -1,6 +1,6 @@
 import { TILE } from '../config';
 
-export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs';
+export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs' | 'tt' | 'sw' | 'mn';
 export type TrainKind = 'regio' | 'ic' | 'freight' | 'sbahn' | 'night' | 'museum' | 'sort';
 export type Traction = 'electric' | 'diesel' | 'steam';
 
@@ -12,7 +12,7 @@ export interface Operator {
   short: string;
   color: string;
   kind: TrainKind;
-  /** Wagenfolge ab Zugspitze (Sprite-Arten), kurzer Zug */
+  /** Wagenfolge ab Zugspitze (Sprite-Arten), kurzer Zug. ecab = Triebwagen mit Führerstand (Nase zeigt nach außen) */
   cars: string[];
   /** langer Zug (Verstärkung) und wie oft er fährt */
   long?: string[];
@@ -37,6 +37,10 @@ export interface Operator {
   numberBase: number;
   /** gewünschter Takt im Vertragsangebot (Minuten) */
   takt: number;
+  /** Privatbahn: fährt zum Ladegleis dieses Betriebs, lädt und fährt zurück */
+  industry?: string;
+  /** Hochgeschwindigkeitszug: nur gerade Strecke und Schnellfahrweichen */
+  highSpeed?: boolean;
   /** maximale Zahl Wagen (ohne Lok) bei langen Bahnsteigen */
   maxCoaches?: number;
 }
@@ -58,7 +62,7 @@ export const OPERATORS: Record<OperatorId, Operator> = {
   },
   sb: {
     takt: 60, id: 'sb', name: 'S-Bahn Donaustadt', category: 'S-Bahn (Wendezug)', short: 'S', color: '#1f9fa8', kind: 'sbahn',
-    cars: ['emu', 'emu'], long: ['emu', 'emu', 'emu', 'emu'], longShare: 0.3, traction: 'electric', vmax: tpm(18), needsStop: true, turnback: true, layover: [18, 30], dwell: 50, fee: 110, pax: [60, 180], numberBase: 3100,
+    cars: ['ecab', 'ecab'], long: ['ecab', 'emu', 'emu', 'ecab'], longShare: 0.3, traction: 'electric', vmax: tpm(18), needsStop: true, turnback: true, layover: [18, 30], dwell: 50, fee: 110, pax: [60, 180], numberBase: 3100,
   },
   rx: {
     takt: 90, id: 'rx', name: 'Waldviertel Express', category: 'REX-Wendezug', short: 'REX', color: '#3f8f3a', kind: 'regio',
@@ -95,7 +99,22 @@ export const OPERATORS: Record<OperatorId, Operator> = {
   hs: {
     takt: 120, id: 'hs', name: 'Donau-Sprinter', category: 'Hochgeschwindigkeits-Triebzug', short: 'DS', color: '#c8102e', kind: 'ic',
     cars: ['pcar', 'coach', 'coach', 'coach', 'pcar'], long: ['pcar', 'coach', 'coach', 'coach', 'coach', 'coach', 'coach', 'pcar'], longShare: 0.5,
-    traction: 'electric', vmax: tpm(30), needsStop: true, turnback: true, layover: [20, 35], dwell: 90, fee: 450, pax: [180, 520], numberBase: 70,
+    traction: 'electric', vmax: tpm(30), needsStop: true, turnback: true, layover: [20, 35], dwell: 90, fee: 450, pax: [180, 520], numberBase: 70, highSpeed: true,
+  },
+  tt: {
+    takt: 60, id: 'tt', name: 'Tullnerfelder Triebzug', category: 'Regional-Triebzug', short: 'TT', color: '#7b4fa0', kind: 'regio',
+    cars: ['ecab', 'emu', 'ecab'], long: ['ecab', 'emu', 'emu', 'emu', 'ecab'], longShare: 0.35, traction: 'electric', vmax: tpm(19), needsStop: true,
+    dwell: 50, fee: 140, pax: [60, 220], numberBase: 4400,
+  },
+  sw: {
+    takt: 120, id: 'sw', name: 'Sägewerk Holzer', category: 'Privatbahn · Holz', short: 'SH', color: '#a8743c', kind: 'freight',
+    cars: ['loco', 'wagon', 'wagon', 'wagon'], traction: 'diesel', vmax: tpm(10), needsStop: false, turnback: true, dwell: 900,
+    fee: 140, pax: [0, 0], numberBase: 81000, industry: 'sawmill',
+  },
+  mn: {
+    takt: 120, id: 'mn', name: 'Bergwerk Erzleiten', category: 'Privatbahn · Erz', short: 'BE', color: '#6c6f78', kind: 'freight',
+    cars: ['loco', 'wagon', 'wagon', 'wagon', 'wagon'], traction: 'diesel', vmax: tpm(9), needsStop: false, turnback: true, dwell: 900,
+    fee: 170, pax: [0, 0], numberBase: 82000, industry: 'mine',
   },
 };
 
@@ -107,7 +126,7 @@ export const SORT_DESTS = [
 ];
 
 const T = (t: Partial<Record<OperatorId, number>>): Record<OperatorId, number> =>
-  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, ...t });
+  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, tt: 0, sw: 0, mn: 0, ...t });
 
 /** alter Takt je Stufe – nur noch für alte Spielstände (Verträge übernehmen) */
 export const TAKT: Record<number, Record<OperatorId, number>> = {

@@ -1,5 +1,6 @@
 import { ACC, CAR_LEN, DEC, LOOP_SLACK, MAIN_ROW, MAP_W, PASSING_LOOPS, SECOND_ROW, START_TIME, TILE } from '../config';
 import { Dir, Edge, edgeRow, isOut, Network, ParkKind, SortRun } from '../world/Network';
+import { INDUSTRY_BY_ID } from '../world/industries';
 import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS } from './Operators';
 
 /** Aufgaben eines Zuges, der Reihe nach abgearbeitet */
@@ -7,7 +8,8 @@ export type Job =
   | { k: 'stop'; board: boolean; alight: boolean }
   | { k: 'exit'; dir?: Dir }
   | { k: 'park'; until: number; wash?: boolean }
-  | { k: 'hump' };
+  | { k: 'hump' }
+  | { k: 'load'; ind: string };
 
 export type TrainState = 'queued' | 'running' | 'dwell' | 'parked' | 'rolling' | 'stored' | 'done';
 
@@ -96,6 +98,7 @@ export interface SimSave {
   counter: Record<OperatorId, number>;
   nextDir: Record<OperatorId, Dir>;
   sortDep?: number[];
+  vandalUntil?: number;
   queue: TrainSave[];
   trains: TrainSave[];
 }
@@ -103,6 +106,8 @@ export interface SimSave {
 const SPAWN_HEAD = 152; // Kopf startet 8 Einheiten vor dem Kartenrand
 const PLAN_AHEAD = 90 * 60;
 const SHUNT_V = 1.4;
+/** Höchstgeschwindigkeit im Verschubbereich (≈ 25 km/h) */
+const SHUNT_AREA_V = (6 * TILE) / 60;
 const ROLL_V = 2.2;
 const SORT_SLOT = 30 * 60;
 const SORT_MIN = 4;
@@ -173,6 +178,13 @@ export class Simulation {
     this.queue.sort((a, b) => a.plannedSpawn - b.plannedSpawn);
   }
 
+  /** bis dahin kommen wegen Vandalismus viele verschmutzte Züge an (Zeitungsmeldung) */
+  vandalUntil = 0;
+  private hasWash() {
+    for (const e of this.net.edges.values()) if (e.wash) return true;
+    return false;
+  }
+
   private createTrain(op: Operator, at: number, dir: Dir): Train {
     let base = op.long && Math.random() < (op.longShare ?? 0) ? op.long : op.cars;
     if (op.needsStop && op.long) {
@@ -181,18 +193,21 @@ export class Simulation {
       if (fit >= op.long.length && Math.random() < 0.6) base = op.long;
       else if (fit < op.long.length) base = op.cars;
       if (base === op.long && fit >= op.long.length + 2 && Math.random() < 0.4) {
-        const extra = op.cars.includes('emu') ? 'emu' : 'coach';
+        const extra = op.cars.includes('emu') || op.cars.includes('ecab') ? 'emu' : 'coach';
         const tail = base[base.length - 1];
-        base = tail === 'cab' || tail === 'pcar' ? [...base.slice(0, -1), extra, extra, tail] : [...base, extra, extra];
+        base = tail === 'cab' || tail === 'pcar' || tail === 'ecab' ? [...base.slice(0, -1), extra, extra, tail] : [...base, extra, extra];
       }
     }
     const cars = base.map((c) => (c === 'wagon' ? `wagon${Math.floor(Math.random() * 3)}` : c));
     const contract = this.contractActive(op.id);
     const length = cars.length * CAR_LEN;
     const back: Dir = dir === 'E' ? 'W' : 'E';
-    const layover = contract && op.turnback && op.layover && this.level >= LAYOVER_LEVEL ? Math.round(rnd(op.layover[0], op.layover[1])) : 0;
+    const vandal = at < this.vandalUntil && op.needsStop;
+    // Vandalismus: Wendezüge mit Waschanlage enden und fahren zum Waschen, auch vor der Wendezeit-Stufe
+    const layover = contract && op.turnback && op.layover && (this.level >= LAYOVER_LEVEL || (vandal && this.hasWash())) ? Math.round(rnd(op.layover[0], op.layover[1])) : 0;
     let jobs: Job[];
-    if (op.kind === 'sort') jobs = [{ k: 'hump' }];
+    if (op.industry && contract) jobs = [{ k: 'load', ind: op.industry }, { k: 'exit', dir: back }];
+    else if (op.kind === 'sort') jobs = [{ k: 'hump' }];
     else if (!op.needsStop || !contract) jobs = [{ k: 'exit' }];
     else if (op.turnback && layover) {
       jobs = [{ k: 'stop', alight: true, board: false }, { k: 'park', until: 0 }, { k: 'stop', alight: false, board: true }, { k: 'exit', dir: back }];
@@ -200,10 +215,14 @@ export class Simulation {
     else jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit' }];
     // Wendezug: hin zum Bahnhof (ca. Kartenmitte) und wieder zurück, plus 1 min zum Wenden
     const stops = op.needsStop && contract;
-    const dist = op.turnback && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
-    const stopLoss = stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (op.turnback ? 60 : 0) : 0;
+    const ind = op.industry && contract ? INDUSTRY_BY_ID[op.industry] : undefined;
+    // Privatbahn: bis zum Ladegleis (plus Anschlussgleis) und zurück
+    const indDist = ind ? 2 * ((dir === 'E' ? ind.x1 : MAP_W - ind.x0) + Math.abs(ind.row - MAIN_ROW) * 2 + 10) * TILE : 0;
+    const dist = ind ? indDist : op.turnback && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
+    const stopLoss = ind ? op.dwell + 2 * (op.vmax / (2 * ACC) + op.vmax / (2 * DEC)) + 600 + 60
+      : stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (op.turnback ? 60 : 0) : 0;
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
-    const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu').length * 80;
+    const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80;
     const paxScale = base.length / op.cars.length;
     const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale));
     return {
@@ -214,7 +233,7 @@ export class Simulation {
       route: [], start: [], s: SPAWN_HEAD, v: 0, committed: 0,
       state: 'queued', jobs, dwellLeft: 0, waiting: false,
       passengers, capacity, reserved: new Set(),
-      dirt: Math.round(rnd(5, 85)), wear: Math.round(rnd(0, 85)), layover,
+      dirt: Math.round(vandal ? rnd(75, 98) : rnd(5, 85)), wear: Math.round(rnd(0, 85)), layover,
       transit: !contract && op.kind !== 'sort',
     };
   }
@@ -222,6 +241,7 @@ export class Simulation {
   // ------------------------------------------------------------ Netzänderung
   setNetwork(net: Network) {
     this.net = net;
+    this.loopEdges.clear(); this.loopTwin.clear(); this.parkedCache.clear();
     for (const t of this.trains) {
       if (t.state === 'rolling' || t.state === 'stored') {
         const r = t.route.map((e) => net.edges.get(e.key));
@@ -268,42 +288,245 @@ export class Simulation {
     return s;
   }
 
-  /**
-   * Würde die Reservierung von `blocks` für Zug t eine gegenseitige Blockade erzeugen?
-   * Wartegraph: X wartet auf Y, wenn auf X' restlichem Weg ein Block von Y liegt.
-   */
-  private wouldDeadlock(t: Train, blocks: Set<number>, tRemaining: Edge[], relaxed = false) {
-    const ownerOf = (b: number) => (blocks.has(b) ? t.id : this.blockOwner(b));
-    const byId = new Map(this.trains.map((x) => [x.id, x]));
-    /** nur bis zur nächsten Kreuzungsstelle schauen: dort können sich Züge ausweichen */
-    const horizon = (es: Edge[]) => {
-      const i = es.findIndex((e) => this.isLoopEdge(e));
-      return i < 0 ? es : es.slice(0, i);
-    };
-    const waitsFor = (x: Train): number[] => {
-      if (x.state === 'rolling' || x.state === 'stored') return [];
-      // locker: fahrende Züge nur bis zu ihrem nächsten Ziel (danach geben sie Blöcke hinter sich frei)
-      const own = x.route.slice(x.committed + 1);
-      const useAhead = !relaxed || x.state !== 'running' || !own.length;
-      const rest = horizon(x === t ? tRemaining : useAhead ? [...own, ...(x.ahead ?? [])] : own);
-      const res = new Set<number>();
-      for (const e of rest) {
-        if (e.block < 0) continue;
-        const o = ownerOf(e.block);
-        if (o && o !== x.id) res.add(o);
-      }
-      return [...res];
-    };
-    const seen = new Set<number>();
-    const stack = waitsFor(t);
-    while (stack.length) {
-      const id = stack.pop()!;
-      if (id === t.id) return true;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const x = byId.get(id);
-      if (x) stack.push(...waitsFor(x));
+  private cellBlock?: Int32Array;
+  private cellBlockNet?: Network;
+  private blockOfCell(k: number) {
+    if (!this.cellBlock || this.cellBlock.length !== this.owner.length || this.cellBlockNet !== this.net) {
+      this.cellBlockNet = this.net;
+      this.cellBlock = new Int32Array(this.owner.length).fill(-1);
+      for (const [b, cells] of this.net.blockCells) for (const c of cells) this.cellBlock[c] = b;
     }
+    return this.cellBlock[k];
+  }
+
+  private baseline = { time: -1, net: null as Network | null, set: new Set<number>() };
+  private baselineUnsafe() {
+    if (this.baseline.time !== this.time || this.baseline.net !== this.net) {
+      this.baseline = { time: this.time, net: this.net, set: this.unsafeTrains() };
+    }
+    return this.baseline.set;
+  }
+
+  /**
+   * Stau-Vorhersage: Jeder Zug fährt Abschnitt für Abschnitt (Signal zu Signal) seinen geplanten Weg weiter,
+   * sobald alle Blöcke des nächsten Abschnitts frei sind, und gibt dabei die alten frei.
+   * Züge, die so nie bis zum Ende ihres Weges kommen, stecken in einem Stau.
+   * extra: Zug t hätte zusätzlich `blocks` reserviert und fährt danach `path`.
+   */
+  private unsafeTrains(extra?: { t: Train; blocks: Set<number>; legs: Edge[][]; route?: Edge[]; end?: number }): Set<number> {
+    const owners = new Map<number, Set<number>>();
+    const hold = (b: number, id: number) => { let o = owners.get(b); if (!o) owners.set(b, (o = new Set())); o.add(id); };
+    type Sec = { blocks: Set<number>; anyOf: number[][]; last?: boolean; stop?: boolean; arrive?: Set<number> };
+    const agents: { id: number; held: Set<number>; sections: Sec[] }[] = [];
+    /**
+     * Abschnitte je Teilweg; am Ende eines Teilwegs (Halt/Wenden/Abstellen) steht der Zug ganz im letzten Block.
+     * In Kreuzungsstellen darf er jedes der beiden Gleise nehmen. Ab der zweiten Kreuzungsstelle ist er weit genug weg.
+     */
+    const sectionsOf = (legs: Edge[][]) => {
+      const out: Sec[] = [];
+      let cur: Sec = { blocks: new Set(), anyOf: [] };
+      const push = () => { if (cur.blocks.size || cur.anyOf.length) out.push(cur); cur = { blocks: new Set(), anyOf: [] }; };
+      let loops = 0, inLoop = false;
+      outer: for (const leg of legs) {
+        for (const e of leg) {
+          const twin = e.block >= 0 ? this.loopTwinBlock(e.block) : -1;
+          if (twin >= 0) {
+            if (!inLoop) {
+              inLoop = true;
+              if (++loops === 2) { cur.anyOf.push([e.block, twin]); cur.last = true; push(); break outer; }
+            }
+            if (!cur.anyOf.some((g) => g[0] === e.block)) cur.anyOf.push([e.block, twin]);
+          } else {
+            if (e.block >= 0 && !this.isLoopEdge(e)) inLoop = false;
+            if (e.block >= 0) cur.blocks.add(e.block);
+          }
+          if (e.signalAtEnd || isOut(e.key)) push();
+        }
+        push();
+        const last = leg[leg.length - 1];
+        const prev = out[out.length - 1];
+        if (last && last.block >= 0 && prev && !prev.anyOf.length && !(prev.blocks.size === 1 && prev.blocks.has(last.block))) out.push({ blocks: new Set([last.block]), anyOf: [] });
+        if (out.length) out[out.length - 1].stop = true;
+      }
+      push();
+      // nur von Warteplatz zu Warteplatz fahren (Kreuzungsgleis, Halt, Ende): nie auf der eingleisigen Strecke stehen bleiben
+      const merged: Sec[] = [];
+      let acc: Sec | null = null;
+      for (const sec of out) {
+        if (!acc) acc = { blocks: new Set(sec.blocks), anyOf: [...sec.anyOf] };
+        else { sec.blocks.forEach((b) => acc!.blocks.add(b)); acc.anyOf.push(...sec.anyOf); }
+        if (sec.anyOf.length || sec.stop || sec.last) {
+          // angekommen: steht dann nur noch im Kreuzungsgleis bzw. im letzten Abschnitt
+          acc.arrive = sec.anyOf.length ? new Set() : new Set(sec.blocks);
+          merged.push(acc); acc = null;
+        }
+      }
+      if (acc) merged.push(acc);
+      return merged;
+    };
+    const list = extra && !this.trains.includes(extra.t) ? [...this.trains, extra.t] : this.trains;
+    for (const x of list) {
+      const held = new Set<number>();
+      if (extra && x === extra.t && extra.route && extra.end !== undefined) {
+        // mit der neuen Fahrstraße: steht dann an deren Ende
+        this.blocksAtEnd(x, extra.route, extra.end).forEach((b) => held.add(b));
+      } else if (x.state === 'running' && !x.rake && x.route.length && x.committed < x.route.length) {
+        // fährt bis ans Ende seiner Fahrstraße (die hat er sicher) – dahinter wird alles frei
+        this.blocksAtEnd(x, x.route, x.committed).forEach((b) => held.add(b));
+      } else {
+        for (const k of x.reserved) { const b = this.blockOfCell(k); if (b >= 0) held.add(b); }
+        if (extra && x === extra.t) extra.blocks.forEach((b) => held.add(b));
+      }
+      held.forEach((b) => hold(b, x.id));
+      if (x.state === 'rolling' || x.state === 'stored') continue; // Wagen im Richtungsgleis bleiben stehen
+      const legs = extra && x === extra.t ? extra.legs : x.state === 'parked' ? this.parkedPath(x) : [x.route.slice(x.committed + 1), x.ahead ?? []];
+      const secs = sectionsOf(legs);
+      agents.push({ id: x.id, held, sections: secs });
+    }
+    // Suche: Züge rücken von Warteplatz zu Warteplatz vor (Kreuzungsgleis, Halt). Wessen ganzer restlicher Weg frei ist,
+    // kommt sicher durch und gibt alles frei. Findet sich eine Reihenfolge, in der alle durchkommen, gibt es keinen Stau.
+    const n = agents.length;
+    const free0 = (held: Set<number>[], b: number, i: number) => { for (let j = 0; j < n; j++) if (j !== i && held[j].has(b)) return false; return true; };
+    const canFinish = (held: Set<number>[], pos: number[], i: number) => {
+      const secs = agents[i].sections;
+      for (let k = pos[i]; k < secs.length; k++) {
+        const sec = secs[k];
+        for (const b of sec.blocks) if (!free0(held, b, i)) return false;
+        for (const g of sec.anyOf) if (!g.some((b) => free0(held, b, i))) return false;
+      }
+      return true;
+    };
+    const DONE = -1;
+    let best = { done: -1, pos: [] as number[] };
+    const seen = new Set<string>();
+    let budget = 1500;
+    const search = (held: Set<number>[], pos: number[]): boolean => {
+      // alles, was durchkommt, sofort durchlassen (schadet nie)
+      let again = true;
+      while (again) {
+        again = false;
+        for (let i = 0; i < n; i++) if (pos[i] !== DONE && canFinish(held, pos, i)) { pos[i] = DONE; held[i] = new Set(); again = true; }
+      }
+      const nd = pos.filter((p) => p === DONE).length;
+      if (nd > best.done) best = { done: nd, pos: [...pos] };
+      if (nd === n) return true;
+      if (--budget <= 0) return false;
+      const key = pos.join(',') + '|' + held.map((h) => [...h].sort((x, y) => x - y).join('.')).join('/');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      for (let i = 0; i < n; i++) {
+        if (pos[i] === DONE) continue;
+        const sec = agents[i].sections[pos[i]];
+        if (!sec) continue;
+        if ([...sec.blocks].some((b) => !free0(held, b, i))) continue;
+        const picks: number[] = [];
+        let ok = true;
+        for (const g of sec.anyOf) {
+          const pick = g.find((b) => held[i].has(b)) ?? g.find((b) => free0(held, b, i));
+          if (pick === undefined) { ok = false; break; }
+          picks.push(pick);
+        }
+        if (!ok) continue;
+        const h2 = [...held]; const p2 = [...pos];
+        h2[i] = sec.arrive ? new Set([...sec.arrive, ...picks]) : new Set([...sec.blocks, ...picks]);
+        p2[i] = pos[i] + 1;
+        if (search(h2, p2)) return true;
+      }
+      return false;
+    };
+    search(agents.map((a) => new Set(a.held)), agents.map(() => 0));
+    const stuckIds = new Set(agents.filter((_, i) => best.pos[i] !== DONE).map((a) => a.id));
+    return stuckIds;
+  }
+
+  /** Block des Nachbargleises in derselben Kreuzungsstelle */
+  private loopTwin = new Map<number, number>();
+  private loopTwinBlock(b: number) {
+    let v = this.loopTwin.get(b);
+    if (v === undefined) {
+      v = -1;
+      const g = this.net.grid;
+      const pure = (blk: number) => {
+        const cs = this.net.blockCells.get(blk) ?? [];
+        return cs.length > 0 && cs.every((k) => { const p = g.xy(k); return g.isLoopCell(p.x, p.y) && (p.y === MAIN_ROW || p.y === SECOND_ROW); })
+          && new Set(cs.map((k) => g.xy(k).y)).size === 1;
+      };
+      const cells = this.net.blockCells.get(b) ?? [];
+      if (cells.length && pure(b)) {
+        const p = g.xy(cells[Math.floor(cells.length / 2)]);
+        const o = this.blockOfCell(g.key(p.x, p.y === MAIN_ROW ? SECOND_ROW : MAIN_ROW));
+        if (o >= 0 && o !== b && pure(o)) v = o;
+      }
+      if (v < 0) v = this.parallelBlocks().get(b) ?? -1;
+      this.loopTwin.set(b, v);
+    }
+    return v;
+  }
+
+  private parallel?: { net: Network; map: Map<number, number> };
+  /** Blöcke, die dieselben Nachbarblöcke verbinden (z.B. zwei Bahnhofsgleise zwischen denselben Weichen) */
+  private parallelBlocks() {
+    if (this.parallel?.net === this.net) return this.parallel.map;
+    const prev = new Map<number, Set<number>>(), next = new Map<number, Set<number>>();
+    const add = (m: Map<number, Set<number>>, b: number, x: number) => { let s2 = m.get(b); if (!s2) m.set(b, (s2 = new Set())); s2.add(x); };
+    for (const e of this.net.edges.values()) {
+      if (e.dir !== 'E' || e.block < 0) continue;
+      for (const f of this.net.out.get(e.to) ?? []) {
+        if (f.block < 0 || f.block === e.block) continue;
+        add(next, e.block, f.block);
+        add(prev, f.block, e.block);
+      }
+    }
+    const sig = new Map<string, number[]>();
+    for (const b of this.net.blockCells.keys()) {
+      const p = prev.get(b), n2 = next.get(b);
+      if (!p?.size || !n2?.size) continue;
+      const k = [...p].sort().join(',') + '>' + [...n2].sort().join(',');
+      if (!sig.has(k)) sig.set(k, []);
+      sig.get(k)!.push(b);
+    }
+    const map = new Map<number, number>();
+    for (const group of sig.values()) if (group.length === 2) { map.set(group[0], group[1]); map.set(group[1], group[0]); }
+    this.parallel = { net: this.net, map };
+    return map;
+  }
+
+  private parkedCache = new Map<number, { time: number; path: Edge[][] }>();
+  /** abgestellter Zug: geschätzter Weg nach dem Abstellen (zum nächsten Halt und weiter) */
+  private parkedPath(t: Train): Edge[][] {
+    const c = this.parkedCache.get(t.id);
+    if (c && this.time - c.time < 30) return c.path;
+    const saved = t.jobs;
+    const end = t.route[t.route.length - 1];
+    let path: Edge[][] = [];
+    if (end) {
+      const leg1 = this.estimateAhead(t, [end]);
+      t.jobs = saved.slice(1);
+      const leg2 = leg1.length ? this.estimateAhead(t, leg1) : [];
+      t.jobs = saved;
+      path = [leg1, leg2];
+    }
+    this.parkedCache.set(t.id, { time: this.time, path });
+    return path;
+  }
+
+  /** Blöcke, die der Zug belegt, wenn seine Spitze am Ende von route[end] steht */
+  private blocksAtEnd(t: Train, route: Edge[], end: number) {
+    const out = new Set<number>();
+    let acc = 0;
+    for (let i = end; i >= 0; i--) {
+      const e = route[i];
+      if (e.block >= 0) out.add(e.block);
+      acc += e.len;
+      if (acc >= t.length + 2) break;
+    }
+    return out;
+  }
+
+  /** macht diese Lage jemanden stecken, der vorher noch durchkam? */
+  private worse(after: Set<number>) {
+    const base = this.baselineUnsafe();
+    for (const id of after) if (!base.has(id)) return true;
     return false;
   }
 
@@ -312,11 +535,12 @@ export class Simulation {
     const idx = this.section(t.route, i);
     const blocks = this.sectionBlocks(t.route, idx);
     for (const b of blocks) if (!this.blockFree(b, t.id)) return false;
-    if (this.wouldDeadlock(t, blocks, [...t.route.slice(i), ...(t.ahead ?? [])])) {
-      // gegenseitiges Warten auflösen: wer schon länger wartet, darf fahren, wenn es bis zum nächsten Ziel sicher ist
-      const long = t.waitSince !== undefined && this.time - t.waitSince > 60;
-      if (!long || this.wouldDeadlock(t, blocks, t.route.slice(i), true)) return false;
-    }
+    // Nur reservieren, wenn danach noch alle Züge der Reihe nach ans Ziel kommen (kein Stau entsteht)
+    const after = this.unsafeTrains({ t, blocks, legs: [t.route.slice(idx[0]), t.ahead ?? []], route: t.route, end: idx[idx.length - 1] });
+    if (after.has(t.id)) return false;
+    // andere Züge kämen danach nicht mehr weiter – nur zulassen, wenn sonst alles steht (gegenseitiges Höflichsein auflösen)
+    // andere Züge kämen danach nicht mehr weiter – dann lieber warten
+    if (this.worse(after)) return false;
     for (const b of blocks) this.reserve(t, b);
     t.committed = idx[idx.length - 1];
     return true;
@@ -332,19 +556,28 @@ export class Simulation {
   private electric(t: Train) { return t.op.traction === 'electric'; }
 
   /** Kandidatenwege für die aktuelle Aufgabe ab Port `from` */
-  private candidates(t: Train, from: string, job: Job | undefined): Edge[][] {
+  private candidates(t: Train, from: string, job: Job | undefined, estimate = false): Edge[][] {
     if (!job || isOut(from)) return [];
+    // Hochgeschwindigkeitszüge: nur gerade Gleise und Schnellfahrweichen
+    if (t.op.highSpeed) return this.candidatesRaw(t, from, job, estimate).filter((p) => p.every((e) => !e.curvy));
+    return this.candidatesRaw(t, from, job, estimate);
+  }
+
+  private candidatesRaw(t: Train, from: string, job: Job, estimate: boolean): Edge[][] {
     const el = this.electric(t);
     switch (job.k) {
       case 'stop':
         return this.net.pathsTo(from, (e) => !!e.stopRun && e.stopRun.accessible && e.stopRun.len * TILE >= t.length, el);
       case 'park': {
-        let c = this.net.pathsTo(from, (e) => !!e.parkRun && e.parkRun.len * TILE >= t.length && this.blockFree(e.block, t.id), el);
+        let c = this.net.pathsTo(from, (e) => !!e.parkRun && e.parkRun.len * TILE >= t.length && (estimate || this.blockFree(e.block, t.id)), el);
         if (job.wash) { const w = c.filter((p) => p.some((e) => e.wash)); if (w.length) c = w; }
         return c;
       }
       case 'hump':
         return this.net.pathsTo(from, (e) => e.hump, el, 50);
+      case 'load':
+        // bis ans Ende des Ladegleises (Prellbock)
+        return this.net.pathsTo(from, (e) => e.industry === job.ind && !(this.net.out.get(e.to) ?? []).some((f) => f.industry === job.ind), el, 50);
       case 'exit':
         if (job.dir && job.dir !== t.dir) return [];
         return this.net.paths(from, el);
@@ -379,17 +612,26 @@ export class Simulation {
   private bestPath(t: Train, fromIdx: number, requireFree: boolean): Edge[] | null {
     const job = t.jobs[0];
     const raw = this.candidates(t, t.route[fromIdx].to, job).filter((p) => p.length);
-    let best: { p: Edge[]; score: number } | null = null;
-    for (const p of raw) {
+    // nach Güte sortiert; die (teure) Stau-Prüfung nur für die besten paar Wege
+    const ranked = raw.map((p) => ({ p, score: this.score(t, p, job!) })).sort((x, y) => x.score - y.score);
+    let checks = 0;
+    for (const { p } of ranked) {
       if (requireFree) {
-        const first = this.sectionBlocks(p, this.section(p, 0));
+        const idx = this.section(p, 0);
+        const first = this.sectionBlocks(p, idx);
         if (![...first].every((b) => this.blockFree(b, t.id))) continue;
-        if (this.wouldDeadlock(t, first, [...p, ...this.estimateAhead(t, p)])) continue;
+        if (++checks > 12) return null;
+        const full = [...t.route.slice(0, fromIdx + 1), ...p];
+        const after = this.unsafeTrains({ t, blocks: first, legs: [p, this.estimateAhead(t, p)], route: full, end: fromIdx + 1 + idx[idx.length - 1] });
+        if (after.has(t.id) || this.worse(after)) continue;
+        return p;
       }
-      const score = this.score(t, p, job!);
-      if (!best || score < best.score) best = { p, score };
+      // Weg, auf dem der Zug sicher stecken bliebe (Gegenzug auf demselben Gleis), möglichst meiden
+      if (++checks > 12) break;
+      const after = this.unsafeTrains({ t, blocks: new Set(), legs: [p, this.estimateAhead(t, p)] });
+      if (!after.has(t.id)) return p;
     }
-    return best?.p ?? null;
+    return requireFree ? null : ranked[0]?.p ?? null;
   }
 
   /** geschätzter Weg nach dem aktuellen Ziel (für die Deadlock-Prüfung) */
@@ -403,15 +645,17 @@ export class Simulation {
       if (!rev) return null;
       const saved = t.dir;
       t.dir = saved === 'E' ? 'W' : 'E';
-      const c2 = this.candidates(t, rev.to, next);
+      const c2 = this.candidates(t, rev.to, next, true);
       t.dir = saved;
       return c2[0] ? [rev, ...c2[0]] : null;
     };
-    if (t.op.turnback && !t.turned) return afterReverse() ?? [...t.route, ...path];
-    const c = this.candidates(t, end.to, next);
+    /** notfalls: denselben Weg zurück */
+    const back = () => [...t.route, ...path].reverse().map((e) => this.net.twin(e)).filter((e): e is Edge => !!e);
+    if (t.op.turnback && !t.turned && next.k !== 'park') return afterReverse() ?? back();
+    const c = this.candidates(t, end.to, next, true);
     if (c[0]) return c[0];
     // muss dort wenden (z.B. im Stumpfgleis)
-    if (this.canReverse(t)) return afterReverse() ?? [...t.route, ...path];
+    if (this.canReverse(t)) return afterReverse() ?? back();
     return [];
   }
 
@@ -551,12 +795,21 @@ export class Simulation {
     const hi = this.edgeIndexAt(t, Math.max(0, t.s - 0.01));
     const head = t.route[hi];
     if (head?.wash || t.departure && t.s < 300) v = Math.min(v, t.op.vmax * 0.35);
+    // Verschubbereich: Schrittgeschwindigkeit (ganzer Zug + Bremsweg davor)
+    if (v > SHUNT_AREA_V) {
+      const ti = this.edgeIndexAt(t, Math.max(0, t.s - t.length));
+      for (let i = ti; i < t.route.length && i <= hi + 4; i++) {
+        if (!t.route[i].shunt) continue;
+        const ahead = t.start[i] - t.s;
+        v = Math.min(v, ahead <= 0 ? SHUNT_AREA_V : Math.sqrt(SHUNT_AREA_V * SHUNT_AREA_V + 2 * DEC * ahead));
+      }
+    }
     // Weichen im abzweigenden Strang: langsam befahren (ganzer Zug + Bremsweg davor)
     if (v > this.switchV) {
       const ti = this.edgeIndexAt(t, Math.max(0, t.s - t.length));
       for (let i = ti; i < t.route.length && i <= hi + 4; i++) {
         const e = t.route[i];
-        if (!e.diverging) continue;
+        if (!e.diverging || e.fast) continue;
         const ahead = t.start[i] - t.s;
         const vi = ahead <= 0 ? this.switchV : Math.sqrt(this.switchV * this.switchV + 2 * DEC * ahead);
         v = Math.min(v, vi);
@@ -672,6 +925,33 @@ export class Simulation {
   }
 
   /** geplante Abfahrt am Bahnhof (Wendezüge) */
+  /** planmäßige Ankunft am Bahnhof (grob: Kartenmitte) */
+  private dueAt(t: Train) {
+    return t.plannedSpawn + (MAP_W * TILE / 2) / t.op.vmax + 60;
+  }
+
+  /** so viele Spielsekunden ist der überfälligste Zug, der hier noch Fahrgäste mitnehmen soll, schon zu spät (0 = alles im Plan) */
+  overdue() {
+    let worst = 0;
+    for (const t of [...this.queue, ...this.trains]) {
+      if (t.missedStop || t.op.kind === 'sort') continue;
+      const i = t.jobs.findIndex((j) => j.k === 'stop' && j.board);
+      if (i < 0) continue;
+      const job = t.jobs[i] as Extract<Job, { k: 'stop' }>;
+      if (i === 0 && t.state === 'dwell') continue; // steht schon da
+      const due = job.alight ? this.dueAt(t) : this.plannedDeparture(t) - 120;
+      worst = Math.max(worst, this.time - due);
+    }
+    return worst;
+  }
+
+  /** Verspätung in Minuten beim Einsteigen */
+  boardDelay(t: Train) {
+    const job = t.jobs[0];
+    if (job?.k === 'stop' && !job.alight) return Math.max(0, (this.time - this.plannedDeparture(t)) / 60);
+    return Math.max(0, t.arrDelay ?? 0);
+  }
+
   private plannedDeparture(t: Train) {
     return t.plannedExit - (MAP_W * TILE / 2 + t.length) / t.op.vmax - 180;
   }
@@ -696,6 +976,11 @@ export class Simulation {
       }
       // Einsteigen erst kurz vor der Abfahrt
       if (job.board && !job.alight) t.dwellLeft = Math.max(t.dwellLeft, this.plannedDeparture(t) - this.time);
+      return;
+    }
+    if (job.k === 'load') {
+      t.state = 'dwell';
+      t.dwellLeft = t.op.dwell;
       return;
     }
     if (job.k === 'park') {
@@ -856,35 +1141,38 @@ export class Simulation {
   private findDeadlock(): number[] | null {
     const stuck = this.trains.filter((t) => t.state === 'running' && !t.rake && t.waiting && t.waitSince !== undefined && this.time - t.waitSince > 240);
     if (stuck.length < 2) return null;
-    const ids = new Set(stuck.map((t) => t.id));
-    const byId = new Map(this.trains.map((t) => [t.id, t]));
-    const waitsFor = (x: Train) => {
-      const res = new Set<number>();
-      for (const e of [...x.route.slice(x.committed + 1), ...(x.ahead ?? [])]) {
-        if (e.block < 0) continue;
-        const o = this.blockOwner(e.block);
-        if (o && o !== x.id) res.add(o);
+    // wer wartet auf wen (nächster Abschnitt belegt)?
+    const waitsOn = new Map<number, number[]>();
+    for (const t of stuck) {
+      const idx = this.section(t.route, Math.min(t.committed + 1, t.route.length - 1));
+      const set = new Set<number>();
+      for (const b of this.sectionBlocks(t.route, idx)) {
+        for (const k of this.net.blockCells.get(b) ?? []) { const o = this.owner[k]; if (o && o !== t.id) set.add(o); }
       }
-      return [...res];
-    };
+      waitsOn.set(t.id, [...set]);
+    }
     for (const start of stuck) {
-      // Kreis über wartende (oder abgestellte) Züge zurück zum Start?
       const path: number[] = [];
       const seen = new Set<number>();
       const dfs = (id: number): boolean => {
         if (path.length && id === start.id) return true;
-        if (seen.has(id)) return false;
+        if (seen.has(id) || !waitsOn.has(id)) return false;
         seen.add(id);
-        const x = byId.get(id);
-        if (!x || (!ids.has(id) && x.state !== 'parked' && x.state !== 'dwell')) return false;
         path.push(id);
-        for (const n of waitsFor(x)) if (dfs(n)) return true;
+        for (const n of waitsOn.get(id)!) if (dfs(n)) return true;
         path.pop();
         return false;
       };
-      if (!dfs(start.id)) continue;
-      return path.slice();
+      if (dfs(start.id)) {
+        // nur echte Staus melden: kommt laut Vorhersage noch jeder durch (z.B. über ein anderes Gleis), ist es kein Stau
+        const unsafe = this.unsafeTrains();
+        if (path.some((id) => unsafe.has(id))) return path.slice();
+        break;
+      }
     }
+    // alle stehen, obwohl nichts im Weg ist? (gegenseitiges Vorlassen) – nach 20 min auch als Stau melden
+    const frozen = stuck.filter((t) => this.time - (t.waitSince ?? this.time) > 1200);
+    if (frozen.length >= 2 && this.trains.every((t) => t.state === 'stored' || t.state === 'rolling' || (t.state === 'running' && t.waiting))) return frozen.map((t) => t.id);
     return null;
   }
 
@@ -964,7 +1252,7 @@ export class Simulation {
 
   save(): SimSave {
     return {
-      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep],
+      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep], vandalUntil: this.vandalUntil,
       nextSpawn: { ...this.nextSpawn }, counter: { ...this.counter }, nextDir: { ...this.nextDir },
       queue: this.queue.map((t) => this.saveTrain(t)),
       trains: this.trains.map((t) => this.saveTrain(t)),
@@ -974,6 +1262,7 @@ export class Simulation {
   private restore(s: SimSave) {
     Object.assign(this, { time: s.time, level: s.level, nextId: s.nextId });
     if (s.sortDep) this.sortDep = s.sortDep;
+    this.vandalUntil = s.vandalUntil ?? 0;
     Object.assign(this.nextSpawn, s.nextSpawn);
     Object.assign(this.counter, s.counter);
     Object.assign(this.nextDir, s.nextDir);

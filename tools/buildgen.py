@@ -123,6 +123,23 @@ def bench():
     return iso.result()
 
 
+def _outline(a, col=(22, 50, 30)):
+    """Retro-Look: dunkle Kontur um das Laub (nur grüne Pixel am Rand)"""
+    h, w = a.shape[:2]
+    src = a.copy()
+    for y in range(h):
+        for x in range(w):
+            r, g, b, al = src[y, x]
+            if al < 255 or g <= r:
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if nx < 0 or ny < 0 or nx >= w or ny >= h or src[ny, nx][3] < 200:
+                    a[y, x] = col + (255,)
+                    break
+    return a
+
+
 def tree_round(seed):
     rng = np.random.default_rng(seed)
     img = Image.new("RGBA", (20, 26), (0, 0, 0, 0))
@@ -131,11 +148,11 @@ def tree_round(seed):
     for y in range(22, 26):
         for x in range(2, 18):
             if ((x - 10) / 8) ** 2 + ((y - 23.5) / 2.2) ** 2 <= 1:
-                a[y, x] = (60, 120, 50, 110)
+                a[y, x] = (40, 70, 30, 110)
     for y in range(15, 24):
         for x in (9, 10):
             a[y, x] = (110, 74, 46, 255) if x == 9 else (84, 56, 36, 255)
-    cols = [(46, 120, 52), (62, 146, 60), (86, 172, 70), (122, 200, 90)]
+    cols = [(40, 92, 44), (58, 116, 52), (80, 140, 60), (112, 164, 76)]
     cx, cy, r = 10, 9, 8.2 + rng.random() * 0.8
     for y in range(0, 19):
         for x in range(0, 20):
@@ -144,7 +161,7 @@ def tree_round(seed):
                 light = -((x - cx) * 0.6 + (y - cy)) / r + (rng.random() - 0.5) * 0.7
                 i = 0 if light < -0.6 else 1 if light < 0.1 else 2 if light < 0.7 else 3
                 a[y, x] = cols[i] + (255,)
-    return Image.fromarray(a), -10, -23
+    return Image.fromarray(_outline(a)), -10, -23
 
 
 def tree_pine(seed):
@@ -153,10 +170,10 @@ def tree_pine(seed):
     for y in range(24, 28):
         for x in range(2, 16):
             if ((x - 9) / 7) ** 2 + ((y - 25.5) / 2) ** 2 <= 1:
-                a[y, x] = (60, 120, 50, 110)
+                a[y, x] = (40, 70, 30, 110)
     for y in range(20, 26):
         a[y, 8] = (110, 74, 46, 255); a[y, 9] = (84, 56, 36, 255)
-    cols = [(30, 92, 62), (42, 116, 72), (64, 144, 84)]
+    cols = [(28, 74, 52), (40, 96, 60), (58, 120, 70)]
     for layer, (top, bot, half) in enumerate(((0, 9, 4), (5, 15, 6), (10, 21, 8))):
         for y in range(top, bot):
             wdt = half * (y - top + 1) / (bot - top)
@@ -167,20 +184,20 @@ def tree_pine(seed):
                     if rng.random() < 0.08:
                         i = max(0, i - 1)
                     a[y, x] = cols[i] + (255,)
-    return Image.fromarray(a), -9, -25
+    return Image.fromarray(_outline(a, (16, 44, 32))), -9, -25
 
 
 def bush(seed):
     rng = np.random.default_rng(seed)
     a = np.zeros((10, 14, 4), np.uint8)
-    cols = [(52, 128, 56), (72, 156, 64), (104, 186, 80)]
+    cols = [(46, 104, 48), (66, 128, 56), (92, 154, 68)]
     for y in range(10):
         for x in range(14):
             d = ((x - 7) / 6.5) ** 2 + ((y - 5.5) / 4.5) ** 2
             if d <= 1 + (rng.random() - 0.5) * 0.3:
                 light = -((x - 7) * 0.5 + (y - 5)) / 5 + (rng.random() - 0.5) * 0.6
                 a[y, x] = cols[0 if light < -0.4 else 1 if light < 0.5 else 2] + (255,)
-    return Image.fromarray(a), -7, -8
+    return Image.fromarray(_outline(a)), -7, -8
 
 
 # ---------------------------------------------------------------- Stimmungs-Symbole
@@ -575,6 +592,57 @@ def cafe():
         c = (40, 120, 90, 255) if i % 2 == 0 else (240, 236, 220, 255)
         xa = 2 + i * 3.5
         iso.poly([(xa, 30.5, 9), (xa + 3.5, 30.5, 9), (xa + 3.5, 34, 6.5), (xa, 34, 6.5)], c)
+    return iso.result()
+
+
+def wc():
+    """kleines WC-Häuschen mit zwei Türen"""
+    iso = Iso(16, 16, 18)
+    iso.box(3, 4, 13, 12, 0, 10, (214, 208, 196))
+    iso.box(2, 3, 14, 13, 10, 11.5, (96, 100, 112))
+    iso.wall_rect_y(12, 4.5, 7.5, 0, 7, (60, 110, 190, 255))
+    iso.wall_rect_y(12, 8.5, 11.5, 0, 7, (200, 70, 70, 255))
+    iso.wall_rect_y(12, 5.5, 10.5, 8, 9.5, (250, 250, 246, 255))
+    return iso.result()
+
+
+def inn():
+    """Gasthaus 2x2: Fachwerk-Look, grünes Schild, Biertische davor"""
+    img, ox, oy = gable_house(2, 2, (236, 220, 186), (122, 58, 40), H=12, R=7, sign=(46, 110, 60, 255))
+    iso = Iso(32, 32, 22)
+    iso.img.paste(img, (int(ox - iso.x0), int(oy - iso.y0)), img)
+    for x in (6, 20):
+        iso.box(x, 34, x + 6, 37, 2.5, 3.2, (130, 90, 56))
+        iso.box(x + 2.5, 35, x + 3.5, 36, 0, 2.5, (100, 70, 44))
+    return iso.result()
+
+
+def sawmill():
+    """Sägewerk 3x2: Holzhalle, Stämme davor, Schornstein"""
+    img, ox, oy = gable_house(3, 2, (150, 104, 64), (92, 70, 52), H=13, R=7, windows=False, sign=(200, 160, 60, 255))
+    iso = Iso(48, 32, 36)
+    iso.img.paste(img, (int(ox - iso.x0), int(oy - iso.y0)), img)
+    iso.box(38, 4, 41, 7, 0, 30, (120, 110, 104))
+    for i, x in enumerate((4, 12, 20)):
+        for k in range(3):
+            iso.box(x, 33 + k * 0.0, x + 7, 35, 0.5 + k * 2, 2.3 + k * 2, (172, 120, 70) if (i + k) % 2 else (150, 100, 58))
+    return iso.result()
+
+
+def mine():
+    """Bergwerk 3x2: Förderturm (Gitter) und Maschinenhaus"""
+    img, ox, oy = gable_house(2, 2, (176, 150, 130), (100, 80, 70), H=12, R=6, sign=(60, 60, 70, 255))
+    iso = Iso(48, 32, 52)
+    iso.img.paste(img, (int(ox - iso.x0), int(oy - iso.y0)), img)
+    steel = (74, 78, 88)
+    for (x, y) in ((36, 9), (44, 9), (36, 21), (44, 21)):
+        iso.box(x, y, x + 1.5, y + 1.5, 0, 38, steel, outline=False)
+    for z in (12, 24, 36):
+        iso.box(36, 9, 45.5, 10.5, z, z + 1, steel, outline=False)
+        iso.box(36, 21, 45.5, 22.5, z, z + 1, steel, outline=False)
+    iso.box(37, 13, 45, 18, 38, 41, (150, 60, 50))
+    for x in (6, 16):
+        iso.box(x, 33, x + 7, 37, 0.5, 3, (60, 56, 52))
     return iso.result()
 
 

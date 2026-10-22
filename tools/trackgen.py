@@ -61,6 +61,17 @@ def s_path(y0=8, y1=24, x0=0, x1=48):
     a2 = arc((xs + L, y1 - sg * R), R, sg * (3 * np.pi / 4), sg * np.pi / 2)
     return join(line((x0, y0), (xs, y0)), a1, a2, line(a2[-1], (x1, y1)))
 
+def s_path_long(y0=8, y1=24, x0=0, x1=96, span=80):
+    """Schnellfahr-Gleiswechsel: flaches S mit großem Radius über `span` Einheiten"""
+    d = y1 - y0
+    th = 2 * np.arctan(abs(d) / span)
+    R = span / 2 / np.sin(th)
+    xs = (x0 + x1) / 2 - span / 2
+    sg = np.sign(d)
+    a1 = arc((xs, y0 + sg * R), R, -sg * np.pi / 2, -sg * (np.pi / 2 - th))
+    a2 = arc((xs + span, y1 - sg * R), R, sg * (np.pi / 2 + th), sg * np.pi / 2)
+    return join(line((x0, y0), (xs, y0)), a1, a2, line(a2[-1], (x1, y1)))
+
 # --- Kurven gerade <-> 45 Grad ueber 3x2 Tiles (Ende auf Tile-Port) ---
 R_CURVE = 16 / (1 - np.cos(np.pi / 4))           # 54.6
 LEAD = 48 - R_CURVE * np.sin(np.pi / 4)          # 9.37

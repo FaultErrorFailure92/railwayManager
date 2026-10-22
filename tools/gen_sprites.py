@@ -29,33 +29,29 @@ def save(name, img, ox, oy):
 
 # ---------------------------------------------------------------- Boden
 # Würfel 32x32 im Stil deines Tilesets (assets/tiles.png): Gras oben, Erde an den Seiten.
-# 4 Varianten, damit die Wiese nicht gleichförmig wirkt. Anker = obere Ecke der Raute.
-GRASS = [(153, 229, 80), (163, 236, 92), (140, 214, 72), (130, 204, 66), (174, 242, 104), (118, 192, 62)]
-GRID = (100, 176, 84)
-SOIL_L = [(132, 92, 60), (120, 82, 54), (146, 104, 68)]
-SOIL_R = [(108, 74, 48), (98, 66, 44), (120, 84, 56)]
-LIP_L, LIP_R = (120, 196, 62), (100, 172, 54)
+# Retro-Look: wenige, gedeckte Grüntöne, geordnetes 2x2-Dithering wie in alten Aufbauspielen.
+# 8 Varianten, damit die Wiese nicht gleichförmig wirkt. Anker = obere Ecke der Raute.
+GRASS = [(104, 156, 60), (116, 168, 66), (92, 142, 54), (82, 128, 48), (134, 182, 78), (70, 112, 42)]
+GRID = (84, 128, 48)
+SOIL_L = [(126, 90, 58), (112, 78, 50), (140, 100, 64)]
+SOIL_R = [(100, 70, 46), (90, 62, 40), (112, 80, 52)]
+LIP_L, LIP_R = (96, 146, 54), (80, 126, 46)
 N_GROUND = 8
+BAYER = np.array([[0, 2], [3, 1]]) / 4.0
 
 
 def ground(variant):
     rng = np.random.default_rng(100 + variant)
     a = np.zeros((32, 32, 4), np.uint8)
     dia = lambda x, y: abs(x + 0.5 - 16) / 16 + abs(y + 0.5 - 8) / 8 <= 1.0
-    # grobes Rauschen für Grasflecken (4x4 px Zellen, weich interpoliert)
-    coarse = rng.random((6, 10))
-    def patch(x, y):
-        fx, fy = x / 4, y / 4
-        x0, y0 = int(fx), int(fy)
-        tx, ty = fx - x0, fy - y0
-        c = coarse
-        v = (c[y0, x0] * (1 - tx) + c[y0, x0 + 1] * tx) * (1 - ty) + (c[y0 + 1, x0] * (1 - tx) + c[y0 + 1, x0 + 1] * tx) * ty
-        return v
+    # grobe Flecken (8x8 px), hart abgestuft und gedithert statt weich
+    coarse = rng.random((4, 6))
     for y in range(32):
         for x in range(32):
             if dia(x, y):
-                v = patch(x, y) + (rng.random() - 0.5) * 0.35
-                c = GRASS[5] if v < 0.18 else GRASS[3] if v < 0.32 else GRASS[2] if v < 0.48 else GRASS[0] if v < 0.72 else GRASS[1] if v < 0.88 else GRASS[4]
+                v = coarse[y // 8 + (x // 8) % 2 * 0, x // 8 % 6] if y < 32 else 0
+                base, alt = (GRASS[0], GRASS[2]) if v < 0.55 else (GRASS[1], GRASS[0])
+                c = alt if BAYER[y % 2, x % 2] < 0.5 else base
                 a[y, x] = c + (255,)
             else:
                 k = next((k for k in range(1, 17) if dia(x, y - k) and y - k >= 8), None)
@@ -66,21 +62,22 @@ def ground(variant):
                     a[y, x] = (LIP_L if left else LIP_R) + (255,)
                 else:
                     pal = SOIL_L if left else SOIL_R
-                    r = rng.random()
-                    a[y, x] = (pal[0] if r < 0.7 else pal[1] if r < 0.88 else pal[2]) + (255,)
-                    if k > 6 and rng.random() < 0.04:
+                    # Erdschichten in Streifen, leicht gedithert
+                    band = (k // 4) % 2
+                    a[y, x] = (pal[band] if (x + y) % 2 else pal[0]) + (255,)
+                    if k > 6 and rng.random() < 0.03:
                         a[y, x] = (150, 140, 128, 255)  # Steinchen in der Erde
                 if k == 16 or not any(dia(x, y + 1 - j) and y + 1 - j >= 8 for j in range(1, 17)):
-                    a[y, x] = (70, 48, 34, 255)
-    # Grashalme: dunkler Fuß, heller Spitze
-    for _ in range(14 + variant * 2):
-        x, y = int(rng.integers(3, 29)), int(rng.integers(3, 14))
-        if dia(x, y) and dia(x, y - 1) and dia(x, y - 2):
-            a[y, x] = GRASS[5] + (255,)
-            a[y - 1, x] = GRASS[3] + (255,)
-            if rng.random() < 0.5:
-                a[y - 2, x] = GRASS[4] + (255,)
-    # dezentes Raster: hintere Kanten der Raute
+                    a[y, x] = (58, 40, 28, 255)
+    # Grasbüschel: kleine dunkle "v"-Muster in festem Raster (alt-typisch)
+    for _ in range(6 + variant):
+        x, y = int(rng.integers(4, 28)), int(rng.integers(3, 13))
+        if dia(x - 1, y) and dia(x + 1, y) and dia(x, y + 1):
+            a[y, x - 1] = GRASS[3] + (255,)
+            a[y, x + 1] = GRASS[3] + (255,)
+            a[y + 1, x] = GRASS[5] + (255,)
+            a[y - 1 if dia(x, y - 1) else y, x] = GRASS[4] + (255,)
+    # Raster: hintere Kanten der Raute
     for x in range(32):
         for y in range(16):
             if dia(x, y) and not dia(x, y - 1):
@@ -89,11 +86,11 @@ def ground(variant):
         for _ in range(variant - 3):
             x, y = int(rng.integers(8, 24)), int(rng.integers(5, 11))
             if dia(x, y):
-                col = [(246, 206, 72), (240, 238, 226), (232, 120, 170)][int(rng.integers(3))]
+                col = [(232, 200, 64), (214, 96, 140)][int(rng.integers(2))]
                 a[y, x] = col + (255,)
     if variant == 7:
         x, y = int(rng.integers(10, 20)), int(rng.integers(6, 10))
-        a[y, x] = (150, 150, 142, 255); a[y, x + 1] = (120, 120, 114, 255)
+        a[y, x] = (140, 138, 128, 255); a[y, x + 1] = (108, 106, 98, 255)
     return Image.fromarray(a, "RGBA")
 
 
@@ -117,11 +114,12 @@ def store_path(name, path):
 
 
 xd, xu = tg.s_path(8, 24), tg.s_path(24, 8)
+xdf, xuf = tg.s_path_long(8, 24), tg.s_path_long(24, 8)
 C = {"c1": tg.curve_c1(), "c2": tg.curve_c2(), "c3": tg.curve_c3(), "c4": tg.curve_c4()}
 CS = {"c1": True, "c2": False, "c3": True, "c4": False}   # beginnt gerade?
 DD = tg.line((0, 8), (16, 24))
 DA = tg.line((0, 24), (16, 8))
-for k, v in {"xover_down": xd, "xover_up": xu, **C, "diag_desc": DD, "diag_asc": DA}.items():
+for k, v in {"xover_down": xd, "xover_up": xu, "xover_down_fast": xdf, "xover_up_fast": xuf, **C, "diag_desc": DD, "diag_asc": DA}.items():
     store_path(k, v)
 
 
@@ -145,6 +143,10 @@ PIECES = {
 }
 for key, tracks in PIECES.items():
     img, (sx, sy) = tg.render(tracks, (0, 0, 48, 32))
+    save("piece_" + key, img, sx, sy)
+R0L, R1L = tg.main_path(8, 0, 96), tg.main_path(24, 0, 96)
+for key, tracks in {"xover_down_fast": [(R0L, True), (R1L, True), (xdf, False)], "xover_up_fast": [(R0L, True), (R1L, True), (xuf, False)]}.items():
+    img, (sx, sy) = tg.render(tracks, (0, 0, 96, 32))
     save("piece_" + key, img, sx, sy)
 for key, P in (("diag_desc", DD), ("diag_asc", DA)):
     img, (sx, sy) = tg.render([(P, True, tg.DIAG_OFF, tg.DIAG_STEP)], (0, 0, 16, 32))
@@ -193,6 +195,19 @@ def signal(color):
 save("signal_red", signal((230, 40, 40, 255)), -2, -15)
 save("signal_green", signal((60, 230, 90, 255)), -2, -15)
 
+
+def shunt_signal(color):
+    """Rangiersignal: niedriges Zwergsignal am Boden"""
+    img = Image.new("RGBA", (5, 6), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, 4, 4], fill=(40, 40, 46, 255))
+    d.rectangle([1, 1, 3, 2], fill=color)
+    d.point((2, 1), fill=(255, 255, 255, 200))
+    d.line([(1, 5), (3, 5)], fill=(70, 70, 76, 255))
+    return img
+save("shsig_red", shunt_signal((230, 40, 40, 255)), -2, -5)
+save("shsig_green", shunt_signal((240, 240, 232, 255)), -2, -5)
+
 # ---------------------------------------------------------------- Wagen
 CAR_L, CAR_W, CAR_H = 14.5, 9.0, 11
 ORIENT = {0: (1.0, 0.0), 1: (0.7071, 0.7071), 2: (0.7071, -0.7071)}
@@ -204,6 +219,10 @@ def shade(c, f):
 
 def car(body, roof, kind, accent=None, orient=0):
     t = np.array(ORIENT[orient]); n = np.array([-t[1], t[0]])
+    # Triebwagen mit Führerstand: Nase an einem Ende (+u = Osten bzw. -u = Westen)
+    nose = 1 if kind == "ecabE" else -1 if kind == "ecabW" else 0
+    if nose:
+        kind = "emu"
     hl, hw = CAR_L / 2, CAR_W / 2
     z_floor = 2
     CAR_H = 9 if kind in ("tank", "steam") else globals()["CAR_H"]
@@ -269,7 +288,23 @@ def car(body, roof, kind, accent=None, orient=0):
         if kind_f == "side" and kind == "steam":
             v = sgn * hw
             d.polygon(S([P(-hl, v, 2), P(hl, v, 2), P(hl, v, 3.5), P(-hl, v, 3.5)]), fill=(170, 40, 36, 255))
-        if kind_f == "end" and kind in ("loco", "emu", "cab", "pcar"):
+        if kind_f == "side" and nose:
+            v = sgn * hw
+            un, ui = nose * hl, nose * (hl - 3.4)
+            a0, a1 = min(un, ui), max(un, ui)
+            d.polygon(S([P(a0, v, 5.4), P(a1, v, 5.4), P(a1, v, 9.4), P(a0, v, 9.4)]), fill=(22, 30, 44, 255))
+            if accent:
+                d.polygon(S([P(a0, v, 2.2), P(a1, v, 2.2), P(a1, v, 5.0), P(a0, v, 5.0)]), fill=accent)
+        if kind_f == "end" and nose and sgn == nose:
+            u = sgn * hl
+            d.polygon(S([P(u, -hw + 0.6, 5.2), P(u, hw - 0.6, 5.2), P(u, hw - 0.6, 9.6), P(u, -hw + 0.6, 9.6)]), fill=(22, 30, 44, 255))
+            if accent:
+                d.polygon(S([P(u, -hw, 2.2), P(u, hw, 2.2), P(u, hw, 5.0), P(u, -hw, 5.0)]), fill=accent)
+            for vv in (-hw + 1.6, hw - 2.4):
+                d.polygon(S([P(u, vv, 3.0), P(u, vv + 0.9, 3.0), P(u, vv + 0.9, 4.0), P(u, vv, 4.0)]), fill=(255, 244, 190, 255))
+        elif kind_f == "end" and nose:
+            pass
+        elif kind_f == "end" and kind in ("loco", "emu", "cab", "pcar"):
             u = sgn * hl
             d.polygon(S([P(u, -hw + 1.5, 6), P(u, hw - 1.5, 6), P(u, hw - 1.5, 8.5), P(u, -hw + 1.5, 8.5)]),
                       fill=(30, 40, 56, 255))
@@ -277,6 +312,10 @@ def car(body, roof, kind, accent=None, orient=0):
             u = sgn * hl
             d.polygon(S([P(u, -hw, 3), P(u, hw, 3), P(u, hw, 4.5), P(u, -hw, 4.5)]), fill=accent)
     d.polygon(S(top), fill=roof)
+    if nose:  # abgerundete Dachkante über dem Führerstand
+        un, ui = nose * hl, nose * (hl - 2.6)
+        a0, a1 = min(un, ui), max(un, ui)
+        d.polygon(S([P(a0, -hw, CAR_H), P(a1, -hw, CAR_H), P(a1, hw, CAR_H), P(a0, hw, CAR_H)]), fill=shade(roof, 0.8))
 
     def box3(u0, u1, v0, v1, z0, z1, col):
         """kleiner Aufbau (Kessel, Führerhaus, Dom)"""
@@ -314,7 +353,12 @@ SCHEMES = {
            "wagon0": ((52, 96, 160), (70, 116, 180), None),
            "wagon1": ((170, 60, 50), (190, 80, 66), None),
            "wagon2": ((70, 130, 80), (90, 150, 100), None)},
-    "sb": {"emu": ((236, 236, 230), (120, 130, 140), (31, 159, 168, 255))},
+    "sb": {"emu": ((236, 236, 230), (120, 130, 140), (31, 159, 168, 255)),
+           "ecabE": ((236, 236, 230), (120, 130, 140), (31, 159, 168, 255)),
+           "ecabW": ((236, 236, 230), (120, 130, 140), (31, 159, 168, 255))},
+    "tt": {"emu": ((226, 222, 232), (124, 118, 136), (123, 79, 160, 255)),
+           "ecabE": ((226, 222, 232), (124, 118, 136), (123, 79, 160, 255)),
+           "ecabW": ((226, 222, 232), (124, 118, 136), (123, 79, 160, 255))},
     "rx": {"loco": ((63, 143, 58), (140, 146, 150), (240, 240, 230, 255)),
            "coach": ((226, 226, 218), (140, 146, 150), (63, 143, 58, 255)),
            "cab": ((226, 226, 218), (140, 146, 150), (63, 143, 58, 255))},
@@ -335,6 +379,14 @@ SCHEMES = {
            "wagon2": ((132, 96, 58), (170, 128, 80), None)},
     "hs": {"pcar": ((240, 240, 236), (60, 64, 72), (200, 16, 46, 255)),
            "coach": ((240, 240, 236), (150, 156, 164), (200, 16, 46, 255))},
+    "sw": {"loco": ((168, 116, 60), (90, 90, 94), (240, 220, 160, 255)),
+           "wagon0": ((132, 90, 52), (176, 128, 76), None),
+           "wagon1": ((120, 82, 48), (166, 118, 70), None),
+           "wagon2": ((140, 98, 58), (182, 134, 80), None)},
+    "mn": {"loco": ((108, 111, 120), (70, 70, 76), (230, 190, 60, 255)),
+           "wagon0": ((70, 66, 64), (52, 48, 46), None),
+           "wagon1": ((82, 76, 72), (58, 54, 50), None),
+           "wagon2": ((64, 60, 58), (46, 44, 42), None)},
     "dm": {"steam": ((34, 34, 38), (52, 52, 58), None),
            "coach": ((122, 42, 36), (70, 60, 56), (214, 176, 80, 255))},
 }
@@ -420,6 +472,8 @@ P5 = {
     "bld_cafe": bg.cafe(), "bld_parking": bg.parking(), "bld_bus": bg.bus_terminal(),
     "bld_station2": bg.station_big(2), "bld_station3": bg.station_big(3),
     "bld_fountain": bg.fountain(), "bld_flowers": bg.flowers(5), "bld_statue": bg.statue(),
+    "bld_wc": bg.wc(), "bld_inn": bg.inn(), "bld_streetlamp": bg.lamp(),
+    "bld_sawmill": bg.sawmill(), "bld_mine": bg.mine(),
 }
 for name, (img, ox, oy) in P5.items():
     save(name, img, ox, oy)
@@ -503,6 +557,8 @@ icon_save("platform", compose([("track", 0, 1), ("platform_s", 0, 0), ("platform
 icon_save("track", compose([("track", 0, 0), ("track", 1, 0)], [(0, 0), (1, 0)]))
 icon_save("signal_E", compose([("track", 0, 0), ("signal_green", 0, 0)], T1))
 icon_save("signal_W", compose([("track", 0, 0), ("signal_green", 0, 0)], T1).transpose(Image.FLIP_LEFT_RIGHT))
+for key in ("xover_down_fast", "xover_up_fast"):
+    icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], [(x, y) for x in range(6) for y in range(2)]))
 for key in ("xover_down", "xover_up", "branch_divDown", "branch_divUp", "branch_mergeAbove", "branch_mergeBelow",
             "curve_divDown", "curve_divUp", "curve_mergeAbove", "curve_mergeBelow"):
     icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], T32))
@@ -519,7 +575,7 @@ for n in ("cursor", "flag", "shovel", "house"):
     ic = Image.open(os.path.join(OUT, "ui", n + ".png"))
     icon_save("tool_" + n, ic.resize((36, 36), Image.NEAREST))
 for name, d in (("bld_cafe", (2, 2)), ("bld_parking", (3, 2)), ("bld_bus", (3, 2)), ("bld_station2", (3, 2)), ("bld_station3", (3, 2)),
-                ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1))):
+                ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1)), ("bld_wc", (1, 1)), ("bld_inn", (2, 2)), ("bld_streetlamp", (1, 1)), ("bld_sawmill", (3, 2)), ("bld_mine", (3, 2))):
     icon_save(name, compose([(name, 0, 0)], [(x, y) for x in range(d[0]) for y in range(d[1])]))
 for name in ("bld_vending", "bld_lamp", "bld_clock"):
     icon_save(name, compose([("platform", 0, 0), (name, 0, 0)], T1))
@@ -538,6 +594,7 @@ for name, (img, ox, oy) in {
     "mark_sort1": bg.stripe((170, 60, 50)), "mark_sort2": bg.stripe((70, 130, 80)),
     "sign_siding": bg.sign((240, 200, 40)), "sign_sort0": bg.sign((52, 96, 160)),
     "sign_sort1": bg.sign((170, 60, 50)), "sign_sort2": bg.sign((70, 130, 80)),
+    "mark_shunt": bg.stripe((230, 120, 30)), "sign_shunt": bg.sign((230, 120, 30)),
 }.items():
     save(name, img, ox, oy)
 bg.warn_icon().save(os.path.join(OUT, "warn.png"))
@@ -558,6 +615,9 @@ row3 = [(x, 0) for x in range(3)]
 icon_save("tool_wire", compose([("track", 0, 0), ("track", 1, 0), ("wire_span", 0, 0), ("wire_span", 1, 0), ("wire_mast", 0, 0)], [(0, 0), (1, 0)]))
 icon_save("access_tunnel", compose([("platform", 0, 0), ("track", 0, 1), ("platform", 0, 2), ("tunnel_stairs", 0, 0), ("tunnel_stairs", 0, 2)], [(0, 0), (0, 1), (0, 2)]))
 icon_save("access_bridge", compose([("platform", 0, 0), ("track", 0, 1), ("platform", 0, 2), ("bridge_tower", 0, 0), ("bridge_deck", 0, 1), ("bridge_tower", 0, 2)], [(0, 0), (0, 1), (0, 2)]))
+icon_save("mark_shunt", compose([("track", 0, 0), ("track", 1, 0), ("mark_shunt", 0, 0), ("mark_shunt", 1, 0), ("sign_shunt", 0, 0), ("shsig_red", 1, 0)], [(0, 0), (1, 0)]))
+icon_save("shsig_E", compose([("track", 0, 0), ("shsig_red", 0, 0)], [(0, 0)]))
+icon_save("shsig_W", compose([("track", 0, 0), ("shsig_red", 0, 0)], [(0, 0)]).transpose(Image.FLIP_LEFT_RIGHT))
 icon_save("mark_siding", compose([("track", 0, 0), ("track", 1, 0), ("mark_siding", 0, 0), ("mark_siding", 1, 0), ("sign_siding", 0, 0), ("buffer_W", 0, 0)], [(0, 0), (1, 0)]))
 for d in range(3):
     icon_save(f"mark_sort{d}", compose([("track", 0, 0), ("track", 1, 0), (f"mark_sort{d}", 0, 0), (f"mark_sort{d}", 1, 0), (f"sign_sort{d}", 0, 0)], [(0, 0), (1, 0)]))

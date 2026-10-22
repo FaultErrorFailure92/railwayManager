@@ -33,3 +33,21 @@
 - [x] das zeit/weg Linien diagramm sieht zwar schon cool aus, aber es sollte eher gezeichnet aussehen bzw. einfach noch mehr ins spiel reinpassen, derzeit wirkt es sehr technisch.
 - [x] bevor die züge fahren, sollte man vielleicht die verträge auch abschließen. machen wirs doch so: sobald das empfangsgebäude steht, wird der erste vertrag ausgeschrieben, dabei kann man sich auch unterschiedliche unternehmen aussuchen (nur 1 vertrag möglich auszuwählen). dann kommt recht schnell der 2. vertrag für güterzüge dazu. wenn die oberleitung dann da ist, melden sich dann immer wieder neue unternehmen und auch mit den zuggattungen, die sie anbieten wollen. und natürlich betrifft das vertragsthema auch den fahrplan... du kannst nicht doppelt so viel züge schicken, nur weil ich die weiche freigeschaltet hab... erst wenn ein zweites gleis existiert, kann die frequenz überhaupt erhöht werden
 
+
+=== 
+- [x] Fahrgäste sind verärgert, obwohl alle Züge pünktlich sind, das sollte nicht sein *(Ärger zählt nur noch, wenn ein Zug überfällig ist; beim Einsteigen zählt die Verspätung des Zuges)*
+- [x] Ich habe dauernd Deadlocks, obwohl ich noch keine Weichen habe, das sollte auch nicht sein, da kann ich als spieler ja nix dafür *(Fahrdienstleiter plant jetzt voraus: ein Zug fährt nur los, wenn danach alle noch durchkommen – nutzt dabei beide Gleise von Kreuzungen und Bahnhof)*
+- [x] mach die optik der Landschaft bitte noch ein bisschen mehr retro, das darf ruhig ein bisschen bisschen oldschoolig aussehen *(gedeckte Farben, Dithering, Bäume mit Kontur)*
+- [x] ich hätte bei den Elektrischen Zügen dann den Vorschlag, dass du unter den Personenzügen überhaupt auch noch triebzüge mit 2 führerständen bringst, also so, wie die meisten S-Bahnen heute fahren *(S-Bahn hat jetzt Führerstände an beiden Enden; neu: Tullnerfelder Triebzug als Anfrage nach der Oberleitung)*
+- [x] das Zoomen ist nicht gut, es zoomt viel zu schnell mit dem Mausrad *(eine Stufe pro Rad-Raste, kurze Pause danach)*
+
+===
+- neue Features:
+    - [x] Verschubereiche (eventuell mit eigenen Signalen?) *(Forschung „Verschubbereiche“: Gleise markieren → max. ~25 km/h, eigene Rangiersignale für 100 €)*
+    - [x] Waschanlagen für Züge (Zwischendurch gibt es Zeitungsartikel, die Vandalismus behandeln, dann kommen für einige Zeit vermehrt dreckige Züge an, die im Bahnhof enden und zur Waschanlage fahren, sofern eine Verfügbar ist) *(Zeitung „Donau-Kurier“, 8 h verschmutzte Züge)*
+    - [x] Privatbahnen anbinden (Sägewerke, Bergwerke, etc...), die zahlen dann für jede Durchfahrt auch einen betrag. Voraussetzung: Man hat einen Bereich erschlossen, wo so ein Privatunternehmen ist *(Sägewerk Holzer und Bergwerk Erzleiten mit Ladegleis – anschließen genügt)*
+    - [x] Upgrademöglichkeiten für Bahnhof: WC anlagen, Gasthaus *(WC mit Bahnhofsausbau I, Gasthaus mit Ausbau II)*
+    - [x] Wirtschaftliches Upgrade: jedes gleis, jede Weiche, jeder Bahnsteig, jeder Bahnhof kostet einmal pro Tag Geld. Vandalismus gibt es zwischendruch auch am Bahnhfo (angekündigt mit Zeitungsartikel), dann kostet die Instandhaltung für einen Tag mehr *(Abrechnung um Mitternacht, Betrag im Tooltip der Kasse)*
+    - [x] Schnellfahrweiche im Forschungsbaum: Darf in der Länge gerne doppelt so lang sein, wie eine normale Weiche. Ist eine voraussetzung dafür, dass Schnellzüge überhaupt angenommen werden können, und dann dürfen sie überhaupt nur dort fahren, wo es gerade ist, oder wo es eine Schnellfahrweiche gibt (und eine Oberleitung) *(Schnellfahr-Gleiswechsel, 6 Felder lang)*
+    - [x] Tageszeiten: Lichtstimmung soll sich für die Tageszeiten etwas ändern, am Abend ist es dann dunkel, Bahnhof hat Licht und Züge auch. Eventuell Deko zum erforschen für mehr Laternen bzw. zum Freiplatzieren *(neu: Straßenlaterne)*
+    - [x] Im Forschungsbaum wird nur ein Tile gezeigt. der restliche Text wird beim Hovern als "Tooltip" angezeigt

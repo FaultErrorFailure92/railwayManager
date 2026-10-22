@@ -7,7 +7,7 @@ import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research'
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
 import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
-import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, TRANSIT_FEE } from './Screens';
+import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTipHtml, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { GameScene, UiState } from '../render/GameScene';
 import { VARIANTS, typing, variantOf } from '../render/GameScene';
@@ -124,9 +124,22 @@ export class Hud {
       (b as HTMLElement).onclick = () => this.closeScreen();
     });
     $('ct-transit').textContent = String(TRANSIT_FEE);
+    // Forschungsbaum: Details als Tooltip neben dem Feld
+    $('rs-tree').addEventListener('mousemove', (e) => {
+      const c = (e.target as HTMLElement).closest('[data-tip]') as HTMLElement | null;
+      const tip = $('rs-tip');
+      if (!c) { tip.style.display = 'none'; this.rsTipId = undefined; return; }
+      if (this.rsTipId !== c.dataset.tip) { this.rsTipId = c.dataset.tip; tip.innerHTML = researchTipHtml(this.g, c.dataset.tip as ResearchId); }
+      tip.style.display = 'flex';
+      const r = c.getBoundingClientRect();
+      const left = r.right + 12 + tip.offsetWidth > window.innerWidth ? r.left - 12 - tip.offsetWidth : r.right + 12;
+      tip.style.left = `${Math.max(4, left)}px`;
+      tip.style.top = `${Math.max(4, Math.min(window.innerHeight - tip.offsetHeight - 4, r.top))}px`;
+    });
+    $('rs-tree').addEventListener('mouseleave', () => { $('rs-tip').style.display = 'none'; this.rsTipId = undefined; });
     $('rs-tree').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-research]') as HTMLElement | null;
-      if (b && this.g.startResearch(b.dataset.research as ResearchId)) this.renderScreen(true);
+      if (b && this.g.startResearch(b.dataset.research as ResearchId)) { this.rsTipId = undefined; $('rs-tip').style.display = 'none'; this.renderScreen(true); }
     });
     $('ct-table').addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
@@ -257,6 +270,9 @@ export class Hud {
   // ------------------------------------------------------------ Forschung / Verträge
   private screen: 'research' | 'contracts' | 'timetable' | null = null;
   private timetable!: Timetable;
+  private rsTipId?: string;
+  private maintVersion = -1;
+  private maintAt = 0;
   private pausedBeforeScreen = false;
   private screenKey = '';
 
@@ -272,6 +288,7 @@ export class Hud {
   }
 
   private closeScreen() {
+    $('rs-tip').style.display = 'none';
     if (!this.screen) return;
     $(this.screen).classList.add('hidden');
     this.screen = null;
@@ -381,13 +398,13 @@ export class Hud {
   private eventQueue: string[] = [];
   private pausedBeforeEvent = false;
 
-  private showEvent(html: string) {
+  private showEvent(html: string, confetti = true) {
     if (!$('event').classList.contains('hidden')) { this.eventQueue.push(html); return; }
     this.pausedBeforeEvent = this.g.paused;
     this.g.paused = true;
     $('ev-body').innerHTML = html;
     const conf = $('ev-confetti');
-    conf.innerHTML = Array.from({ length: 40 }, (_, i) => {
+    conf.innerHTML = !confetti || html.startsWith('<div class="news"') ? '' : Array.from({ length: 40 }, (_, i) => {
       const c = ['#ffd23c', '#ff6a5a', '#7dff8a', '#5ab4ff', '#ffffff'][i % 5];
       return `<i style="left:${Math.random() * 100}%;background:${c};animation-delay:${(Math.random() * 1.2).toFixed(2)}s;animation-duration:${(1.8 + Math.random() * 1.6).toFixed(2)}s"></i>`;
     }).join('');
@@ -508,7 +525,7 @@ export class Hud {
     const isPax = t.capacity > 0;
     const load = isPax ? (t.passengers / t.capacity) * 100 : 0;
     const kmh = Math.round(t.v * 15);
-    const cars = t.cars.map((c) => `<img src="assets/gen/car_${t.op.id}_${c}_0.png" alt="" />`).join('');
+    const cars = t.cars.map((c, i) => `<img src="assets/gen/car_${t.op.id}_${c === 'ecab' ? (i ? 'ecabW' : 'ecabE') : c}_0.png" alt="" />`).join('');
     const dirTxt = t.dir === 'E' ? '→ Ost' : '← West';
     const rows = [
       `<div class="tc-head"><span class="dot" style="background:${t.op.color}"></span><b>${t.number}</b><span class="muted">${dirTxt}</span></div>`,
@@ -562,6 +579,11 @@ export class Hud {
     $('clock').textContent = fmtTime(sim.time);
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
+    if (g.version !== this.maintVersion || now > this.maintAt) {
+      this.maintVersion = g.version; this.maintAt = now + 5000;
+      const m = g.maintenance();
+      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}`;
+    }
     $('punct').textContent = g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–';
     $('pax').textContent = g.stats.passengers.toLocaleString('de-AT');
     const mood = this.scene()?.peopleMood();
@@ -716,6 +738,12 @@ export class Hud {
         this.showEvent(`<h1 class="blue">FORSCHUNG FERTIG!</h1>
           <div class="ev-tools"><div class="ev-tool big"><span class="slot"><img src="${ICON(r.icon)}" alt="" /></span></div></div>
           <div class="ev-title">${r.name}</div><div class="ev-info">${r.info}</div>`);
+        continue;
+      }
+      if (ev.type === 'news') {
+        const day = Math.floor(g.sim.time / 86400) + 1;
+        this.showEvent(`<div class="news"><div class="nw-head">DONAU-KURIER</div><div class="nw-date">Tag ${day} · ${fmtTime(g.sim.time)} Uhr · Lokales</div>
+          <div class="nw-title">${ev.title}</div><div class="nw-text">${ev.text}</div></div>`, false);
         continue;
       }
       if (ev.type === 'contract') {
