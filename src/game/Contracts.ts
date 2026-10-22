@@ -30,8 +30,11 @@ export const lengthClass = (cars: number): LengthClass => (cars >= LONG_TRAIN_CA
 const round10 = (n: number) => Math.round(n / 10) * 10;
 
 /** marktüblicher Preis */
+/** Forschung „Verhandlungsgeschick“: faire Preise höher */
+export const priceMod = { fair: 1 };
+
 export function fairPrice(op: Operator, cls: LengthClass) {
-  return round10(op.fee * (cls === 'long' ? 2.2 : 1.5));
+  return round10(op.fee * (cls === 'long' ? 2.2 : 1.5) * priceMod.fair);
 }
 
 export function newContracts(): Record<OperatorId, Contract> {

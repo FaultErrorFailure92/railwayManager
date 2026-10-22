@@ -4,8 +4,9 @@ import type { Game } from '../game/Game';
 import manifest from '../gen/manifest.json';
 import { toScreen } from '../iso';
 import { villages } from '../world/Grid';
+import { currentMap } from '../world/maps';
 
-type Kind = 'cow' | 'sheep' | 'deer' | 'hare' | 'fox';
+type Kind = 'cow' | 'sheep' | 'deer' | 'hare' | 'fox' | 'cat';
 
 interface Animal {
   kind: Kind;
@@ -26,9 +27,9 @@ interface Animal {
 }
 
 const ANIMALS = (manifest as unknown as { animals: Record<Kind, { file: string; w: number; h: number; frames: number }> }).animals;
-const SPEED: Record<Kind, number> = { cow: 4, sheep: 5, deer: 14, hare: 18, fox: 12 };
+const SPEED: Record<Kind, number> = { cow: 4, sheep: 5, deer: 14, hare: 18, fox: 12, cat: 7 };
 /** Tiere laufen nur auf Wiese ohne Gleis, Gebäude oder Bahnsteig */
-const WILD_IDLE: Record<Kind, [number, number]> = { cow: [3, 9], sheep: [2, 7], deer: [2, 6], hare: [1, 4], fox: [1, 5] };
+const WILD_IDLE: Record<Kind, [number, number]> = { cow: [3, 9], sheep: [2, 7], deer: [2, 6], hare: [1, 4], fox: [1, 5], cat: [3, 12] };
 
 export function preloadAnimals(scene: Phaser.Scene) {
   for (const [k, a] of Object.entries(ANIMALS)) {
@@ -39,6 +40,7 @@ export function preloadAnimals(scene: Phaser.Scene) {
 export class Animals {
   private list: Animal[] = [];
   private seed = 4242;
+  private catCheck = 0;
 
   constructor(private scene: Phaser.Scene, private g: Game) {
     this.spawnAll();
@@ -50,14 +52,15 @@ export class Animals {
   }
 
   /** Zelle frei für Tiere? */
-  private walkable(cx: number, cy: number) {
+  private walkable(cx: number, cy: number, cat = false) {
     const g = this.g.grid;
+    if (cat && g.get(cx, cy)?.platform) return true;
     if (!g.isGround(cx, cy)) return false;
     const c = g.get(cx, cy)!;
     if (c.track || c.piece !== null || c.platform) return false;
     if (c.building !== null) {
       const b = g.buildings.get(c.building);
-      return !!b && b.decor && (b.key.startsWith('bld_tree') || b.key.startsWith('bld_pine') || b.key === 'bld_bush0');
+      return !!b && b.decor && (/^bld_(tree|pine|snowpine|palm|cactus|bush0|drybush)/.test(b.key));
     }
     return true;
   }
@@ -65,7 +68,7 @@ export class Animals {
   private spawnAll() {
     // Weiden bei den Dörfern: Kühe oder Schafe (nie auf der Strecken-Seite)
     villages().forEach((v, i) => {
-      const kind: Kind = i % 2 ? 'sheep' : 'cow';
+      const kind: Kind = i % 2 || currentMap().ground === 'sand' ? 'sheep' : 'cow';
       const side = v.y < MAIN_ROW ? -1 : 1;
       const hx = v.x + (this.rnd() - 0.5) * 8, hy = v.y + side * (4 + this.rnd() * 3);
       const n = kind === 'sheep' ? 7 : 5;
@@ -81,11 +84,11 @@ export class Animals {
       let trees = 0;
       for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
         const c = g.get(x + dx, y + dy);
-        if (c?.building != null && g.buildings.get(c.building)?.key.match(/tree|pine/)) trees++;
+        if (c?.building != null && g.buildings.get(c.building)?.key.match(/tree|pine|palm|cactus/)) trees++;
       }
       if (trees < 3) continue;
       const r = this.rnd();
-      const kind: Kind = r < 0.45 ? 'deer' : r < 0.8 ? 'hare' : 'fox';
+      const kind: Kind = currentMap().ground === 'sand' ? (r < 0.6 ? 'hare' : 'fox') : r < 0.45 ? 'deer' : r < 0.8 ? 'hare' : 'fox';
       const group = kind === 'deer' ? 1 + Math.floor(this.rnd() * 3) : 1;
       for (let k = 0; k < group; k++) this.add(kind, x, y, kind === 'deer' ? 7 : 5);
       placed++;
@@ -97,9 +100,9 @@ export class Animals {
     for (let i = 0; i < 20; i++) {
       x = hx + (this.rnd() - 0.5) * r * 2;
       y = hy + (this.rnd() - 0.5) * r * 2;
-      if (this.walkable(Math.floor(x), Math.floor(y))) break;
+      if (this.walkable(Math.floor(x), Math.floor(y), kind === 'cat')) break;
     }
-    if (!this.walkable(Math.floor(x), Math.floor(y))) return;
+    if (!this.walkable(Math.floor(x), Math.floor(y), kind === 'cat')) return;
     const img = this.scene.add.image(0, 0, `animal_${kind}`, 0).setOrigin(0.5, 1);
     const a: Animal = {
       kind, img, x: x * TILE, y: y * TILE, tx: x * TILE, ty: y * TILE, hx, hy, r,
@@ -112,7 +115,7 @@ export class Animals {
   private pickTarget(a: Animal) {
     for (let i = 0; i < 8; i++) {
       const x = a.hx + (this.rnd() - 0.5) * a.r * 2, y = a.hy + (this.rnd() - 0.5) * a.r * 2;
-      if (this.walkable(Math.floor(x), Math.floor(y))) { a.tx = x * TILE; a.ty = y * TILE; return; }
+      if (this.walkable(Math.floor(x), Math.floor(y), a.kind === 'cat')) { a.tx = x * TILE; a.ty = y * TILE; return; }
     }
   }
 
@@ -121,8 +124,16 @@ export class Animals {
     a.img.setPosition(Math.round(p.x), Math.round(p.y)).setDepth(p.y + 0.25).setFrame(frame);
   }
 
+  /** Bahnhofskatze: zieht ein, sobald erforscht und ein Bahnhof steht */
+  private checkCat() {
+    if (!this.g.researched('cat') || this.list.some((a) => a.kind === 'cat')) return;
+    const st = [...this.g.grid.buildings.values()].find((b) => /^bld_station/.test(b.key));
+    if (st) this.add('cat', st.x + 1, st.y + 2.5, 3);
+  }
+
   update(dtReal: number, speed: number, paused: boolean, view: Phaser.Geom.Rectangle) {
     if (paused) return;
+    if ((this.catCheck -= dtReal) < 0) { this.catCheck = 2; this.checkCat(); }
     const dt = dtReal * Math.min(speed, 4);
     for (const a of this.list) {
       const p = toScreen(a.x, a.y);
@@ -142,7 +153,7 @@ export class Animals {
       }
       const step = Math.min(d, a.speed * dt);
       const nx = a.x + (dx / d) * step, ny = a.y + (dy / d) * step;
-      if (!this.walkable(Math.floor(nx / TILE), Math.floor(ny / TILE))) { a.idle = 1; continue; }
+      if (!this.walkable(Math.floor(nx / TILE), Math.floor(ny / TILE), a.kind === 'cat')) { a.idle = 1; continue; }
       a.x = nx; a.y = ny;
       // Blickrichtung auf dem Bildschirm: rechts, wenn x−y wächst
       a.img.setFlipX(dx - dy < 0);

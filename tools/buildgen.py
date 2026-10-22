@@ -768,3 +768,206 @@ def platform_clock():
     iso.wall_rect_y(9, 6.6, 9.4, 14.6, 18.4, (245, 245, 235, 255))
     iso.line((8, 9, 16.5), (8, 9, 18), (20, 20, 20, 255))
     return iso.result()
+
+
+# ---------------------------------------------------------------- Wüste: Lehmhäuser, Brunnen, Zelt
+def adobe(w, h, wall, H=10, dome=False, tower=False, seed=0):
+    """Lehmhaus mit Flachdach und Brüstung, Holzbalken, kleine Fenster"""
+    rng = np.random.default_rng(seed)
+    W, D = 16 * w, 16 * h
+    m = 1.5
+    x0, y0, x1, y1 = m, m, W - m, D - m
+    top_h = H + (8 if tower else 0) + (7 if dome else 0) + 4
+    iso = Iso(W, D, top_h)
+    iso.box(x0, y0, x1, y1, 0, H, wall)
+    # Brüstung
+    p = 1.2
+    for (a, b, c, d) in ((x0, y0, x1, y0 + p), (x0, y1 - p, x1, y1), (x0, y0, x0 + p, y1), (x1 - p, y0, x1, y1)):
+        iso.box(a, b, c, d, H, H + 1.5, shade(wall, 1.05), outline=False)
+    iso.poly([(x0 + p, y0 + p, H + 0.2), (x1 - p, y0 + p, H + 0.2), (x1 - p, y1 - p, H + 0.2), (x0 + p, y1 - p, H + 0.2)], shade(wall, 0.9))
+    # Fenster vorne + Tür
+    n = max(1, int((x1 - x0) // 8))
+    for i in range(n):
+        xa = x0 + 3 + i * (x1 - x0 - 4) / n
+        if i == n // 2:
+            iso.wall_rect_y(y1, xa, xa + 3.5, 0, 6.5, (110, 70, 40, 255))
+            iso.wall_rect_y(y1, xa - 0.5, xa + 4, 6.5, 7.3, shade(wall, 0.7))
+        else:
+            iso.wall_rect_y(y1, xa, xa + 2.5, 4.5, 7.5, (40, 34, 30, 255))
+    for i in range(max(1, int((y1 - y0) // 9))):
+        ya = y0 + 3 + i * 9
+        iso.wall_rect_x(x1, ya, ya + 2.5, 4.5, 7.5, (34, 28, 26, 255))
+    # Holzbalken (Vigas) unter dem Dach
+    for i in range(int((x1 - x0) // 5)):
+        xa = x0 + 2.5 + i * 5
+        iso.wall_rect_y(y1 + 0.01, xa, xa + 1, H - 2, H - 1, (96, 64, 38, 255))
+    if tower:
+        tx0, ty0 = x0 + 2, y0 + 2
+        iso.box(tx0, ty0, tx0 + 7, ty0 + 7, H, H + 8, shade(wall, 1.02))
+        iso.wall_rect_y(ty0 + 7, tx0 + 2.5, tx0 + 4.5, H + 3, H + 6, (40, 34, 30, 255))
+    if dome:
+        cx, cy, r = (x0 + x1) / 2, (y0 + y1) / 2, min(x1 - x0, y1 - y0) * 0.32
+        for k in range(7):
+            rr = r * np.cos(k / 7 * np.pi / 2)
+            col = shade((236, 236, 228), 1.0 - k * 0.02) if k < 6 else shade((70, 140, 170), 1)
+            iso.box(cx - rr, cy - rr, cx + rr, cy + rr, H + k, H + k + 1.2, col, outline=False)
+    # Flecken im Lehm
+    a = np.array(iso.img)
+    ys, xs = np.where(a[:, :, 3] == 255)
+    for i in rng.choice(len(xs), size=min(len(xs), 25), replace=False):
+        y, x = ys[i], xs[i]
+        a[y, x, :3] = (a[y, x, :3] * 0.9).astype(np.uint8)
+    return Image.fromarray(a), int(iso.x0), int(iso.y0)
+
+
+def well():
+    iso = Iso(16, 16, 18)
+    stone = (170, 150, 120)
+    iso.box(3, 3, 13, 13, 0, 4, stone)
+    iso.poly([(4.5, 4.5, 4.1), (11.5, 4.5, 4.1), (11.5, 11.5, 4.1), (4.5, 11.5, 4.1)], (50, 90, 130, 255))
+    for (a, b) in ((3.5, 7.5), (11.5, 7.5)):
+        iso.box(a, b, a + 1, b + 1, 4, 12, (110, 76, 46))
+    iso.box(3.5, 7.2, 12.5, 8.8, 12, 13, (96, 64, 38))
+    iso.poly([(2, 6, 13), (14, 6, 13), (14, 8, 16), (2, 8, 16)], shade((176, 80, 52), 0.8))
+    iso.poly([(2, 10, 13), (14, 10, 13), (14, 8, 16), (2, 8, 16)], shade((176, 80, 52), 1.0))
+    return iso.result()
+
+
+def tent(col=(214, 190, 150), stripe=(170, 60, 50)):
+    iso = Iso(16, 16, 14)
+    x0, y0, x1, y1, H = 2, 3, 14, 13, 10
+    ym = (y0 + y1) / 2
+    iso.poly([(x1, y0, 0), (x1, y1, 0), (x1, ym, H)], shade(col, 0.8), shade(col, 0.55))
+    iso.poly([(x0, y1, 0), (x1, y1, 0), (x1, ym, H), (x0, ym, H)], shade(col, 1.0), shade(col, 0.6))
+    for t in (0.33, 0.66):
+        iso.line((x0 + (x1 - x0) * t, y1, 0), (x0 + (x1 - x0) * t, ym, H), shade(stripe, 1))
+    iso.poly([(x1, ym - 1.5, 0), (x1, ym + 1.5, 0), (x1, ym, 5)], (50, 36, 28, 255))
+    return iso.result()
+
+
+# ---------------------------------------------------------------- Forschung: neue Gebäude
+def billboard():
+    """Plakatwand auf zwei Pfosten, buntes Plakat"""
+    iso = Iso(16, 16, 22)
+    for x in (4, 12):
+        iso.box(x, 8, x + 1, 9, 0, 9, (70, 70, 76))
+    iso.box(2, 8, 14, 9, 9, 19, (230, 230, 224))
+    iso.wall_rect_y(9.01, 3, 13, 10, 18, (60, 140, 210, 255))
+    iso.wall_rect_y(9.02, 3, 13, 10, 12.5, (240, 200, 60, 255))
+    iso.wall_rect_y(9.03, 4, 8, 13.5, 17, (220, 70, 60, 255))
+    iso.wall_rect_y(9.03, 9, 12, 14.5, 15.5, (250, 250, 250, 255))
+    iso.wall_rect_y(9.03, 9, 11, 16, 17, (250, 250, 250, 255))
+    return iso.result()
+
+
+def lockers():
+    """Schließfächer: Metallschrank mit Fächern"""
+    iso = Iso(16, 16, 18)
+    iso.box(3, 6, 13, 10, 0, 13, (150, 160, 172))
+    for i in range(4):
+        for j in range(3):
+            xa = 3.6 + i * 2.35
+            iso.wall_rect_y(10.01, xa, xa + 1.9, 1 + j * 4, 4 + j * 4, (186, 196, 206, 255))
+            iso.wall_rect_y(10.02, xa + 1.3, xa + 1.6, 2.2 + j * 4, 2.8 + j * 4, (60, 60, 66, 255))
+    iso.wall_rect_y(10.03, 3.6, 12.4, 12, 13, (240, 200, 60, 255))
+    return iso.result()
+
+
+def souvenir():
+    """Souvenirstand: Häuschen mit Postkartenständer und Wimpeln"""
+    iso = Iso(16, 16, 22)
+    iso.box(3, 4, 13, 11, 0, 9, (150, 90, 160))
+    iso.wall_rect_y(11, 4, 12, 3, 7, (250, 236, 200, 255))
+    for i, c in enumerate([(220, 60, 50), (60, 140, 210), (240, 200, 60), (80, 170, 90)]):
+        iso.wall_rect_y(11.01, 4.5 + i * 2, 5.8 + i * 2, 4, 6, c + (255,))
+    iso.poly([(2, 3, 9), (14, 3, 9), (14, 12, 9), (2, 12, 9)], (200, 140, 210, 255), (110, 60, 120, 255))
+    iso.box(6, 6, 10, 9, 9, 12, (240, 200, 60))
+    iso.line((13, 12, 0), (13, 12, 8), (70, 70, 76, 255))
+    for k, c in enumerate([(240, 240, 240), (120, 200, 230), (250, 180, 120)]):
+        iso.wall_rect_x(13.6, 11.2, 12.8, 2 + k * 2, 3.6 + k * 2, c + (255,))
+    return iso.result()
+
+
+def mural():
+    """Wandbild: Mauerstück mit bunter Lok"""
+    iso = Iso(16, 16, 20)
+    wall = (196, 170, 140)
+    iso.box(1, 7, 15, 9, 0, 14, wall)
+    iso.wall_rect_y(9.01, 1.5, 14.5, 0.5, 13.5, (110, 190, 220, 255))
+    iso.wall_rect_y(9.02, 1.5, 14.5, 0.5, 4, (90, 170, 80, 255))
+    iso.wall_rect_y(9.03, 9.5, 12.5, 10, 12, (250, 220, 80, 255))
+    iso.wall_rect_y(9.04, 3, 10, 4, 8.5, (210, 60, 50, 255))
+    iso.wall_rect_y(9.05, 8, 10, 8.5, 10.5, (210, 60, 50, 255))
+    iso.wall_rect_y(9.06, 3.5, 5, 6, 7.5, (240, 240, 240, 255))
+    iso.wall_rect_y(9.06, 4, 5, 3.5, 4.5, (30, 30, 30, 255))
+    iso.wall_rect_y(9.06, 7.5, 8.5, 3.5, 4.5, (30, 30, 30, 255))
+    iso.wall_rect_y(9.07, 2, 14, 13, 13.6, shade(wall, 0.8))
+    return iso.result()
+
+
+def xmas():
+    """Christbaum mit Kugeln und Stern"""
+    img, ox, oy = tree_pine(77)
+    a = np.array(img)
+    rng = np.random.default_rng(5)
+    cols = [(230, 60, 50), (250, 210, 60), (90, 150, 230), (250, 250, 250)]
+    ys, xs = np.where((a[:, :, 3] == 255) & (a[:, :, 1] > 60))
+    for i in rng.choice(len(xs), size=min(len(xs), 14), replace=False):
+        if ys[i] < 22:
+            a[ys[i], xs[i], :3] = cols[i % 4]
+    top = np.where(a[:, :, 3] == 255)
+    y0 = top[0].min()
+    x0 = int(np.median(top[1][top[0] == y0]))
+    big = np.zeros((a.shape[0] + 3, a.shape[1], 4), np.uint8)
+    big[3:] = a
+    for (dy, dx) in ((0, 0), (1, -1), (1, 0), (1, 1), (2, 0)):
+        if 0 <= x0 + dx < big.shape[1]:
+            big[dy + 1 if dy else 0, x0 + dx] = (255, 220, 60, 255)
+    return Image.fromarray(big), ox, oy - 3
+
+
+def ri_icon(kind):
+    """kleine Forschungs-Symbole 18x18 (werden auf 48 skaliert)"""
+    a = np.zeros((18, 18, 4), np.uint8)
+    def px(x, y, c):
+        if 0 <= x < 18 and 0 <= y < 18:
+            a[y, x] = c + (255,)
+    def rect(x0, y0, x1, y1, c):
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                px(x, y, c)
+    K = (30, 30, 36)
+    if kind == "whistle":
+        rect(3, 7, 12, 12, (210, 200, 70)); rect(11, 8, 16, 10, (210, 200, 70)); rect(5, 8, 9, 11, (240, 230, 120))
+        rect(6, 9, 8, 10, K); rect(2, 6, 4, 7, (160, 150, 40))
+        for i in range(3):
+            px(13 + i, 5 - i, (255, 255, 255)); px(12 + i, 4 - i, (200, 220, 255))
+    elif kind == "estw":
+        rect(1, 2, 17, 13, (60, 64, 72)); rect(2, 3, 16, 12, (20, 40, 30))
+        for x in range(3, 15):
+            px(x, 7, (120, 230, 120))
+        for x in range(6, 11):
+            px(x, 7 - (x - 6) // 2, (120, 230, 120))
+        px(4, 5, (230, 60, 50)); px(13, 9, (120, 230, 120)); px(9, 10, (240, 200, 60))
+        rect(7, 13, 11, 15, (60, 64, 72)); rect(4, 15, 14, 16, (80, 84, 92))
+    elif kind == "haggle":
+        rect(1, 7, 8, 12, (230, 180, 140)); rect(10, 7, 17, 12, (200, 150, 110))
+        rect(6, 8, 12, 11, (240, 196, 156)); rect(0, 6, 3, 13, (60, 90, 160)); rect(15, 6, 18, 13, (160, 60, 60))
+        for x in (7, 9, 11):
+            px(x, 8, (170, 120, 90))
+        rect(7, 1, 11, 5, (240, 200, 60)); px(8, 2, (200, 150, 30)); px(9, 3, (200, 150, 30))
+    elif kind == "specials":
+        rect(2, 4, 16, 13, (240, 220, 160)); rect(2, 4, 16, 6, (200, 60, 50))
+        for y in (7, 9, 11):
+            rect(4, y, 11, y + 1, (120, 100, 70))
+        rect(12, 8, 15, 12, (60, 120, 200)); px(13, 9, (250, 250, 250))
+        for y in range(4, 13, 2):
+            px(1, y, (240, 220, 160)); px(16, y, (240, 220, 160))
+    # Umriss
+    m = a[:, :, 3] > 0
+    out = a.copy()
+    for y in range(18):
+        for x in range(18):
+            if not m[y, x] and any(0 <= y + dy < 18 and 0 <= x + dx < 18 and m[y + dy, x + dx] for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0))):
+                out[y, x] = (20, 20, 24, 255)
+    return Image.fromarray(out).resize((36, 36), Image.NEAREST)

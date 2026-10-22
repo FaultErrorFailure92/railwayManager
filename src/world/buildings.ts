@@ -58,21 +58,39 @@ const defs: BuildingDef[] = [
   { key: 'bld_wc', label: 'WC-Anlage', effect: 'Wartende geduldiger · Benutzungsgebühr (Preis per Klick)', w: 1, h: 1, cost: 900, onPlatform: false, group: 'func', demolish: 100 },
   { key: 'bld_inn', label: 'Gasthaus', effect: 'Wirtshaus am Bahnhof – Preis per Klick einstellen', w: 2, h: 2, cost: 4500, onPlatform: false, group: 'func', demolish: 600 },
   { key: 'bld_bush0', label: 'Busch', effect: 'Deko', w: 1, h: 1, cost: 20, onPlatform: false, group: 'nature', demolish: 10 },
+  { key: 'bld_billboard', label: 'Plakatwand', effect: 'Werbung: Geld für jeden Fahrgast (bis 6 Wände)', w: 1, h: 1, cost: 800, onPlatform: false, group: 'func', demolish: 100 },
+  { key: 'bld_lockers', label: 'Schließfächer', effect: 'Gepäckaufbewahrung – Gebühr per Klick einstellen', w: 1, h: 1, cost: 700, onPlatform: true, group: 'func', demolish: 80 },
+  { key: 'bld_souvenir', label: 'Souvenirladen', effect: 'Andenken – bei Volksfesten dreimal so viele Käufer', w: 1, h: 1, cost: 1800, onPlatform: true, group: 'func', demolish: 200 },
+  { key: 'bld_mural', label: 'Wandbild', effect: 'Kunst am Bau · Wartende froher', w: 1, h: 1, cost: 1200, onPlatform: false, group: 'deco', demolish: 100 },
+  { key: 'bld_xmas', label: 'Christbaum', effect: 'Festschmuck · Wartende deutlich froher · leuchtet', w: 1, h: 1, cost: 600, onPlatform: false, group: 'deco', demolish: 50 },
+  { key: 'bld_adobeA', label: 'Lehmhaus', effect: 'Deko', w: 2, h: 2, cost: 800, onPlatform: false, group: 'deco', demolish: 400 },
+  { key: 'bld_adobeB', label: 'Lehmhaus mit Kuppel', effect: 'Deko', w: 2, h: 2, cost: 900, onPlatform: false, group: 'deco', demolish: 400 },
+  { key: 'bld_adobeC', label: 'Lehmhütte', effect: 'Deko', w: 1, h: 1, cost: 400, onPlatform: false, group: 'deco', demolish: 200 },
+  { key: 'bld_well', label: 'Brunnen (Ziehbrunnen)', effect: 'Deko', w: 1, h: 1, cost: 300, onPlatform: false, group: 'deco', demolish: 100 },
+  { key: 'bld_tent', label: 'Zelt', effect: 'Deko', w: 1, h: 1, cost: 100, onPlatform: false, group: 'deco', demolish: 50 },
+  { key: 'bld_cactus0', label: 'Kaktus', effect: 'Landschaft', w: 1, h: 1, cost: 20, onPlatform: false, group: 'nature', demolish: 20 },
+  { key: 'bld_cactus1', label: 'Kaktus', effect: 'Landschaft', w: 1, h: 1, cost: 20, onPlatform: false, group: 'nature', demolish: 20 },
+  { key: 'bld_palm0', label: 'Palme', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
+  { key: 'bld_palm1', label: 'Palme', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
+  { key: 'bld_drybush', label: 'Dornbusch', effect: 'Landschaft', w: 1, h: 1, cost: 10, onPlatform: false, group: 'nature', demolish: 10 },
+  { key: 'bld_snowpine0', label: 'Verschneite Tanne', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
+  { key: 'bld_snowpine1', label: 'Verschneite Tanne', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
 ];
 
 export const BUILDINGS: Record<string, BuildingDef> = Object.fromEntries(defs.map((d) => [d.key, d]));
 
 /** Auswahl im Baumenü */
-export const BUILD_MENU = ['bld_station', 'bld_shelter', 'bld_kiosk', 'bld_vending', 'bld_cafe', 'bld_wc', 'bld_inn', 'bld_bench', 'bld_clock',
-  'bld_parking', 'bld_bus', 'bld_lamp', 'bld_streetlamp', 'bld_flowers', 'bld_fountain', 'bld_statue',
+export const BUILD_MENU = ['bld_station', 'bld_shelter', 'bld_kiosk', 'bld_vending', 'bld_cafe', 'bld_wc', 'bld_inn', 'bld_souvenir', 'bld_lockers', 'bld_bench', 'bld_clock',
+  'bld_parking', 'bld_bus', 'bld_billboard', 'bld_lamp', 'bld_streetlamp', 'bld_flowers', 'bld_fountain', 'bld_statue', 'bld_mural', 'bld_xmas',
   'bld_houseA', 'bld_houseB', 'bld_tree0', 'bld_pine0', 'bld_bush0'];
 
 export const isStation = (key: string) => key === 'bld_station' || key === 'bld_station2' || key === 'bld_station3';
 
 /** Gebäude, die erst erforscht werden müssen */
 export const BUILDING_RESEARCH: Record<string, string> = {
-  bld_parking: 'road', bld_bus: 'road', bld_lamp: 'deco', bld_streetlamp: 'deco', bld_flowers: 'deco', bld_fountain: 'deco', bld_statue: 'deco', bld_clock: 'deco',
-  bld_wc: 'station2', bld_inn: 'station3',
+  bld_parking: 'road', bld_bus: 'road', bld_lamp: 'light', bld_streetlamp: 'light', bld_flowers: 'green', bld_tree0: 'green', bld_pine0: 'green', bld_bush0: 'green',
+  bld_fountain: 'water', bld_statue: 'monument', bld_clock: 'clock', bld_bench: 'bench', bld_shelter: 'bench', bld_mural: 'art', bld_xmas: 'season',
+  bld_kiosk: 'kiosk', bld_vending: 'kiosk', bld_cafe: 'cafe', bld_wc: 'wc', bld_inn: 'inn', bld_billboard: 'ads', bld_lockers: 'lockers', bld_souvenir: 'souvenir',
 };
 
 /** Läden: Referenzpreis (€) und Kaufquote bei diesem Preis */
@@ -82,4 +100,6 @@ export const SHOPS: Record<string, { name: string; ref: number; rate: number }> 
   bld_vending: { name: 'Automat', ref: 2, rate: 0.1 },
   bld_wc: { name: 'WC', ref: 0.5, rate: 0.2 },
   bld_inn: { name: 'Gasthaus', ref: 9, rate: 0.05 },
+  bld_lockers: { name: 'Schließfächer', ref: 2, rate: 0.04 },
+  bld_souvenir: { name: 'Souvenirladen', ref: 7, rate: 0.025 },
 };

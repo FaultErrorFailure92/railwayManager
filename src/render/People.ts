@@ -77,6 +77,10 @@ export class People {
       if (b.key === 'bld_shelter') add(b.x, b.y, 1, 1.7);
       if (b.key === 'bld_bench') add(b.x, b.y, 1, 1.3);
       if (b.key === 'bld_clock') add(b.x, b.y, 2, 1.2);
+      // Deko in der Nähe macht Wartende froher
+      if (b.key === 'bld_fountain' || b.key === 'bld_statue' || b.key === 'bld_mural') add(b.x, b.y, 3, 1.15);
+      if (b.key === 'bld_flowers') add(b.x, b.y, 2, 1.1);
+      if (b.key === 'bld_xmas') add(b.x, b.y, 3, 1.3);
       if (b.key === 'bld_kiosk' || b.key === 'bld_vending') {
         add(b.x, b.y, 2, 1.3);
         for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) this.kioskNear.add(`${b.x + dx},${b.y + dy}`);
@@ -119,6 +123,11 @@ export class People {
   }
 
   private patience(p: Person) {
+    if (this.g.researched('cat')) return this.patienceRaw(p) * 1.1;
+    return this.patienceRaw(p);
+  }
+
+  private patienceRaw(p: Person) {
     const c = this.cellOf(p);
     return PATIENCE * (this.comfort.get(`${c.x},${c.y}`) ?? 1) * (this.hasWc ? 1.2 : 1);
   }

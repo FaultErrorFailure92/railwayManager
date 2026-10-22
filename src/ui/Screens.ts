@@ -1,13 +1,15 @@
 import { acceptChance, cancelRisk, fairPrice, TRANSIT_FEE } from '../game/Contracts';
 import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
-import { RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research';
+import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES, treeOf } from '../game/Research';
 import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
 import { ACHIEVEMENTS } from '../game/Achievements';
+import { contactOf, VERBUND } from '../game/Board';
+import { portrait } from './portrait';
 
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
-const CARD_W = 92, CARD_H = 92, GAP_X = 44, GAP_Y = 18;
+const CARD_W = 136, CARD_H = 96, GAP_X = 40, GAP_Y = 16;
 
 const hm = (sec: number) => {
   const m = Math.max(0, Math.ceil(sec / 60));
@@ -15,36 +17,54 @@ const hm = (sec: number) => {
 };
 
 /** Zustand für das Neuzeichnen (nur bei Änderung) */
-export function researchKey(g: Game, quest?: string) {
+export function researchKey(g: Game, tree: ResearchTree, quest?: string) {
   const r = g.research;
-  return `${r.done.join()}|${r.current?.id}|${r.current ? Math.ceil(r.current.left / 300) : 0}|${r.points}|${Math.floor(g.money / 100)}|${quest}`;
+  const run = TREES.map((t) => { const c = r.running?.[t.id]; return c ? `${c.id}:${Math.ceil(c.left / 300)}` : '-'; }).join(',');
+  return `${tree}|${r.done.join()}|${run}|${r.points}|${Math.floor(g.money / 100)}|${quest}`;
 }
 
-export function researchHtml(g: Game, quest?: string) {
-  const cols = Math.max(...RESEARCH.map((r) => r.col)) + 1;
-  const rows = Math.max(...RESEARCH.map((r) => r.row)) + 1;
+/** Reiter oben: drei Bäume mit laufender Forschung */
+export function researchTabsHtml(g: Game, tree: ResearchTree, quest?: string) {
+  const questTree = quest ? RESEARCH_BY_ID[quest as ResearchId]?.tree : undefined;
+  return TREES.map((t) => {
+    const cur = g.runningIn(t.id);
+    const all = treeOf(t.id), done = all.filter((r) => g.researched(r.id)).length;
+    const ready = all.some((r) => !g.researchBlock(r.id));
+    const pct = cur ? 100 - (cur.left / (RESEARCH_BY_ID[cur.id].hours * 3600)) * 100 : 0;
+    return `<button class="rs-tab${t.id === tree ? ' on' : ''}${questTree === t.id ? ' quest' : ''}" data-tree="${t.id}">
+      <img src="${ICON(t.icon)}" alt="" /><span><b>${t.name}</b><small>${cur ? `forscht: ${RESEARCH_BY_ID[cur.id].name}` : ready ? 'bereit für neue Forschung' : t.sub} · ${done}/${all.length}</small></span>
+      ${ready && !cur ? '<i class="rs-dot"></i>' : ''}<em class="rs-tabbar"><i style="width:${pct.toFixed(0)}%"></i></em></button>`;
+  }).join('');
+}
+
+export function researchHtml(g: Game, tree: ResearchTree, quest?: string) {
+  const list = treeOf(tree);
+  const cols = Math.max(...list.map((r) => r.col)) + 1;
+  const rows = Math.max(...list.map((r) => r.row)) + 1;
   const W = cols * CARD_W + (cols - 1) * GAP_X, H = rows * CARD_H + (rows - 1) * GAP_Y;
   const pos = (id: ResearchId) => {
     const r = RESEARCH_BY_ID[id];
     return { x: r.col * (CARD_W + GAP_X), y: r.row * (CARD_H + GAP_Y) };
   };
-  const lines = RESEARCH.flatMap((r) => r.requires.map((q) => {
+  const lines = list.flatMap((r) => r.requires.filter((q) => RESEARCH_BY_ID[q].tree === tree).map((q) => {
     const a = pos(q), b = pos(r.id);
     const x1 = a.x + CARD_W, y1 = a.y + CARD_H / 2, x2 = b.x, y2 = b.y + CARD_H / 2, xm = x1 + GAP_X / 2;
     const on = g.researched(q);
     return `<path d="M${x1} ${y1} H${xm} V${y2} H${x2}" class="${on ? 'on' : ''}" />`;
   })).join('');
-  const cards = RESEARCH.map((r) => {
+  const cards = list.map((r) => {
     const p = pos(r.id);
     const done = g.researched(r.id);
-    const cur = g.research.current?.id === r.id ? g.research.current : null;
+    const cur = g.runningOf(r.id);
     const block = g.researchBlock(r.id);
     const state = done ? 'done' : cur ? 'running' : !block ? 'ready' : r.requires.every((q) => g.researched(q)) ? 'open' : 'locked';
     const pct = cur ? 100 - (cur.left / (r.hours * 3600)) * 100 : 0;
     const mark = done ? '<span class="rs-mark ok">✓</span>' : !block && !cur ? '<span class="rs-mark gold">!</span>' : '';
-    // nur das Feld; alles andere steht im Tooltip. Klick = erforschen (wenn möglich)
+    // Voraussetzung aus einem anderen Baum: kleiner Hinweis
+    const cross = r.requires.filter((q) => RESEARCH_BY_ID[q].tree !== tree && !g.researched(q)).length ? '<span class="rs-cross" title="braucht Forschung aus einem anderen Baum">↗</span>' : '';
     return `<div class="rs-card ${state}${quest === r.id && !done ? ' quest' : ''}" data-tip="${r.id}"${!block && !done && !cur ? ` data-research="${r.id}"` : ''} style="left:${p.x}px;top:${p.y}px;width:${CARD_W}px;height:${CARD_H}px">
-      <img class="rs-icon" src="${ICON(r.icon)}" alt="" />${mark}
+      <img class="rs-icon" src="${ICON(r.icon)}" alt="" />${mark}${cross}
+      <span class="rs-name">${r.name}</span>
       ${cur ? `<div class="rs-prog"><div style="width:${pct.toFixed(1)}%"></div></div>` : ''}
     </div>`;
   }).join('');
@@ -87,12 +107,13 @@ export function statsHtml(g: Game) {
 export function researchTipHtml(g: Game, id: ResearchId) {
   const r = RESEARCH_BY_ID[id];
   const done = g.researched(id);
-  const cur = g.research.current?.id === id ? g.research.current : null;
+  const cur = g.runningOf(id);
   const block = g.researchBlock(id);
   const foot = done ? '<span class="ok">✓ erforscht</span>' : cur ? `<span>läuft · noch ${hm(cur.left)}</span>`
     : !block ? '<span class="gold">Klicken zum Erforschen</span>' : `<span class="no">${block}</span>`;
-  const req = r.requires.length ? `<small>braucht: ${r.requires.map((q) => RESEARCH_BY_ID[q].name).join(', ')}</small>` : '';
-  return `<b>${r.name}</b><div>${r.info}</div>
+  const tn = (q: ResearchId) => RESEARCH_BY_ID[q].tree === r.tree ? RESEARCH_BY_ID[q].name : `${RESEARCH_BY_ID[q].name} (${TREES.find((t) => t.id === RESEARCH_BY_ID[q].tree)!.name})`;
+  const req = r.requires.length ? `<small>braucht: ${r.requires.map(tn).join(', ')}</small>` : '';
+  return `<b>${r.name}</b><div class="rs-unl">→ ${r.unlocks}</div><div>${r.info}</div>
     <div class="rs-cost"><span><img src="assets/gen/ui/flask.png" alt="" />${r.fp}</span><span><img src="assets/gen/ui/coin.png" alt="" />${eur(r.cost)}</span><span><img src="assets/gen/ui/clock.png" alt="" />${r.hours} h</span></div>
     ${req}<div>${foot}</div>`;
 }
@@ -106,12 +127,27 @@ export function contractsKey(g: Game) {
   return contractOps(g).map((o) => {
     const c = g.contracts[o.id];
     return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
-  }).join('|') + g.minTakt;
+  }).join('|') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}`;
 }
+
+/** Personal: eigene Instandhalter */
+function crewHtml(g: Game) {
+  if (!g.researched('crew')) {
+    return `<div class="ct-crew off"><img src="${ICON('tool_shovel')}" alt="" /><div><b>Instandhaltungsteam</b><small>Erforsche „Die Schrauber-Brigade“ (Stellwerk), um eigene Instandhalter einzustellen. Bis dahin: Störung anklicken und Störtrupp rufen.</small></div></div>`;
+  }
+  const n = g.crew;
+  const workers = Array.from({ length: Game_CREW_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}">${portrait(31 + i * 17, 28)}</span>`).join('');
+  return `<div class="ct-crew"><img src="${ICON('tool_shovel')}" alt="" />
+    <div><b>Instandhaltungsteam</b><small>${n ? `rücken bei Störungen selbst aus · Reparatur ${g.repairMinutes} min · ${Math.round(15 * n)} % weniger Ausfälle` : 'noch niemand eingestellt'}${g.researched('crew2') ? ' · vorbeugende Wartung aktiv' : ''}</small></div>
+    <div class="cw-list">${workers}</div>
+    <div class="ct-price"><button class="btn" data-crew="-1"${n <= 0 ? ' disabled' : ''}>−</button><span>${n}</span><button class="btn" data-crew="1"${n >= Game_CREW_MAX ? ' disabled' : ''}>+</button>
+    <small>${eur(n * 250)} €/Tag</small></div></div>`;
+}
+const Game_CREW_MAX = 4;
 
 export function contractsHtml(g: Game) {
   const ops = contractOps(g);
-  if (!ops.length) return '<div class="ct-empty">Noch keine Verträge. Sobald dein Empfangsgebäude steht, gibt es eine Ausschreibung.</div>';
+  if (!ops.length) return crewHtml(g) + '<div class="ct-empty">Noch keine Verträge. Sobald dein Empfangsgebäude steht, gibt es eine Ausschreibung.</div>';
   const rows = ops.map((o) => {
     const c = g.contracts[o.id];
     const sat = Math.round(g.satisfaction[o.id]);
@@ -145,7 +181,7 @@ export function contractsHtml(g: Game) {
       <div class="ct-status">${status}</div>
     </div>`;
   }).join('');
-  return rows;
+  return crewHtml(g) + rows;
 }
 
 /** Ausschreibung / Anfrage als Karten */
@@ -165,10 +201,22 @@ export function offerHtml(g: Game) {
       <div class="tc-row"><span>Takt</span><span>alle ${Math.max(g.minTakt, op.takt)} min</span></div>
       <div class="tc-row"><span>Preis</span><span>${fair('short')} € / ${fair('long')} € lang</span></div>
       <div class="tc-row"><span>Halt</span><span>${op.needsStop ? (op.turnback ? 'endet hier, wendet' : 'hält bei dir') : 'fährt durch'}</span></div>
+      <div class="of-space"></div>
       ${block ? `<div class="no of-block">${block}</div>` : `<button class="btn big" data-accept="${id}">${o.kind === 'tender' ? 'Wählen' : 'Annehmen'}</button>`}
     </div>`;
   }).join('');
-  return `<h1 class="${o.kind === 'tender' ? '' : 'blue'}">${o.title.toUpperCase()}</h1><div class="ev-info">${o.text}</div>
+  // ein Mensch meldet sich: Brief vom Verkehrsverbund oder Anruf vom Unternehmen
+  const first = OPERATORS[o.ops[0]];
+  const who = o.kind === 'tender' ? VERBUND() : contactOf(first.id, first.name);
+  let say = o.text;
+  if (o.kind === 'inquiry') say = `Grüß Gott, ${who.name} von ${first.name} hier! Wir würden gern bei Ihnen fahren – ${first.category}. Die Eckdaten sehen Sie unten. Kommen wir ins Geschäft?`;
+  else if (/Regional/.test(o.title)) say = 'Gratulation zur Bahnhofseröffnung! Wir vergeben jetzt den Regionalverkehr. Drei Bahnunternehmen haben sich beworben – Sie dürfen EINES auswählen.';
+  else if (/Güter/.test(o.title)) say = 'Auch der Güterverkehr wird neu vergeben. Güterzüge fahren bei Ihnen durch und zahlen für die Trasse. Wählen Sie EIN Unternehmen.';
+  else if (/Wende/.test(o.title)) say = 'Wir suchen einen Partner für Wendezüge: Diese Züge enden bei Ihnen und fahren wieder zurück. Wen nehmen Sie?';
+  const call = `<div class="call ${o.kind}"><div class="call-pic">${portrait(who.seed, 54)}</div>
+    <div class="call-body"><div class="call-who"><b>${who.name}</b><small>${who.role} · ${who.org}</small></div><div class="call-say">„${say}“</div></div>
+    <span class="call-tag">${o.kind === 'tender' ? '✉ BRIEF' : '☎ ANRUF'}</span></div>`;
+  return `<h1 class="${o.kind === 'tender' ? '' : 'blue'}">${o.title.toUpperCase()}</h1>${call}
     <div class="of-cards">${cards}</div>
     ${o.kind === 'inquiry' ? '<button class="btn" data-decline="1">Ablehnen</button>' : ''}`;
 }

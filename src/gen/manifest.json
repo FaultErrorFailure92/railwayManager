@@ -56,6 +56,118 @@
    "w": 32,
    "h": 32
   },
+  "ground_sand_0": {
+   "file": "ground_sand_0.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_1": {
+   "file": "ground_sand_1.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_2": {
+   "file": "ground_sand_2.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_3": {
+   "file": "ground_sand_3.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_4": {
+   "file": "ground_sand_4.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_5": {
+   "file": "ground_sand_5.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_6": {
+   "file": "ground_sand_6.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_sand_7": {
+   "file": "ground_sand_7.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_0": {
+   "file": "ground_snow_0.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_1": {
+   "file": "ground_snow_1.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_2": {
+   "file": "ground_snow_2.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_3": {
+   "file": "ground_snow_3.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_4": {
+   "file": "ground_snow_4.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_5": {
+   "file": "ground_snow_5.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_6": {
+   "file": "ground_snow_6.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
+  "ground_snow_7": {
+   "file": "ground_snow_7.png",
+   "ox": -16,
+   "oy": 0,
+   "w": 32,
+   "h": 32
+  },
   "track": {
    "file": "track.png",
    "ox": -22,
@@ -1302,6 +1414,62 @@
    "w": 14,
    "h": 10
   },
+  "bld_cactus0": {
+   "file": "bld_cactus0.png",
+   "ox": -8,
+   "oy": -15,
+   "w": 16,
+   "h": 26
+  },
+  "bld_cactus1": {
+   "file": "bld_cactus1.png",
+   "ox": -8,
+   "oy": -15,
+   "w": 16,
+   "h": 26
+  },
+  "bld_palm0": {
+   "file": "bld_palm0.png",
+   "ox": -12,
+   "oy": -19,
+   "w": 24,
+   "h": 30
+  },
+  "bld_palm1": {
+   "file": "bld_palm1.png",
+   "ox": -12,
+   "oy": -19,
+   "w": 24,
+   "h": 30
+  },
+  "bld_snowpine0": {
+   "file": "bld_snowpine0.png",
+   "ox": -9,
+   "oy": -17,
+   "w": 18,
+   "h": 28
+  },
+  "bld_snowpine1": {
+   "file": "bld_snowpine1.png",
+   "ox": -9,
+   "oy": -17,
+   "w": 18,
+   "h": 28
+  },
+  "bld_drybush": {
+   "file": "bld_drybush.png",
+   "ox": -7,
+   "oy": 0,
+   "w": 14,
+   "h": 10
+  },
+  "bld_xmas": {
+   "file": "bld_xmas.png",
+   "ox": -9,
+   "oy": -20,
+   "w": 18,
+   "h": 31
+  },
   "bld_cafe": {
    "file": "bld_cafe.png",
    "ox": -35,
@@ -1393,6 +1561,55 @@
    "w": 86,
    "h": 98
   },
+  "bld_adobeA": {
+   "file": "bld_adobeA.png",
+   "ox": -35,
+   "oy": -30,
+   "w": 70,
+   "h": 65
+  },
+  "bld_adobeB": {
+   "file": "bld_adobeB.png",
+   "ox": -35,
+   "oy": -27,
+   "w": 70,
+   "h": 62
+  },
+  "bld_adobeC": {
+   "file": "bld_adobeC.png",
+   "ox": -19,
+   "oy": -19,
+   "w": 38,
+   "h": 38
+  },
+  "bld_well": {
+   "file": "bld_well.png",
+   "ox": -19,
+   "oy": -21,
+   "w": 38,
+   "h": 40
+  },
+  "bld_tent": {
+   "file": "bld_tent.png",
+   "ox": -19,
+   "oy": -17,
+   "w": 38,
+   "h": 36
+  },
+  "bld_billboard": {
+   "file": "bld_billboard.png",
+   "ox": -19,
+   "oy": -25,
+   "w": 38,
+   "h": 44
+  },
+  "bld_mural": {
+   "file": "bld_mural.png",
+   "ox": -19,
+   "oy": -23,
+   "w": 38,
+   "h": 42
+  },
   "bld_vending": {
    "file": "bld_vending.png",
    "ox": -19,
@@ -1409,6 +1626,20 @@
   },
   "bld_clock": {
    "file": "bld_clock.png",
+   "ox": -19,
+   "oy": -29,
+   "w": 38,
+   "h": 44
+  },
+  "bld_lockers": {
+   "file": "bld_lockers.png",
+   "ox": -19,
+   "oy": -25,
+   "w": 38,
+   "h": 40
+  },
+  "bld_souvenir": {
+   "file": "bld_souvenir.png",
    "ox": -19,
    "oy": -29,
    "w": 38,
@@ -4245,6 +4476,12 @@
   "hare": {
    "file": "animal_hare.png",
    "w": 5,
+   "h": 5,
+   "frames": 3
+  },
+  "cat": {
+   "file": "animal_cat.png",
+   "w": 8,
    "h": 5,
    "frames": 3
   },

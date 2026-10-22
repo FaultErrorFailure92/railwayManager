@@ -5,8 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/png" href="favicon.png" />
   <title>Bahnhofsmanager</title>
+  <!-- Ladebildschirm: sofort da, bevor CSS und Spiel geladen sind -->
+  <style>
+    html, body { margin: 0; background: #1b2130; }
+    body:not(.ready) > :not(#loading) { visibility: hidden; }
+    #loading { position: fixed; inset: 0; z-index: 9999; background: #1b2130; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px; color: #ffd23c; font: 48px VT323, 'Courier New', monospace; letter-spacing: 4px; text-shadow: 4px 4px 0 #000; transition: opacity .4s; }
+    #loading img { width: 96px; image-rendering: pixelated; animation: ld-bob .6s steps(2) infinite; }
+    #loading .ld-bar { width: 280px; height: 16px; background: #2b2b30; box-shadow: 0 0 0 3px #000, inset 0 0 0 2px #4a4a50; }
+    #loading .ld-bar div { height: 100%; width: 0; background: #ffd23c; transition: width .2s; }
+    #loading small { font-size: 22px; color: #9aa3b5; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+    #loading.done { opacity: 0; pointer-events: none; }
+    @keyframes ld-bob { 50% { transform: translateY(-3px); } }
+  </style>
 </head>
 <body>
+  <div id="loading"><img src="assets/gen/ui/train.png" alt="" /><div>BAHNHOFSMANAGER</div><div class="ld-bar"><div id="ld-bar"></div></div><small id="ld-text">Gleise werden verlegt …</small></div>
   <div id="game"></div>
 
   <header id="topbar" class="panel">
@@ -46,6 +60,7 @@
       <div class="q-head"><img src="assets/gen/ui/quest.png" alt="" /><span id="q-count">AUFTRAG 1/6</span></div>
       <div class="q-title" id="q-title"></div>
       <div class="q-short" id="q-short"></div>
+      <ul class="q-checks" id="q-checks"></ul>
       <div class="q-bar" id="q-bar"></div>
       <div class="q-foot">
         <span class="q-num" id="q-num"></span>
@@ -84,7 +99,8 @@
         <div class="sc-stats"><span><img src="assets/gen/ui/flask.png" alt="" /><b id="rs-fp">0</b> Forschungspunkte</span><span><img src="assets/gen/ui/coin.png" alt="" /><b id="rs-money">0</b> €</span></div>
         <button class="btn" data-close="research">✕</button>
       </div>
-      <div class="sc-hint">Forschungspunkte gibt es für pünktliche Züge und erledigte Aufträge. Es läuft immer nur eine Forschung.</div>
+      <div class="sc-hint">Forschungspunkte gibt es für pünktliche Züge und erledigte Aufträge. In jedem Baum kann eine Forschung gleichzeitig laufen.</div>
+      <div class="rs-tabs" id="rs-tabs"></div>
       <div id="rs-tree"></div>
     </div>
   </div>
@@ -173,6 +189,23 @@
     </div>
   </div>
 
+  <div id="ng-ask" class="hidden">
+    <div class="panel dialog">
+      <div id="ng-q">
+        <h2>Neues Spiel</h2>
+        <p>Soll der aktuelle Spielstand vorher gespeichert werden?</p>
+        <div class="dc-btns"><button class="btn big" id="ng-yes">Ja</button><button class="btn big" id="ng-no">Nein</button><button class="btn" id="ng-cancel">Abbrechen</button></div>
+      </div>
+      <div id="ng-save" class="hidden">
+        <h2>Spielstand speichern</h2>
+        <p>Name für den Spielstand:</p>
+        <input id="ng-name" maxlength="40" />
+        <div class="ng-err" id="ng-err"></div>
+        <div class="dc-btns"><button class="btn big" id="ng-ok">Speichern &amp; weiter</button><button class="btn" id="ng-back">Abbrechen</button></div>
+      </div>
+    </div>
+  </div>
+
   <div id="menu" class="hidden">
     <div class="m-box">
       <img class="m-logo" src="assets/gen/ui/train.png" alt="" />
@@ -184,6 +217,7 @@
         <button class="btn big" id="m-load">Laden</button>
         <button class="btn big" id="m-help">Steuerung</button>
         <button class="btn big" id="m-news">Was ist neu?</button>
+        <button class="btn big hidden" id="m-demo">Demobahnhof (Dev)</button>
       </div>
       <div class="panel slots hidden" id="m-slots"></div>
       <div class="panel m-help hidden" id="m-helpbox">

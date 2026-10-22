@@ -98,6 +98,22 @@ for v in range(N_GROUND):
     save(f"ground_{v}", ground(v), -16, 0)
 manifest["groundVariants"] = N_GROUND
 
+# Themen-Böden (Wüste, Schnee): gleiche Muster, andere Farben, keine Blumen
+THEMES = {
+    "sand": dict(GRASS=[(222, 190, 120), (230, 200, 130), (210, 176, 108), (196, 162, 98), (240, 214, 150), (178, 146, 86)],
+                 GRID=(200, 166, 102), LIP_L=(214, 180, 112), LIP_R=(194, 160, 98),
+                 SOIL_L=[(186, 132, 80), (170, 118, 70), (198, 144, 88)], SOIL_R=[(156, 108, 64), (142, 98, 58), (168, 118, 70)]),
+    "snow": dict(GRASS=[(230, 236, 246), (240, 245, 252), (216, 224, 238), (196, 208, 226), (252, 254, 255), (180, 194, 216)],
+                 GRID=(200, 210, 228), LIP_L=(222, 230, 242), LIP_R=(198, 208, 226),
+                 SOIL_L=[(118, 96, 82), (104, 84, 72), (130, 108, 92)], SOIL_R=[(92, 74, 62), (82, 66, 56), (102, 84, 70)]),
+}
+_saved = dict(GRASS=GRASS, GRID=GRID, LIP_L=LIP_L, LIP_R=LIP_R, SOIL_L=SOIL_L, SOIL_R=SOIL_R)
+for theme, pal in THEMES.items():
+    globals().update(pal)
+    for v in range(N_GROUND):
+        save(f"ground_{theme}_{v}", ground(v if v < 5 else v % 5), -16, 0)
+globals().update(_saved)
+
 # ---------------------------------------------------------------- Gleise
 # Anker = Welt (0,0) des jeweiligen Rechtecks.
 img, (sx, sy) = tg.render([(tg.main_path(8, 0, 16), True)], (0, 0, 16, 16))
@@ -478,6 +494,88 @@ for i in range(3):
 for i in range(2):
     NATURE[f"bld_pine{i}"] = bg.tree_pine(20 + i)
 NATURE["bld_bush0"] = bg.bush(30)
+
+
+def _cactus(seed):
+    rng = np.random.default_rng(seed)
+    a = np.zeros((26, 16, 4), np.uint8)
+    for y in range(23, 26):
+        for x in range(2, 14):
+            if ((x - 8) / 6) ** 2 + ((y - 24) / 1.6) ** 2 <= 1:
+                a[y, x] = (120, 96, 50, 110)
+    cols = [(52, 110, 60), (74, 138, 72), (104, 164, 88)]
+    def col(x0, y0, y1, w=3):
+        for y in range(y0, y1):
+            for x in range(x0, x0 + w):
+                a[y, x] = cols[0 if x == x0 + w - 1 else 2 if x == x0 else 1] + (255,)
+    col(6, 2, 24, 4)
+    arm = int(rng.integers(8, 12))
+    col(2, arm - 5, arm + 1); a[arm, 2:6] = cols[1] + (255,); a[arm + 1, 2:6] = cols[0] + (255,)
+    arm2 = int(rng.integers(6, 10))
+    col(11, arm2 - 4, arm2 + 1); a[arm2, 9:13] = cols[1] + (255,); a[arm2 + 1, 9:13] = cols[0] + (255,)
+    for _ in range(10):
+        x, y = int(rng.integers(2, 14)), int(rng.integers(2, 22))
+        if a[y, x, 3] == 255:
+            a[y, x] = (226, 226, 190, 255)
+    return Image.fromarray(bg._outline(a, (30, 60, 36))), -8, -23
+
+
+def _palm(seed):
+    rng = np.random.default_rng(seed)
+    a = np.zeros((30, 24, 4), np.uint8)
+    for y in range(26, 30):
+        for x in range(4, 20):
+            if ((x - 12) / 8) ** 2 + ((y - 27.5) / 2) ** 2 <= 1:
+                a[y, x] = (120, 96, 50, 110)
+    for y in range(8, 28):
+        x = 12 + int((28 - y) * 0.12)
+        c = (138, 100, 62) if y % 3 else (110, 78, 48)
+        a[y, x] = c + (255,); a[y, x + 1] = (100, 72, 44, 255)
+    cx, cy = 14, 8
+    leaf = [(46, 112, 52), (70, 140, 64), (100, 168, 80)]
+    for ang in np.linspace(0, 2 * np.pi, 7, endpoint=False) + rng.random() * 0.4:
+        for r in range(1, 10):
+            x = int(round(cx + np.cos(ang) * r))
+            y = int(round(cy + np.sin(ang) * r * 0.55 + (r / 9) ** 2 * 4))
+            for dy in (0, 1):
+                if 0 <= x < 24 and 0 <= y + dy < 30:
+                    a[y + dy, x] = leaf[2 if dy == 0 and np.sin(ang) < 0 else 1 if dy == 0 else 0] + (255,)
+    a[cy:cy + 2, cx - 1:cx + 1] = (120, 86, 40, 255)
+    return Image.fromarray(bg._outline(a, (24, 56, 30))), -12, -27
+
+
+def _snow_pine(seed):
+    img, ox, oy = bg.tree_pine(seed)
+    a = np.array(img)
+    rng = np.random.default_rng(seed + 7)
+    h, w = a.shape[:2]
+    for x in range(w):
+        for y in range(h - 6):
+            if a[y, x, 3] == 255 and tuple(a[y, x, :3]) not in ((110, 74, 46), (84, 56, 36)):
+                # Schnee auf den Oberkanten der Äste
+                above = y == 0 or a[y - 1, x, 3] < 255 or tuple(a[y - 1, x, :3]) == (16, 44, 32)
+                if above or rng.random() < 0.18:
+                    a[y, x] = (238, 244, 252, 255) if above else (206, 218, 236, 255)
+    return Image.fromarray(a), ox, oy
+
+
+def _dry_bush(seed):
+    rng = np.random.default_rng(seed)
+    a = np.zeros((10, 14, 4), np.uint8)
+    for _ in range(26):
+        x0, y0 = 7, 9
+        ang = rng.random() * np.pi
+        for r in range(int(rng.integers(3, 7))):
+            x = int(round(x0 + np.cos(ang) * r * 1.2)); y = int(round(y0 - np.sin(ang) * r))
+            if 0 <= x < 14 and 0 <= y < 10:
+                a[y, x] = ((150, 120, 70) if r % 2 else (120, 96, 56)) + (255,)
+    return Image.fromarray(a), -7, -8
+
+
+NATURE2 = {"bld_cactus0": _cactus(40), "bld_cactus1": _cactus(41), "bld_palm0": _palm(42), "bld_palm1": _palm(43),
+           "bld_snowpine0": _snow_pine(20), "bld_snowpine1": _snow_pine(21), "bld_drybush": _dry_bush(44)}
+NATURE.update(NATURE2)
+NATURE["bld_xmas"] = bg.xmas()
 for name, (img, ox, oy) in NATURE.items():
     save(name, img, ox, oy + 8)  # Anker = Tile-Ecke, Baum steht in der Tile-Mitte (Bildschirm +8)
 
@@ -488,10 +586,16 @@ P5 = {
     "bld_fountain": bg.fountain(), "bld_flowers": bg.flowers(5), "bld_statue": bg.statue(),
     "bld_wc": bg.wc(), "bld_inn": bg.inn(), "bld_streetlamp": bg.lamp(),
     "bld_sawmill": bg.sawmill(), "bld_mine": bg.mine(),
+    "bld_adobeA": bg.adobe(2, 2, (214, 170, 116), H=15, tower=True, seed=1),
+    "bld_adobeB": bg.adobe(2, 2, (226, 196, 150), H=13, dome=True, seed=2),
+    "bld_adobeC": bg.adobe(1, 1, (204, 156, 104), H=12, seed=3),
+    "bld_well": bg.well(), "bld_tent": bg.tent(),
+    "bld_billboard": bg.billboard(), "bld_mural": bg.mural(),
 }
 for name, (img, ox, oy) in P5.items():
     save(name, img, ox, oy)
-for name, (img, ox, oy) in {"bld_vending": bg.vending(), "bld_lamp": bg.lamp(), "bld_clock": bg.platform_clock()}.items():
+for name, (img, ox, oy) in {"bld_vending": bg.vending(), "bld_lamp": bg.lamp(), "bld_clock": bg.platform_clock(),
+                            "bld_lockers": bg.lockers(), "bld_souvenir": bg.souvenir()}.items():
     save(name, img, ox, oy - 4)   # stehen auf dem Bahnsteig
 for m in range(16):
     img, ox, oy = bg.road(m)
@@ -589,7 +693,9 @@ for n in ("cursor", "flag", "shovel", "house"):
     ic = Image.open(os.path.join(OUT, "ui", n + ".png"))
     icon_save("tool_" + n, ic.resize((36, 36), Image.NEAREST))
 for name, d in (("bld_cafe", (2, 2)), ("bld_parking", (3, 2)), ("bld_bus", (3, 2)), ("bld_station2", (3, 2)), ("bld_station3", (3, 2)),
-                ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1)), ("bld_wc", (1, 1)), ("bld_inn", (2, 2)), ("bld_streetlamp", (1, 1)), ("bld_sawmill", (3, 2)), ("bld_mine", (3, 2))):
+                ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1)), ("bld_wc", (1, 1)), ("bld_inn", (2, 2)), ("bld_streetlamp", (1, 1)), ("bld_sawmill", (3, 2)), ("bld_mine", (3, 2)),
+                ("bld_adobeA", (2, 2)), ("bld_adobeB", (2, 2)), ("bld_adobeC", (1, 1)), ("bld_well", (1, 1)), ("bld_tent", (1, 1)),
+                ("bld_billboard", (1, 1)), ("bld_mural", (1, 1))):
     icon_save(name, compose([(name, 0, 0)], [(x, y) for x in range(d[0]) for y in range(d[1])]))
 for name in ("bld_vending", "bld_lamp", "bld_clock"):
     icon_save(name, compose([("platform", 0, 0), (name, 0, 0)], T1))
@@ -641,6 +747,17 @@ for name, w in (("bld_remise", 5), ("bld_workshop", 5), ("bld_wash", 3), ("bld_h
 # Manifest liegt in src/gen, damit es direkt importiert werden kann
 MAN = os.path.join(ROOT, "src", "gen")
 os.makedirs(MAN, exist_ok=True)
+# ---------------------------------------------------------------- Forschungs-Symbole und Bahnhofskatze
+for k in ("whistle", "estw", "haggle", "specials"):
+    icon_save("ri_" + k, bg.ri_icon(k))
+for name in ("bld_lockers", "bld_souvenir"):
+    icon_save(name, compose([("platform", 0, 0), (name, 0, 0)], T1))
+_cat = Image.open(os.path.join(OUT, "animal_cat.png"))
+_cw = manifest["animals"]["cat"]["w"]
+icon_save("bld_cat", _cat.crop((0, 0, _cw, _cat.height)).resize((_cw * 4, _cat.height * 4), Image.NEAREST))
+
 with open(os.path.join(MAN, "manifest.json"), "w") as f:
     json.dump(manifest, f, indent=1)
 print(len(manifest["sprites"]), "Sprites erzeugt")
+
+

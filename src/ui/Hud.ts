@@ -8,11 +8,14 @@ import { Sound } from '../render/Sound';
 import { MISSIONS, ToolId } from '../game/Missions';
 import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
 import { OPERATORS } from '../sim/Operators';
-import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research';
+import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
-import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
-import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
+import { author, newsPhoto, paperName } from './press';
+import { BOARD } from '../game/Board';
+import { portrait } from './portrait';
+import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
+import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { GameScene, UiState } from '../render/GameScene';
 import { VARIANTS, typing, variantOf } from '../render/GameScene';
@@ -21,6 +24,13 @@ const $ = (id: string) => document.getElementById(id)!;
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const SPEEDS = [1, 2, 4, 8];
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
+const PHOTO_CAPTION: Record<string, string> = {
+  fest: 'Schon am Vormittag herrschte reges Treiben am Festplatz.',
+  sponsor: 'Der Bahnhofsvorplatz – bald Schauplatz eines großen Festes?',
+  fans: 'Archivbild: Fans beim letzten Auswärtsspiel.',
+  'vandal-trains': 'Kein Kunstwerk: besprühte Garnitur vor der Waschanlage.',
+  'vandal-station': 'Spuren der Verwüstung am Bahnsteig.',
+};
 
 interface ToolDef { id: ToolId; label: string; key: string; icon?: string; cost?: number; help: string }
 
@@ -48,7 +58,6 @@ const STATE_TEXT: Record<string, string> = {
 
 export class Hud {
   private ribbonUntil = 0;
-  private newGameArmed = 0;
   private savedFlash = 0;
   private fresh = new Set<ToolId>();
   private lastVariantsKey = '';
@@ -71,6 +80,23 @@ export class Hud {
     $('go-load').onclick = () => this.toggleSlots('go-slots');
     $('go-new').onclick = () => { $('gameover').classList.add('hidden'); this.openMapPick(); };
     $('mp-close').onclick = () => $('mappick').classList.add('hidden');
+    // Kartenauswahl per Pfeiltasten wie in alten Spielen
+    $('mp-cards').addEventListener('mouseover', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-map]') as HTMLElement | null;
+      if (b) { $('mp-cards').querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); }
+    });
+    $('mappick').addEventListener('keydown', (e) => {
+      const list = Array.from($('mp-cards').querySelectorAll<HTMLElement>('[data-map]'));
+      const i = list.findIndex((x) => x.classList.contains('sel'));
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length];
+        list.forEach((x) => x.classList.remove('sel'));
+        n.classList.add('sel'); n.focus(); n.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' && i >= 0) { e.preventDefault(); this.startOnMap(list[i].dataset.map!); }
+      else if (e.key === 'Escape') $('mappick').classList.add('hidden');
+      e.stopPropagation();
+    });
     $('mp-cards').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-map]') as HTMLElement | null;
       if (b) this.startOnMap(b.dataset.map!);
@@ -116,6 +142,20 @@ export class Hud {
     // Hauptmenü
     $('m-continue').onclick = () => this.closeMenu();
     $('m-new').onclick = () => this.newGame();
+    $('ng-yes').onclick = () => this.saveDialog();
+    $('ng-no').onclick = () => { $('ng-ask').classList.add('hidden'); this.openMapPick(); };
+    $('ng-cancel').onclick = () => $('ng-ask').classList.add('hidden');
+    $('ng-back').onclick = () => $('ng-ask').classList.add('hidden');
+    $('ng-ok').onclick = () => this.saveAndNew();
+    $('ng-name').addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') this.saveAndNew(); e.stopPropagation(); });
+    if (import.meta.env.DEV) {
+      $('m-demo').classList.remove('hidden');
+      $('m-demo').onclick = () => {
+        saveState.disabled = true;
+        try { sessionStorage.setItem('rm_new', '1'); sessionStorage.setItem('rm_map', 'donau'); sessionStorage.setItem('rm_demo', '1'); } catch { /* egal */ }
+        location.reload();
+      };
+    }
     $('m-help').onclick = () => $('m-helpbox').classList.toggle('hidden');
 
     $('ev-ok').onclick = () => this.closeEvent();
@@ -142,7 +182,13 @@ export class Hud {
     $('btn-research').onclick = () => this.openScreen('research');
     $('btn-contracts').onclick = () => this.openScreen('contracts');
     $('btn-stats').onclick = () => this.openScreen('stats');
-    const soundLabel = () => { $('btn-sound').textContent = Sound.muted ? 'Stumm' : 'Ton'; };
+    // Pixel-Lautsprecher: Wellen = an, Kreuz = stumm
+    const soundLabel = () => {
+      const body = '<path d="M1 4h2v3H1zM3 4h1V3h1V2h1v7H5V8H4V7H3z"/>';
+      const extra = Sound.muted ? '<path d="M8 4h1v1H8zM10 4h1v1h-1zM9 5h1v1H9zM8 6h1v1H8zM10 6h1v1h-1z"/>' : '<path d="M8 4h1v3H8zM10 3h1v5h-1zM9 2h1v1H9zM9 8h1v1H9z"/>';
+      $('btn-sound').innerHTML = `<svg viewBox="0 0 12 11" width="24" height="22" shape-rendering="crispEdges" fill="currentColor">${body}${extra}</svg>`;
+      $('btn-sound').title = Sound.muted ? 'Ton ist aus – klicken zum Einschalten' : 'Ton ist an – klicken zum Ausschalten';
+    };
     soundLabel();
     $('btn-sound').onclick = () => { Sound.toggle(); soundLabel(); };
     $('btn-timetable').onclick = () => this.openScreen('timetable');
@@ -164,6 +210,10 @@ export class Hud {
       tip.style.left = `${Math.max(4, left)}px`;
       tip.style.top = `${Math.max(4, Math.min(window.innerHeight - tip.offsetHeight - 4, r.top))}px`;
     });
+    $('rs-tabs').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-tree]') as HTMLElement | null;
+      if (b) { this.rsTree = b.dataset.tree as ResearchTree; $('rs-tip').style.display = 'none'; this.renderScreen(true); }
+    });
     $('rs-tree').addEventListener('mouseleave', () => { $('rs-tip').style.display = 'none'; this.rsTipId = undefined; });
     $('rs-tree').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-research]') as HTMLElement | null;
@@ -177,6 +227,8 @@ export class Hud {
         const step = Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 5 : 1);
         this.g.setPrice(op, cls, this.g.contracts[op].price[cls] + step);
       }
+      const cr = t.closest('[data-crew]') as HTMLElement | null;
+      if (cr) this.g.setCrew(this.g.crew + Number(cr.dataset.crew));
       const tk = t.closest('[data-takt]') as HTMLElement | null;
       if (tk) this.g.stepTakt(tk.dataset.takt as keyof typeof OPERATORS, Number(tk.dataset.d));
       const o = t.closest('[data-offer]') as HTMLElement | null;
@@ -262,7 +314,6 @@ export class Hud {
     $('m-continue').style.display = running ? '' : 'none';
     $('m-new').textContent = running ? 'Neues Spiel' : 'Spiel starten';
     $('m-sub').textContent = running ? `${this.g.company || ''} · ${currentMap().name}` : '';
-    this.newGameArmed = 0;
     $('menu').classList.remove('hidden');
   }
 
@@ -275,18 +326,40 @@ export class Hud {
 
   private newGame() {
     const running = this.hadSave || !!this.g.company;
-    if (!running || performance.now() < this.newGameArmed) this.openMapPick();
-    else this.newGameArmed = performance.now() + 5000;
+    if (!running) { this.openMapPick(); return; }
+    // laufendes Spiel: vorher speichern?
+    $('ng-ask').classList.remove('hidden');
+    $('ng-save').classList.add('hidden');
+    $('ng-q').classList.remove('hidden');
+  }
+
+  private saveDialog() {
+    $('ng-q').classList.add('hidden');
+    $('ng-save').classList.remove('hidden');
+    const inp = $('ng-name') as HTMLInputElement;
+    inp.value = `${this.g.company || 'Spiel'} · Tag ${Math.floor(this.g.sim.time / 86400) + 1}, ${fmtTime(this.g.sim.time)}`;
+    setTimeout(() => { inp.focus(); inp.select(); }, 50);
+  }
+
+  private saveAndNew() {
+    const s = this.g.save();
+    const label = ($('ng-name') as HTMLInputElement).value.trim() || this.g.company || 'Spiel';
+    if (!writeSlot(label, false, s)) { $('ng-err').textContent = 'Speichern fehlgeschlagen – Speicher voll?'; return; }
+    $('ng-ask').classList.add('hidden');
+    this.openMapPick();
   }
 
   /** Kartenauswahl vor einem neuen Spiel */
   private openMapPick() {
     const diff: Record<string, string> = { leicht: '★', mittel: '★★', schwer: '★★★' };
-    $('mp-cards').innerHTML = MAPS.map((m) => `<button class="mp-card" data-map="${m.id}" style="--tint:#${m.tint.toString(16).padStart(6, '0')}">
-      <div class="mp-prev">${this.mapPreview(m)}</div>
-      <b>${m.name}</b><span class="mp-theme">${m.theme} · Schwierigkeit ${diff[m.difficulty]}</span>
-      <small>${m.info}</small><span class="mp-money">Startkapital ${eur(m.startMoney)} €</span></button>`).join('');
+    const bg = (m: (typeof MAPS)[number]) => m.ground === 'sand' ? '#d8b878' : m.ground === 'snow' ? '#e4ebf4'
+      : `color-mix(in srgb, #6c9a3c 80%, #${m.tint.toString(16).padStart(6, '0')})`;
+    $('mp-cards').innerHTML = MAPS.map((m, i) => `<button class="mp-card${i === 0 ? ' sel' : ''}" data-map="${m.id}">
+      <span class="mp-arrow">▶</span><div class="mp-prev" style="background:${bg(m)}"><img src="assets/maps/${m.id}.png" alt="" onerror="this.remove()" />${this.mapPreview(m)}</div>
+      <div class="mp-txt"><b>${m.name}</b><span class="mp-theme">${m.theme} · Schwierigkeit ${diff[m.difficulty]}</span><small>${m.info}</small></div>
+      <span class="mp-money">Start<br>${eur(m.startMoney)} €</span></button>`).join('');
     $('mappick').classList.remove('hidden');
+    ($('mp-cards').firstElementChild as HTMLElement).focus();
   }
 
   /** kleine Vorschau: Fels, Wasser, Wald grob als Pixel */
@@ -356,6 +429,7 @@ export class Hud {
     if (this.naming.kind === 'company') {
       if (first && !$('tut-row').classList.contains('hidden') && !($('tut-check') as HTMLInputElement).checked) this.g.skipTutorial();
       this.g.company = v || 'Meine Bahn AG';
+      if (first) this.g.welcome();
     }
     else this.g.stationName(this.naming.id, v || this.g.suggestStationName());
     ($('name-input') as HTMLInputElement).blur();
@@ -373,8 +447,17 @@ export class Hud {
   private pausedBeforeScreen = false;
   private screenKey = '';
 
+  /** gerade gezeigter Forschungsbaum */
+  private rsTree: ResearchTree = 'ops';
+
   private openScreen(name: 'research' | 'contracts' | 'timetable' | 'stats') {
     if (name === 'research' && !this.g.unlocked.has('research')) return;
+    // Auftrag will eine Forschung: gleich den passenden Baum zeigen
+    if (name === 'research') {
+      const mt = this.g.missionTool();
+      const q = mt?.tool === 'research' && mt.variant ? RESEARCH_BY_ID[mt.variant as ResearchId] : undefined;
+      if (q && !this.g.researched(q.id)) this.rsTree = q.tree;
+    }
     if (this.screen === name) { this.closeScreen(); return; }
     if (!this.screen) { this.pausedBeforeScreen = this.g.paused; this.g.paused = true; }
     else $(this.screen).classList.add('hidden');
@@ -397,13 +480,14 @@ export class Hud {
     if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); return; }
     const mt = this.g.missionTool();
     const quest = mt?.tool === 'research' ? mt.variant : undefined;
-    const key = this.screen === 'research' ? researchKey(this.g, quest) : this.screen === 'stats' ? statsKey(this.g) : contractsKey(this.g);
+    const key = this.screen === 'research' ? researchKey(this.g, this.rsTree, quest) : this.screen === 'stats' ? statsKey(this.g) : contractsKey(this.g);
     if (!force && key === this.screenKey) return;
     this.screenKey = key;
     if (this.screen === 'research') {
       $('rs-fp').textContent = String(this.g.research.points);
       $('rs-money').textContent = eur(this.g.money);
-      $('rs-tree').innerHTML = researchHtml(this.g, quest);
+      $('rs-tabs').innerHTML = researchTabsHtml(this.g, this.rsTree, quest);
+      $('rs-tree').innerHTML = researchHtml(this.g, this.rsTree, quest);
     } else if (this.screen === 'stats') $('st-body').innerHTML = statsHtml(this.g);
     else $('ct-table').innerHTML = contractsHtml(this.g);
   }
@@ -560,10 +644,11 @@ export class Hud {
       const b = document.createElement('button');
       const need = this.ui.tool === 'facility' ? FACILITY_RESEARCH[item.key]
         : this.ui.tool === 'switch' ? (item.key.endsWith('_fast') ? 'fastSwitch' : item.key.startsWith('xover') ? 'double' : undefined)
-        : this.ui.tool === 'signal' && item.key.startsWith('S') ? 'shunt' : undefined;
+        : this.ui.tool === 'signal' && item.key.startsWith('S') ? 'shunt'
+        : this.ui.tool === 'building' ? BUILDING_RESEARCH[item.key] as ResearchId | undefined : undefined;
       const lockedV = !!need && !this.g.researched(need);
       b.className = `slot${i === sel ? ' on' : ''}${item.key === questVariant && i !== sel ? ' quest' : ''}${lockedV ? ' locked' : ''}`;
-      b.title = item.label;
+      b.title = lockedV ? `${item.label} – erst erforschen: ${RESEARCH_BY_ID[need as ResearchId].name}` : item.label;
       b.innerHTML = `<img src="${ICON(item.icon)}" alt="" />${item.cost ? `<span class="cost">${item.cost}</span>` : ''}`;
       b.onclick = () => { this.ui.variant[this.ui.tool] = i; };
       box.appendChild(b);
@@ -705,10 +790,10 @@ export class Hud {
       this.maintVersion = g.version; this.maintAt = now + 5000;
       const m = g.maintenance();
       const zins = g.interest;
-      const dc = m.total * (m.vandal ? 2 : 1) + zins;
+      const dc = (m.total - m.Personal) * (m.vandal ? 2 : 1) + m.Personal + zins;
       $('daycost').textContent = dc ? `−${eur(dc)}/Tag` : '0/Tag';
       const bal = g.news.lastBalance;
-      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}${Number.isFinite(bal) ? ` · gestern: ${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €` : ''}`;
+      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)}${m.Personal ? `, Personal ${eur(m.Personal)}` : ''})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}${Number.isFinite(bal) ? ` · gestern: ${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €` : ''}`;
     }
     $('punct').textContent = g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–';
     $('pax').textContent = g.stats.passengers.toLocaleString('de-AT');
@@ -723,8 +808,9 @@ export class Hud {
       b.classList.toggle('on', g.paused ? s === 0 : s === g.speed);
     });
     $('fp').textContent = String(g.research.points);
-    const rc = g.research.current;
-    $('rs-mini').style.width = rc ? `${(100 - (rc.left / (RESEARCH_BY_ID[rc.id].hours * 3600)) * 100).toFixed(0)}%` : '0';
+    // Mini-Balken: weiteste laufende Forschung; Punkt, wenn ein Baum frei ist
+    const prog = TREES.map((t) => g.runningIn(t.id)).filter(Boolean).map((rc) => 100 - (rc!.left / (RESEARCH_BY_ID[rc!.id].hours * 3600)) * 100);
+    $('rs-mini').style.width = prog.length ? `${Math.max(...prog).toFixed(0)}%` : '0';
     $('btn-research').classList.toggle('locked', !g.unlocked.has('research'));
     const mtq = g.missionTool();
     $('btn-research').classList.toggle('quest', mtq?.tool === 'research' && this.screen !== 'research');
@@ -735,11 +821,6 @@ export class Hud {
     $('ct-warn').textContent = warn ? '!' : '';
     this.renderScreen();
     $('btn-save').textContent = now < this.savedFlash ? 'Gespeichert ✓' : 'Speichern';
-    if (this.ui.menu) {
-      const armed = now < this.newGameArmed;
-      if (this.hadSave || g.company) $('m-new').textContent = armed ? 'Wirklich? Spielstand weg!' : 'Neues Spiel';
-      $('m-new').classList.toggle('warn', armed);
-    }
 
     // Baumenü
     const mt = g.missionTool();
@@ -772,8 +853,8 @@ export class Hud {
     const locked = !g.unlocked.has(t.id);
     let html = `<b>${t.label}</b>${v ? ` · ${v.label}` : ''}`;
     if (v?.info && v.info !== 'Deko') html += ` <small>(${v.info})</small>`;
-    const viaResearch: Partial<Record<ToolId, string>> = { wire: 'Oberleitung', access: 'Bahnsteigzugänge', facility: 'Abstellgleise', road: 'Straßenanbindung' };
-    if (locked) html += ` <span class="no">· ${viaResearch[t.id] ? `im Forschungsbaum: ${viaResearch[t.id]}` : 'kommt mit einem späteren Auftrag'}</span>`;
+    const viaResearch: Partial<Record<ToolId, string>> = { wire: RESEARCH_BY_ID.wire.name, access: RESEARCH_BY_ID.access.name, facility: RESEARCH_BY_ID.siding.name, road: RESEARCH_BY_ID.road.name };
+    if (locked) html += ` <span class="no">· ${viaResearch[t.id] ? `erst erforschen: „${viaResearch[t.id]}“` : 'kommt mit einem späteren Auftrag'}</span>`;
     else if (!hovered && this.ui.message) {
       const bad = !/€$/.test(this.ui.message);
       html += ` · <span class="${bad ? 'no' : 'ok'}">${this.ui.message}</span>`;
@@ -787,6 +868,15 @@ export class Hud {
     $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : 'ALLE AUFTRÄGE ERLEDIGT';
     $('q-title').textContent = q.title;
     $('q-short').textContent = q.short;
+    // Checkliste: Teilschritte abhaken
+    const checks = 'checks' in q ? q.checks : undefined;
+    const ck = checks ? checks.map((c) => `${+c.done}${c.label}`).join('|') : '';
+    if ($('q-checks').dataset.k !== ck) {
+      $('q-checks').dataset.k = ck;
+      const next = checks?.findIndex((c) => !c.done) ?? -1;
+      $('q-checks').innerHTML = (checks ?? []).map((c, i) => `<li class="${c.done ? 'ok' : i === next ? 'next' : ''}"><span class="q-box">${c.done ? '✓' : ''}</span>${c.label}</li>`).join('');
+    }
+    $('q-short').classList.toggle('hidden', !!checks?.length);
     const [n, total] = q.text.split('/').map(Number);
     const segs = total && total <= 10 ? total : 10;
     const filled = total && total <= 10 ? n : Math.round(q.value * 10);
@@ -875,12 +965,20 @@ export class Hud {
       }
       if (ev.type === 'decision') {
         const day = Math.floor(g.sim.time / 86400) + 1;
-        this.showEvent(`<div class="news"><div class="nw-head">DONAU-KURIER</div><div class="nw-date">Tag ${day} · ${fmtTime(g.sim.time)} Uhr · Anfrage</div>
-          <div class="nw-title">${ev.title}</div><div class="nw-text">${ev.text}</div></div>
+        this.showEvent(`${this.paper(day, 'Anfrage', ev.title, ev.text, ev.tag)}
           <div class="dc-btns"><button class="btn big" data-decide="1">${ev.yes}</button><button class="btn" data-decide="0">${ev.no}</button></div>`, false);
         continue;
       }
       if (ev.type === 'goal') { Sound.coin(); continue; }
+      if (ev.type === 'letter') {
+        const day = Math.floor(g.sim.time / 86400) + 1;
+        const from = ev.from ?? BOARD(g.company || 'Bahngesellschaft');
+        this.showEvent(`<div class="letter ${ev.mood}${ev.from ? ' ext' : ''}"><div class="lt-head"><b>${from.org}</b><span>${ev.from ? from.role : 'Der Vorstand'} · Tag ${day}</span></div>
+          <div class="lt-title">${ev.title}</div><div class="lt-text">${/^<p>Sehr/.test(ev.text) ? '' : '<p>Sehr geehrte Betriebsleitung,</p>'}${ev.text}</div>
+          ${ev.bonus ? `<div class="lt-bonus"><img src="assets/gen/ui/coin.png" alt="" />+${eur(ev.bonus)} €</div>` : ''}
+          <div class="lt-sign">${portrait(from.seed, 40)}<div><i>${ev.mood === 'bad' ? 'Mit ernsten Grüßen' : 'Mit freundlichen Grüßen'}</i><b>${from.name}</b><small>${from.role}</small></div></div></div>`, false);
+        continue;
+      }
       if (ev.type === 'achievement') {
         const a = ACHIEVEMENTS.find((x) => x.id === ev.id);
         Sound.coin();
@@ -890,8 +988,7 @@ export class Hud {
       }
       if (ev.type === 'news') {
         const day = Math.floor(g.sim.time / 86400) + 1;
-        this.showEvent(`<div class="news"><div class="nw-head">DONAU-KURIER</div><div class="nw-date">Tag ${day} · ${fmtTime(g.sim.time)} Uhr · Lokales</div>
-          <div class="nw-title">${ev.title}</div><div class="nw-text">${ev.text}</div></div>`, false);
+        this.showEvent(this.paper(day, 'Lokales', ev.title, ev.text, ev.tag), false);
         continue;
       }
       if (ev.type === 'contract') {
@@ -914,6 +1011,13 @@ export class Hud {
         ${next ? `<div class="ev-next"><span>Nächster Auftrag</span><b>${next.title}</b><small>${next.short}</small></div>`
           : '<div class="ev-next"><b>Alle Aufträge erledigt!</b><small>Freies Spiel – bau weiter, so groß du willst</small></div>'}`);
     }
+  }
+
+  /** Zeitungsseite mit Kopf, Redakteur und Foto */
+  private paper(day: number, section: string, title: string, text: string, tag: string) {
+    return `<div class="news"><div class="nw-head">${paperName()}</div><div class="nw-date">Tag ${day} · ${fmtTime(this.g.sim.time)} Uhr · ${section}</div>
+      <div class="nw-title">${title}</div>${newsPhoto(tag, PHOTO_CAPTION[tag] ?? title)}<div class="nw-text">${text}</div>
+      <div class="nw-author">von ${author()}</div></div>`;
   }
 
   private row(id: number, color: string, num: string, dir: string, status: string, late: boolean) {

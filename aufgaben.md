@@ -79,10 +79,26 @@
 
 ===
 - [x] unterschiedliche Maps mit unterschiedlichen Terrains und Bahnunternehmen, gerne auch Themed *(Kartenauswahl: Donautal, Alpenbahn, Pannonische Ebene, Industrierevier)*
-- Demobahnhof für lokale Entwicklung
-- Bilder in den Zeitungsartikeln
-- Nimm da gerne auch Autoren mit Lustigen Namen hinein
-- Englische Version
-- bei neues Spiel lieber fragen, ob das alte gespeichert werde soll -> ja/Nein, bei Ja den Speicher Dialog öffnen
-- Begrüssungstext vom Bahnvorstand, wenn man ein neues Spiel anfängt. der Vorstand kann auch hin und wieder briefe schicken oder sich melden, wenn irgendwas gut oder schlecht läuft
 
+===
+- [x] Demobahnhof für lokale Entwicklung *(nur bei npm run dev: Menü → „Demobahnhof (Dev)“)*
+- [x] Bilder in den Zeitungsartikeln *(Pixel-Fotos mit Bildunterschrift, eigene Zeitung je Karte)*
+- [x] Nimm da gerne auch Autoren mit Lustigen Namen hinein *(z. B. Gerti Gleisbett, Herta Hemmschuh)*
+- Englische Version
+- [x] bei neues Spiel lieber fragen, ob das alte gespeichert werde soll -> ja/Nein, bei Ja den Speicher Dialog öffnen
+- [x] Begrüssungstext vom Bahnvorstand, wenn man ein neues Spiel anfängt. der Vorstand kann auch hin und wieder briefe schicken oder sich melden, wenn irgendwas gut oder schlecht läuft *(Hofrat Dr. Ferdinand Fahrplan; Lob teils mit Prämie)*
+- [x] mehrere Themes - Wüste oder Schneelandschaft fänd ich noch gut *(Wüstenbahn + Schneeland mit eigenem Boden, Kakteen/Palmen, verschneiten Tannen)*
+- [x] Themeauswahl am Anfang mit vertikaler auswahl. dann passt es besser zu unserem Game-Theme *(Liste, Pfeiltasten + Enter)*
+- [x] README aktualisieren
+- [x] Icon für Ton statt Text
+- [x] Loading Bildschirm, dass man das HTML nicht durchblitzen sieht
+- [x] Wählen Button bei den Verträgen sollte immer auf der gleichen Höhe sein
+- [x] Bei neuen Verträgen oder KRediten mach das ganze etwas Menschlicher, in dem Sich hier ein Mensch oder zumindest eine FIrma mit einem Brief oder einem Telefonat meldet und dir überbringt, was es auszusuchen gibt. einfach ein bisschen Game-hafter *(Ausschreibung = Brief vom Verkehrsverbund, Anfrage = Anruf mit Ansprechperson, Bank schreibt bei Kredit)*
+- [x] Wenn es Störungen gibt, dann möchte ich auch gerne Instandhalter einstellen (und erforschen) können, die solche Störungen schneller beheben und seltener machen *(Forschung Instandhaltungsteam + Vorbeugende Wartung, einstellen unter Verträge)*
+
+- [x] beim Signal zeig mir bitte zwei drei felder an, wie die fahrtrichtung ist. du hast zwar die pfeile in der beschreibung, aber das ist manchmal irreführend *(gelbe Lauf-Pfeile auf dem Gleis)*
+- [x] Wenn es bei Aufgaben Checklisten gibt, dann stelle sie bitte so dar, dann wird auch klarer, was für die Quest zu erledigen ist. Hake die Punkte auch ab, wenn es erledigt wurde *(Checkliste im Auftragsfenster)*
+- [x] Waschanlagen können nur im Verschubbereich gebaut werden *(Forschung Waschanlage jetzt nach Verschubbereiche)*
+- [x] Arbeite mir ein viel detaillieretes Forschungssystem aus. und die Forschungen können ruhig anders heissen als das, was sie freischalten, gerne auch mit einem Augenzwinkern. ich stelle mir 2-3 Bäume vor, wo einer wirklich Betriebliche Features freischaltet, einer Deko und einer Vielleicht dinge, mit denen Sich zusätzlich geld verdienen lässt. aber da mach zuerst einen plan und zeig ihn mir, bevor du das umsetzt. *(3 Bäume: Stellwerk, Verschönerungsverein, Kaufmännische Abteilung; je Baum eine Forschung parallel)*
+- [x] Schönere Vorschaubilder für die Themes *(echte Ausschnitte aus der Karte, neu erzeugen mit tools/map_previews.py)*
+- [x] Bei Wüste nimm bitte auch noch andere Gebäudetiles dazu *(Lehmhäuser, Kuppelhaus, Lehmhütte, Ziehbrunnen, Zelt)*

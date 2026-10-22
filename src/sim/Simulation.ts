@@ -183,6 +183,8 @@ export class Simulation {
   vandalUntil = 0;
   /** bis dahin mehr Fahrgäste (Volksfest) */
   festUntil = 0;
+  /** Forschung „Pfiff-Akademie“: kürzere Haltezeiten */
+  dwellFactor = 1;
   /** Bahnhofs-Bewertung: Faktor auf die Fahrgastzahl */
   paxFactor = 1.1;
   private hasWash() {
@@ -1009,7 +1011,7 @@ export class Simulation {
     if (!job) return;
     if (job.k === 'stop') {
       t.state = 'dwell';
-      t.dwellLeft = job.board ? t.op.dwell + (t.passengers / 100) * 20 : 40 + (t.passengers / 100) * 15;
+      t.dwellLeft = (job.board ? t.op.dwell + (t.passengers / 100) * 20 : 40 + (t.passengers / 100) * 15) * this.dwellFactor;
       if (job.alight) {
         const nominal = (t.s - SPAWN_HEAD) / t.op.vmax + t.op.vmax / (2 * DEC) + 60;
         t.arrDelay = (this.time - (t.plannedSpawn + nominal)) / 60;

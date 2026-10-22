@@ -113,6 +113,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
+    // Ladebildschirm füttern
+    const bar = document.getElementById('ld-bar');
+    this.load.on('progress', (v: number) => { if (bar) bar.style.width = `${Math.round(v * 100)}%`; });
     for (const [name, s] of Object.entries(SPRITES)) this.load.image(name, `assets/gen/${s.file}`);
     const pm = manifest.people;
     this.load.spritesheet('people', `assets/gen/${pm.file}`, { frameWidth: pm.w, frameHeight: pm.h });
@@ -123,6 +126,13 @@ export class GameScene extends Phaser.Scene {
 
   create() {
     this.buildGround();
+    // Spiel steht: Ladebildschirm ausblenden
+    requestAnimationFrame(() => {
+      document.body.classList.add('ready');
+      const ld = document.getElementById('loading');
+      ld?.classList.add('done');
+      setTimeout(() => ld?.remove(), 500);
+    });
     this.overlay = this.add.graphics().setDepth(D_OVERLAY);
     this.hintGfx = this.add.graphics().setDepth(D_OVERLAY + 1);
     this.hintArrow = this.add.image(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
@@ -153,6 +163,7 @@ export class GameScene extends Phaser.Scene {
     const CHUNK = 2048;
     const n = (manifest as { groundVariants?: number }).groundVariants ?? 4;
     const s = SPRITES.ground_0;
+    const gk = currentMap().ground ? `ground_${currentMap().ground}_` : 'ground_';
     const water = (x: number, y: number) => !g.inside(x, y) || g.isWater(x, y);
     for (let cx = 0; cx < totalW; cx += CHUNK) {
       const w = Math.min(CHUNK, totalW - cx);
@@ -170,7 +181,7 @@ export class GameScene extends Phaser.Scene {
             const m = (water(x, y - 1) ? 0 : 1) | (water(x + 1, y) ? 0 : 2) | (water(x, y + 1) ? 0 : 4) | (water(x - 1, y) ? 0 : 8);
             frame = `water_${m}`;
           } else if (t === ROCK) frame = `rock_${hash % 4}`;
-          else frame = `ground_${hash % n}`;
+          else frame = `${gk}${hash % n}`;
           rt.batchDrawFrame(frame, undefined, px, p.y + s.oy);
         }
       }
@@ -716,6 +727,18 @@ export class GameScene extends Phaser.Scene {
       const c = a.cells[0];
       const [wx, wy] = a.variant === 'W' ? [c.x * TILE + 2, c.y * TILE + 1] : [(c.x + 1) * TILE - 2, c.y * TILE + 15];
       ghostImg(0, 'signal_green', wx, wy);
+      // Fahrtrichtung: gelbe Pfeile auf den nächsten Feldern, laufen in Fahrtrichtung
+      const d = a.variant.endsWith('W') ? -1 : 1;
+      const z = this.cameras.main.zoom;
+      const phase = (this.time0 / 400) % 1;
+      for (let i = 0; i < 4; i++) {
+        const fx = c.x + 0.5 + d * (i - 0.5 + phase), fy = c.y + 0.5;
+        const pt = (dx: number, dy: number) => toScreen((fx + dx) * TILE, (fy + dy) * TILE);
+        const tip = pt(d * 0.32, 0), l = pt(-d * 0.22, -0.42), r = pt(-d * 0.22, 0.42);
+        const alpha = Math.min(1, (i + 1 - phase) / 1.2) * (i === 3 ? 1 - phase : 1);
+        gfx.lineStyle(4 / z, 0x000000, 0.5 * alpha).beginPath().moveTo(l.x, l.y + 1 / z).lineTo(tip.x, tip.y + 1 / z).lineTo(r.x, r.y + 1 / z).strokePath();
+        gfx.lineStyle(2.5 / z, 0xffd23c, alpha).beginPath().moveTo(l.x, l.y).lineTo(tip.x, tip.y).lineTo(r.x, r.y).strokePath();
+      }
     }
     this.ui.message = plan.ok ? `${plan.cost < 0 ? '+' : plan.cost > 0 ? '−' : ''}${Math.abs(plan.cost).toLocaleString('de-AT')} €` : plan.reason ?? '';
   }

@@ -369,7 +369,8 @@ export class Grid {
         if (this.isOwned(x, y)) p *= 0.5;
         if (rnd() < p && this.free(x, y, 1, 1)) {
           const r = rnd();
-          const key = r < 0.35 ? 'bld_pine0' : r < 0.5 ? 'bld_pine1' : r < 0.65 ? 'bld_tree0' : r < 0.78 ? 'bld_tree1' : r < 0.9 ? 'bld_tree2' : 'bld_bush0';
+          const trees = currentMap().trees;
+          const key = trees ? trees[Math.floor(r * trees.length)] : r < 0.35 ? 'bld_pine0' : r < 0.5 ? 'bld_pine1' : r < 0.65 ? 'bld_tree0' : r < 0.78 ? 'bld_tree1' : r < 0.9 ? 'bld_tree2' : 'bld_bush0';
           this.addBuilding(key, x, y, true);
         }
       }
@@ -378,7 +379,10 @@ export class Grid {
     for (const v of currentMap().villages) {
       for (let i = 0; i < 8; i++) {
         const x = Math.round(v.x + (rnd() - 0.5) * 12), y = Math.round(v.y + (rnd() - 0.5) * 7);
-        if (this.free(x, y, 2, 2) && !this.isOwned(x, y)) this.addBuilding(rnd() < 0.5 ? 'bld_houseA' : 'bld_houseB', x, y, true);
+        const hs = currentMap().houses;
+        const key = hs ? hs[Math.floor(rnd() * hs.length)] : rnd() < 0.5 ? 'bld_houseA' : 'bld_houseB';
+        const d = BUILDINGS[key];
+        if (this.free(x, y, d.w, d.h) && !this.isOwned(x, y)) this.addBuilding(key, x, y, true);
       }
     }
   }

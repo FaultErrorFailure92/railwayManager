@@ -205,6 +205,11 @@ ANIMALS = {
         ["...H.", "...hH", ".hhhe", "hhhh.", "..hh."],
         [".....", "...H.", ".hhhh", "hhhhe", ".h.h."],
     ],
+    "cat": [
+        ["o....O.O", "o....oeo", ".oooooo.", ".oOooOo.", ".O.O.O.O"],
+        ["o....O.O", ".o...oeo", ".oooooo.", ".oOooOo.", "..OO.OO."],
+        [".....O.O", ".....oeo", "o..oooo.", ".ooooOo.", "..O..O.."],
+    ],
     "fox": [
         [".......", ".....oO", "o....oe", "Oooooo.", ".oooo..", ".k..k.."],
         [".......", ".....oO", "o....oe", "Oooooo.", ".oooo..", "..kk..."],

@@ -1,7 +1,8 @@
+import { BANK, BoardState, dailyLetter, newBoard, Sender, welcomeLetter } from './Board';
 import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
 import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
-import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
-import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './Research';
+import { priceMod, acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
+import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState, ResearchTree } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { industries } from '../world/industries';
@@ -68,7 +69,8 @@ export type UiEvent =
   | { type: 'gameover'; reason?: 'deadlock' | 'debt' }
   | { type: 'autosave'; label: string }
   | { type: 'news'; title: string; text: string; tag: string }
-  | { type: 'decision'; title: string; text: string; yes: string; no: string }
+  | { type: 'decision'; title: string; text: string; yes: string; no: string; tag: string }
+  | { type: 'letter'; title: string; text: string; mood: 'good' | 'bad' | 'info'; bonus?: number; from?: Sender }
   | { type: 'achievement'; id: string }
   | { type: 'goal' };
 
@@ -107,6 +109,8 @@ export interface GameSave {
   faults?: Game['faults'];
   goals?: Goal[];
   mapId?: string;
+  board?: BoardState;
+  crew?: number;
   offers?: Game['offers'];
   news?: Game['news'];
 }
@@ -174,7 +178,7 @@ export class Game {
   private missionBase: Stats = newStats();
   readonly unlocked = new Set<ToolId>(['select', 'land', 'platform', 'building', 'remove']);
   log: LogEntry[] = [];
-  research: ResearchState = { done: [], current: null, points: 0 };
+  research: ResearchState = { done: [], running: {}, points: 0 };
   /** Verkaufspreise der Läden (€ je Einkauf) */
   shopPrices: Record<string, number> = Object.fromEntries(Object.entries(SHOPS).map(([k, v]) => [k, v.ref]));
   /** Ausweichstellen nach dem zweigleisigen Ausbau abbauen */
@@ -188,6 +192,12 @@ export class Game {
   news = { nextAt: 0, stationUntil: 0, lastDay: -1, dayMoney: NaN, lastBalance: NaN, deals: {} as Record<number, { reward: number; penalty: number }> };
   /** freigespielte Erfolge */
   achievements: string[] = [];
+  /** Briefe vom Vorstand */
+  board: BoardState = newBoard();
+  /** eigene Instandhalter (Forschung „Instandhaltungsteam“) */
+  crew = 0;
+  static readonly CREW_WAGE = 250;
+  static readonly CREW_MAX = 4;
   /** Wetter */
   weather = { kind: 'sun' as 'sun' | 'rain' | 'snow', until: 0 };
   /** Störungen an Weichen/Signalen */
@@ -224,6 +234,7 @@ export class Game {
       save.unlocked.forEach((u) => this.unlocked.add(u));
       if (save.research) this.research = save.research;
       else this.migrateResearch(save);
+      this.migrateTrees(!!save.research);
       if (old) this.missionIdx = Math.min(this.missionIdx, MISSIONS.length);
       if (save.contracts) Object.assign(this.contracts, save.contracts);
       if (save.shopPrices) Object.assign(this.shopPrices, save.shopPrices);
@@ -244,6 +255,8 @@ export class Game {
     if (save?.weather) Object.assign(this.weather, save.weather);
     if (save?.faults) this.faults = save.faults;
     if (save?.goals) this.goals = save.goals;
+    if (save?.board) this.board = save.board;
+    if (save?.crew) this.crew = save.crew;
     this.faults.forEach((f) => this.sim.faultCells.add(f.k));
     this.applyWeather();
     this.clampTakts();
@@ -306,7 +319,7 @@ export class Game {
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id, board: this.board, crew: this.crew,
     };
   }
 
@@ -410,7 +423,8 @@ export class Game {
   /** Kaufquote je Fahrgast bei einem Preis */
   shopRate(key: string, price = this.shopPrices[key]) {
     const s = SHOPS[key];
-    return Math.max(0, s.rate * Math.min(1.5, 2 - price / s.ref));
+    const fest = key === 'bld_souvenir' && this.sim.time < this.sim.festUntil ? 3 : 1;
+    return Math.max(0, s.rate * fest * Math.min(1.5, 2 - price / s.ref));
   }
 
   setShopPrice(key: string, price: number) {
@@ -478,6 +492,14 @@ export class Game {
           const r = this.shopPrices[key] / SHOPS[key].ref;
           if (r > 1.3) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - (r - 1.3) * 2);
           if (r < 0.85) this.satisfaction[t.op.id] = Math.min(100, this.satisfaction[t.op.id] + 0.2);
+        }
+        // Werbeflächen: kleiner Betrag je Fahrgast und Plakatwand
+        const boards = Math.min(6, [...this.grid.buildings.values()].filter((b) => b.key === 'bld_billboard' && !b.decor).length);
+        const ads = Math.round(t.passengers * 0.05 * boards);
+        if (ads) {
+          shopSum += ads;
+          this.money += ads;
+          this.fx.push({ amount: ads, x: 0, y: 0, train: t.id, label: 'Werbung' });
         }
         if (shopSum) { const td = this.today(); td.shop = (td.shop ?? 0) + shopSum; }
         if (t.op.needsStop && !t.transit) this.cleanEma += ((1 - t.dirt / 100) - this.cleanEma) * 0.05;
@@ -572,11 +594,34 @@ export class Game {
   // ------------------------------------------------------------ Forschung
   researched(id: ResearchId) { return this.research.done.includes(id); }
 
+  /** alte Spielstände auf die drei Bäume umstellen */
+  private migrateTrees(hadResearch: boolean) {
+    const r = this.research;
+    r.running ??= {};
+    if (r.current) { r.running[RESEARCH_BY_ID[r.current.id].tree] = r.current; r.current = null; }
+    const done = new Set(r.done);
+    const add = (...ids: ResearchId[]) => ids.forEach((i) => done.add(i));
+    // was früher ohne Forschung baubar war, bleibt in alten Ständen frei
+    if (hadResearch || this.company) add('bench', 'kiosk', 'cafe', 'green');
+    if (done.has('deco')) add('light', 'green', 'clock', 'water', 'monument');
+    if (done.has('station2')) add('wc');
+    if (done.has('station3')) add('inn');
+    if (done.has('wash')) add('shunt');
+    r.done = [...done];
+  }
+
+  /** laufende Forschung je Baum */
+  runningIn(tree: ResearchTree) { return this.research.running?.[tree]; }
+  runningOf(id: ResearchId) {
+    const cur = this.research.running?.[RESEARCH_BY_ID[id].tree];
+    return cur?.id === id ? cur : null;
+  }
+
   /** Kann die Forschung gestartet werden? sonst Grund */
   researchBlock(id: ResearchId): string | null {
     const r = RESEARCH_BY_ID[id];
     if (this.researched(id)) return 'Schon erforscht';
-    if (this.research.current) return 'Es läuft schon eine Forschung';
+    if (this.runningIn(r.tree)) return 'In diesem Baum läuft schon eine Forschung';
     const miss = r.requires.filter((q) => !this.researched(q));
     if (miss.length) return `Zuerst: ${miss.map((q) => RESEARCH_BY_ID[q].name).join(', ')}`;
     if (this.research.points < r.fp) return `Zu wenig Forschungspunkte (${r.fp})`;
@@ -589,18 +634,22 @@ export class Game {
     const r = RESEARCH_BY_ID[id];
     this.money -= r.cost;
     this.research.points -= r.fp;
-    this.research.current = { id, left: r.hours * 3600 };
+    (this.research.running ??= {})[r.tree] = { id, left: r.hours * 3600 };
     this.addLog(`Forschung gestartet: ${r.name}`, 'info');
     return true;
   }
 
   private tickResearch(dt: number) {
-    const cur = this.research.current;
-    if (!cur) return;
-    cur.left -= dt;
-    if (cur.left > 0) return;
-    this.research.current = null;
-    this.finishResearch(cur.id);
+    const run = this.research.running;
+    if (!run) return;
+    for (const tree of Object.keys(run) as ResearchTree[]) {
+      const cur = run[tree];
+      if (!cur) continue;
+      cur.left -= dt;
+      if (cur.left > 0) continue;
+      delete run[tree];
+      this.finishResearch(cur.id);
+    }
   }
 
   private finishResearch(id: ResearchId) {
@@ -617,6 +666,9 @@ export class Game {
 
   private applySwitchSpeed() {
     this.sim.switchV = (10 * 16) / 60;
+    // Forschungs-Wirkungen
+    this.sim.dwellFactor = this.researched('dwell') ? 0.85 : 1;
+    priceMod.fair = this.researched('haggle') ? 1.1 : 1;
   }
 
   get maxStations() { return this.researched('stations') ? 4 : 1; }
@@ -743,7 +795,9 @@ export class Game {
 
   /** ab und zu fällt eine eigene Weiche oder ein eigenes Signal aus */
   private maybeFault() {
-    if (this.faults.length || Math.random() > 0.05) return;
+    // Instandhalter warten vorbeugend: weniger Ausfälle
+    const chance = 0.05 * (1 - 0.15 * this.crew) * (this.researched('crew2') ? 0.5 : 1);
+    if (this.faults.length || Math.random() > chance) return;
     const g = this.grid;
     const cand: { k: number; kind: 'switch' | 'signal' }[] = [];
     for (const p of g.pieces.values()) {
@@ -758,7 +812,8 @@ export class Game {
     this.faults.push({ ...f, since: this.sim.time });
     this.sim.faultCells.add(f.k);
     const p = g.xy(f.k);
-    this.addLog(`Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – anklicken, um den Störtrupp zu schicken (${REPAIR_COST} €)`, 'bad');
+    this.addLog(this.crew ? `Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – deine Instandhalter rücken aus`
+      : `Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – anklicken, um den Störtrupp zu schicken (${REPAIR_COST} €)`, 'bad');
     this.fx.push({ amount: 0, x: p.x, y: p.y, label: 'STÖRUNG!' });
   }
 
@@ -776,18 +831,37 @@ export class Game {
     const f = this.faultAt(x, y);
     if (!f || f.repairAt) return false;
     this.money -= REPAIR_COST;
-    f.repairAt = this.sim.time + 20 * 60;
-    this.addLog(`Störtrupp unterwegs (−${REPAIR_COST} €), fertig in 20 min`, 'info');
+    f.repairAt = this.sim.time + this.repairMinutes * 60;
+    this.addLog(`Störtrupp unterwegs (−${REPAIR_COST} €), fertig in ${this.repairMinutes} min`, 'info');
     this.fx.push({ amount: -REPAIR_COST, x, y, label: 'Störtrupp' });
     return true;
+  }
+
+  /** Reparaturdauer: eigene Instandhalter sind schneller */
+  get repairMinutes() { return Math.max(3, Math.round((20 / (1 + 0.5 * this.crew)) * (this.researched('estw') ? 0.5 : 1))); }
+
+  /** Instandhalter einstellen / entlassen */
+  setCrew(n: number) {
+    if (!this.researched('crew')) return;
+    const v = Math.max(0, Math.min(Game.CREW_MAX, n));
+    if (v === this.crew) return;
+    this.addLog(v > this.crew ? `Instandhalter eingestellt (jetzt ${v})` : `Instandhalter entlassen (jetzt ${v})`, 'info');
+    this.crew = v;
+    this.version++;
   }
 
   private tickFaults() {
     if (!this.faults.length) return;
     const t = this.sim.time;
     for (const f of [...this.faults]) {
+      // eigene Instandhalter rücken nach 5 min von selbst aus, ohne Extrakosten
+      if (this.crew && !f.repairAt && t - f.since > 5 * 60) {
+        f.repairAt = t + this.repairMinutes * 60;
+        const p = this.grid.xy(f.k);
+        this.fx.push({ amount: 0, x: p.x, y: p.y, label: 'Instandhalter' });
+      }
       // ohne Trupp nach 4 Stunden von selbst (aber die Unternehmen sind sauer)
-      const auto = !f.repairAt && t - f.since > 4 * 3600;
+      const auto = !f.repairAt && t - f.since > (this.researched('estw') ? 2 : 4) * 3600;
       if ((f.repairAt && t >= f.repairAt) || auto) {
         this.faults.splice(this.faults.indexOf(f), 1);
         this.sim.faultCells.delete(f.k);
@@ -844,9 +918,13 @@ export class Game {
       this.inDebt = true;
       this.stats.wasDebt = true;
       this.addLog(`Kasse leer – automatischer Kredit, ${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag`, 'bad');
+      if (this.company) this.uiEvents.push({ type: 'letter', mood: 'bad', from: BANK(), title: 'Ihr Konto ist im Minus',
+        text: `<p>Sehr geehrte Damen und Herren der <b>${this.company}</b>,</p><p>Ihr Geschäftskonto ist soeben ins Minus gerutscht. Damit Ihre Züge weiterfahren, gewähren wir Ihnen automatisch einen Kredit – zu <b>${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag</b>.</p><p>Bitte beachten Sie: Bei <b>${(-Game.DEBT_LIMIT).toLocaleString('de-AT')}&nbsp;€ Schulden</b> müssen wir die Kreditlinie leider kündigen.</p>` });
     } else if (this.money >= 0 && this.inDebt) {
       this.inDebt = false;
       this.addLog('Kredit zurückgezahlt!', 'good');
+      this.uiEvents.push({ type: 'letter', mood: 'good', from: BANK(), title: 'Kredit getilgt',
+        text: '<p>Sehr geehrte Damen und Herren,</p><p>wir freuen uns, Ihnen mitzuteilen, dass Ihr Kredit vollständig zurückgezahlt ist. Es war uns ein Vergnügen. Beehren Sie uns bald wieder – aber nicht zu bald.</p>' });
     }
     if (this.money <= Game.DEBT_LIMIT) {
       this.gameOver = true;
@@ -954,8 +1032,8 @@ export class Game {
       const d = BUILDINGS[b.key];
       if (!b.decor && d && (d.group === 'func' || d.group === 'facility' || d.group === 'road')) bld += d.cost * 0.01;
     }
-    const base = { Gleise: track * 2 + pieces * 10 + sig * 2 + wire, Bahnsteige: plat * 3, Gebäude: Math.round(bld) };
-    const total = base.Gleise + base.Bahnsteige + base.Gebäude;
+    const base = { Gleise: track * 2 + pieces * 10 + sig * 2 + wire, Bahnsteige: plat * 3, Gebäude: Math.round(bld), Personal: this.crew * Game.CREW_WAGE };
+    const total = base.Gleise + base.Bahnsteige + base.Gebäude + base.Personal;
     return { ...base, total, vandal: this.sim.time < this.news.stationUntil };
   }
 
@@ -1007,7 +1085,7 @@ export class Game {
     const comfort = Math.min(1, (count(['bld_shelter', 'bld_bench', 'bld_clock', 'bld_wc', 'bld_lamp']) / (runs * 3)));
     const shopTypes = ['bld_kiosk', 'bld_cafe', 'bld_vending', 'bld_inn'].filter((k) => count([k]) > 0).length;
     const service = Math.min(1, shopTypes / 3 + (count(['bld_parking', 'bld_bus']) ? 0.2 : 0));
-    const mood = Math.max(0, Math.min(1, (this.moodEma + 1) / 2));
+    const mood = Math.max(0, Math.min(1, (this.moodEma + 1) / 2 + (this.researched('cat') ? 0.1 : 0)));
     const parts = { Pünktlichkeit: punct, Sauberkeit: this.cleanEma, Komfort: comfort, Service: service, Stimmung: mood };
     const score = punct * 0.35 + this.cleanEma * 0.15 + comfort * 0.2 + service * 0.15 + mood * 0.15;
     const stars = Math.max(1, Math.min(5, Math.round(score * 5)));
@@ -1019,7 +1097,7 @@ export class Game {
   private daily() {
     this.rollGoals();
     const m = this.maintenance();
-    const cost = m.total * (m.vandal ? 2 : 1);
+    const cost = (m.total - m.Personal) * (m.vandal ? 2 : 1) + m.Personal;
     if (cost) {
       this.money -= cost;
       this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
@@ -1036,6 +1114,20 @@ export class Game {
       this.addLog(`Tagesbilanz: ${bal >= 0 ? '+' : '−'}${Math.abs(bal).toLocaleString('de-AT')} €`, bal >= 0 ? 'good' : 'bad');
     }
     this.news.dayMoney = this.money;
+    // ab und zu ein Brief vom Vorstand
+    const l = dailyLetter(this);
+    if (l) {
+      if (l.bonus) this.money += l.bonus;
+      this.uiEvents.push({ type: 'letter', title: l.title, text: l.text, mood: l.mood, bonus: l.bonus });
+      this.addLog(`Brief vom Vorstand: ${l.title}`, l.mood === 'bad' ? 'bad' : 'good');
+    }
+  }
+
+  /** Begrüßungsbrief beim neuen Spiel */
+  welcome() {
+    const l = welcomeLetter(this);
+    this.board.nextAt = this.sim.time + 86400;
+    this.uiEvents.push({ type: 'letter', title: l.title, text: l.text, mood: l.mood });
   }
 
   /** ab und zu eine Zeitungsmeldung mit Folgen */
@@ -1047,24 +1139,29 @@ export class Game {
     this.news.nextAt = t + (14 + Math.random() * 18) * 3600;
     // Entscheidungen
     const q = Math.random();
-    if (q < 0.25 && this.stations().length && !this.decision) {
+    const agency = this.researched('specials');
+    if (q < (agency ? 0.4 : 0.25) && this.stations().length && !this.decision) {
       const at = Math.round((t + (3 + Math.random() * 3) * 3600) / 600) * 600;
       const dir: 'E' | 'W' = Math.random() < 0.5 ? 'E' : 'W';
-      this.decision = { id: 'fans', at, dir, reward: 1500, penalty: 800 };
-      this.uiEvents.push({ type: 'decision', title: 'Fußball-Fans brauchen einen Sonderzug',
-        text: `Der Fanclub fragt an: Ein langer Sonderzug soll um ${fmtTime(at)} Uhr bei dir halten. Pünktlich gibt es 1 500 € Prämie – kommt er zu spät, kostet es 800 € Strafe.`,
+      const reward = agency ? 2250 : 1500;
+      this.decision = { id: 'fans', at, dir, reward, penalty: 800 };
+      this.uiEvents.push({ type: 'decision', tag: 'fans', title: 'Fußball-Fans brauchen einen Sonderzug',
+        text: `Der Fanclub fragt an: Ein langer Sonderzug soll um ${fmtTime(at)} Uhr bei dir halten. Pünktlich gibt es ${reward.toLocaleString('de-AT')} € Prämie – kommt er zu spät, kostet es 800 € Strafe.`,
         yes: 'Annehmen', no: 'Ablehnen' });
       return;
     }
     if (q < 0.4 && this.stations().length && !this.decision && this.money > 4000) {
       this.decision = { id: 'sponsor', cost: 2000 };
-      this.uiEvents.push({ type: 'decision', title: 'Bürgermeister plant ein Bahnhofsfest',
+      this.uiEvents.push({ type: 'decision', tag: 'sponsor', title: 'Bürgermeister plant ein Bahnhofsfest',
         text: 'Ob du 2 000 € beisteuern willst? Dafür kommen 12 Stunden lang viel mehr Fahrgäste, und alle Bahnunternehmen sind zufriedener.',
         yes: 'Sponsern (2 000 €)', no: 'Nein danke' });
       return;
     }
-    const r = Math.random();
-    const trains = this.researched('wash') && r < 0.4;
+    // Kunst am Bau: Sprayer haben Respekt – halb so viel Vandalismus
+    const art = this.researched('art');
+    let r = Math.random();
+    if (art && r >= 0.7 && Math.random() < 0.5) r = 0.4 + Math.random() * 0.3;
+    const trains = this.researched('wash') && r < 0.4 && !(art && Math.random() < 0.5);
     if (!trains && r < 0.7) {
       this.sim.festUntil = t + 12 * 3600;
       this.uiEvents.push({ type: 'news', tag: 'fest', title: 'Volksfest im Ort: Massenandrang erwartet',
@@ -1115,7 +1212,7 @@ export class Game {
     }
   }
 
-  private addLog(text: string, kind: LogEntry['kind']) {
+  addLog(text: string, kind: LogEntry['kind']) {
     this.log.unshift({ time: this.sim.time, text, kind });
     if (this.log.length > 40) this.log.pop();
   }
@@ -1129,7 +1226,7 @@ export class Game {
     const m = this.mission;
     if (!m) return { title: FREE_PLAY.title, short: FREE_PLAY.short, reward: 0, value: 1, text: '', index: MISSIONS.length, total: MISSIONS.length };
     const p = m.progress(this.stats, this.missionBase, this);
-    return { title: m.title, short: m.short, reward: m.reward, ...p, index: this.missionIdx, total: MISSIONS.length };
+    return { title: m.title, short: m.short, reward: m.reward, ...p, index: this.missionIdx, total: MISSIONS.length, checks: m.checks?.(this, this.stats, this.missionBase) };
   }
 
   /** hervorgehobenes Werkzeug für den aktuellen Auftrag */
@@ -1461,6 +1558,7 @@ export class Game {
           if (!cell.track || cell.piece !== null) return fail('Braucht ein gerades Gleis darunter', fp);
           if (cell.building !== null) return fail('Hier steht schon etwas', fp);
           if (cell.signal || cell.signalW) return fail('Signal im Weg', fp);
+          if (variant === 'bld_wash' && !cell.shunt) return fail('Waschanlage nur im Verschubbereich – Gleis zuerst als Verschubbereich markieren', fp);
           if (this.reserved(c.x, c.y)) return fail('Gleis ist gerade befahren', fp);
         }
         cost = def.cost;

@@ -64,6 +64,7 @@ export class Lighting {
       const cx = (b.x + d.w / 2) * TILE, cy = (b.y + d.h / 2) * TILE;
       const s = toScreen(cx, cy);
       if (b.key === 'bld_lamp' || b.key === 'bld_streetlamp') this.staticLights.push({ p: { x: s.x, y: s.y - 15 }, s: 0.9, c: 0xffd27a });
+      else if (b.key === 'bld_xmas') this.staticLights.push({ p: { x: s.x, y: s.y - 10 }, s: 0.7, c: 0xffe6a0 });
       else if (isStation(b.key)) {
         for (const dx of [-14, 14]) this.staticLights.push({ p: { x: s.x + dx, y: s.y - 2 }, s: 0.4, c: 0xffe0a0 });
       } else if (d.group === 'func' || d.group === 'deco' && d.w > 1) this.staticLights.push({ p: { x: s.x, y: s.y - 4 }, s: 0.5, c: 0xffd890 });

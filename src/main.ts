@@ -13,7 +13,12 @@ try { freshStart = sessionStorage.getItem('rm_new') === '1'; sessionStorage.remo
 const saved = freshStart ? undefined : loadSave();
 // Karte: beim neuen Spiel die gewählte, sonst die des Spielstands
 let mapId: string | undefined;
-try { mapId = freshStart ? sessionStorage.getItem('rm_map') ?? undefined : saved?.mapId; } catch { /* egal */ }
+let demo = false;
+try {
+  mapId = freshStart ? sessionStorage.getItem('rm_map') ?? undefined : saved?.mapId;
+  demo = freshStart && import.meta.env.DEV && sessionStorage.getItem('rm_demo') === '1';
+  sessionStorage.removeItem('rm_demo');
+} catch { /* egal */ }
 setMap(mapId);
 try {
   game = new Game(saved);
@@ -28,6 +33,11 @@ const scene = new GameScene(game, ui);
 async function start() {
   // Pixelschrift laden, bevor Phaser Texte rendert
   try { await document.fonts.load('16px "VT323"'); } catch { /* egal */ }
+  // Demobahnhof nur in der lokalen Entwicklung (npm run dev)
+  if (demo && import.meta.env.DEV) {
+    const { buildDemo } = await import('./dev/demo');
+    buildDemo(game);
+  }
   const phaser = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
@@ -37,7 +47,7 @@ async function start() {
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     scene,
   });
-  new Hud(game, ui, () => (scene.sys?.isActive() ? scene : undefined), !!saved, freshStart);
+  new Hud(game, ui, () => (scene.sys?.isActive() ? scene : undefined), !!saved || demo, freshStart && !demo);
 
   // automatisch speichern
   setInterval(() => { if (game.company) writeSave(game.save()); }, 30_000);

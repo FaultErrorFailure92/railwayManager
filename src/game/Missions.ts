@@ -1,6 +1,8 @@
 import { MAIN_ROW, SECOND_ROW } from '../config';
 import type { ResearchId } from './Research';
 import { isStation } from '../world/buildings';
+import { PIECES } from '../world/pieces';
+import { OPERATORS } from '../sim/Operators';
 import type { Game, Stats } from './Game';
 
 export type ToolId = 'select' | 'land' | 'platform' | 'track' | 'signal' | 'switch' | 'curve' | 'diag' | 'wire' | 'access'
@@ -25,7 +27,15 @@ export interface Mission {
   level: number;
   /** Forschungspunkte als Belohnung */
   fp: number;
+  /** Teilschritte als Checkliste (werden abgehakt) */
+  checks?: (g: Game, s: Stats, base: Stats) => Check[];
 }
+
+export interface Check { label: string; done: boolean }
+/** Zähler-Schritt: „3 Züge … (1/3)“ */
+const count = (label: string, n: number, of: number): Check => ({ label: `${label} (${Math.min(n, of)}/${of})`, done: n >= of });
+const ownSwitch = (g: Game) => [...g.grid.pieces.values()].some((p) => !g.grid.fixedPieces.has(p.id) && PIECES[p.key].group === 'switch');
+const hasBuilding = (g: Game, ...keys: string[]) => [...g.grid.buildings.values()].some((b) => keys.includes(b.key));
 
 /** Spannweite der eigenen Fläche entlang der Strecke */
 const ownedSpan = (g: Game) => {
@@ -64,6 +74,12 @@ export const MISSIONS: Mission[] = [
       for (let dy = -2; dy < 0; dy++) for (let dx = 0; dx < 3; dx++) out.push({ x: top.x + dx, y: top.y + dy });
       return out;
     },
+    checks: (g, s, b) => [
+      { label: 'Bahnsteig bauen', done: platforms(g).length > 0 },
+      { label: 'Empfangsgebäude bauen', done: hasStation(g) },
+      { label: 'Regional-Unternehmen wählen', done: Object.values(g.contracts).some((c) => c.status === 'active') },
+      count('Regionalzüge halten lassen', s.stopsRegio - b.stopsRegio, 3),
+    ],
     unlock: ['signal'],
     level: 2,
     fp: 3,
@@ -79,13 +95,17 @@ export const MISSIONS: Mission[] = [
       const { x0, x1 } = ownedSpan(g);
       return [{ x: x0 + 1, y: MAIN_ROW }, { x: x1 - 1, y: MAIN_ROW }];
     },
+    checks: (g, s) => [
+      { label: 'Signal setzen', done: g.grid.cells.some((c, k) => (c.signal || c.signalW) && !c.fixed && g.grid.isOwned(g.grid.xy(k).x, g.grid.xy(k).y)) },
+      count('Züge in Folge pünktlich', s.streak, 5),
+    ],
     unlock: ['switch', 'track', 'curve', 'diag', 'research'],
     level: 3,
     fp: 5,
   },
   {
     title: 'Erste Forschung',
-    short: 'Im Forschungsbaum „Bahnsteigzugänge“ erforschen',
+    short: 'Im Stellwerk-Baum „Treppen für Fortgeschrittene“ erforschen',
     reward: 1000,
     progress: (_s, _b, g) => ({ value: g.researched('access') ? 1 : 0, text: g.researched('access') ? '1/1' : '0/1' }),
     tool: research('access', null),
@@ -102,6 +122,12 @@ export const MISSIONS: Mission[] = [
       return { value: n / 2, text: `${n}/2` };
     },
     tool: (g) => (g.grid.links.size || !g.grid.pieces.size ? { tool: 'switch' } : { tool: 'access' }),
+    checks: (g, s) => [
+      { label: 'Weiche bauen', done: ownSwitch(g) },
+      { label: 'Zweiten Bahnsteig bauen', done: new Set(platforms(g).map((p) => p.y)).size >= 2 },
+      { label: 'Unterführung oder Brücke bauen', done: g.grid.links.size > 0 },
+      count('Gleise mit abgefertigtem Zug', (s.platformRuns ?? []).length, 2),
+    ],
     unlock: [],
     level: 4,
     fp: 4,
@@ -116,6 +142,10 @@ export const MISSIONS: Mission[] = [
     },
     tool: () => ({ tool: 'track' }),
     onStart: (g) => g.requestTurnback(),
+    checks: (g, s, b) => [
+      { label: 'Wendezug-Unternehmen wählen', done: Object.values(OPERATORS).some((o) => o.turnback && g.contracts[o.id].status === 'active') },
+      count('Wendezüge wenden lassen', s.turnbacks - b.turnbacks, 3),
+    ],
     unlock: [],
     level: 4,
     fp: 4,
@@ -129,6 +159,12 @@ export const MISSIONS: Mission[] = [
       return { value: Math.min(1, n / 5), text: `${Math.min(n, 5)}/5` };
     },
     tool: research('double', { tool: 'track' }),
+    checks: (g, s, b) => [
+      { label: '„Doppelt hält besser“ erforschen', done: g.researched('double') },
+      { label: '2. Streckengleis durchgehend verlegen', done: g.researched('double') && !Array.from({ length: g.grid.w }, (_, x) => x)
+        .some((x) => g.grid.isOwned(x, SECOND_ROW) && !g.grid.get(x, SECOND_ROW)!.track && g.grid.get(x, SECOND_ROW)!.piece === null) },
+      count('Züge auf dem 2. Gleis', s.secondRuns - b.secondRuns, 5),
+    ],
     hint: (g) => {
       const out: XY[] = [];
       if (!g.researched('double')) return out;
@@ -151,6 +187,11 @@ export const MISSIONS: Mission[] = [
       return { value: Math.min(1, n / 3), text: `${Math.min(n, 3)}/3` };
     },
     tool: research('siding', { tool: 'facility', variant: 'mark_siding' }),
+    checks: (g, s, b) => [
+      { label: '„Parkverbot aufgehoben“ erforschen', done: g.researched('siding') },
+      { label: 'Abstellgleis markieren oder Remise bauen', done: g.grid.cells.some((c) => c.siding) || hasBuilding(g, 'bld_remise') },
+      count('Züge abstellen', s.parks - b.parks, 3),
+    ],
     unlock: [],
     level: 6,
     fp: 5,
@@ -163,8 +204,16 @@ export const MISSIONS: Mission[] = [
       const n = s.services - b.services;
       return { value: Math.min(1, n / 5), text: `${Math.min(n, 5)}/5` };
     },
-    tool: (g) => (g.researched('wash') || g.researched('remise') ? { tool: 'facility', variant: g.researched('wash') ? 'bld_wash' : 'bld_remise' }
-      : { tool: 'research', variant: 'wash' }),
+    tool: (g) => {
+      if (g.researched('wash')) return g.grid.cells.some((c) => c.shunt) ? { tool: 'facility', variant: 'bld_wash' } : { tool: 'facility', variant: 'mark_shunt' };
+      if (g.researched('remise')) return { tool: 'facility', variant: 'bld_remise' };
+      return { tool: 'research', variant: 'remise' };
+    },
+    checks: (g, s, b) => [
+      { label: '„Schöner Wohnen für Züge“ (Remise) erforschen', done: g.researched('wash') || g.researched('remise') },
+      { label: 'Waschanlage (im Verschubbereich), Remise oder Werkstatt bauen', done: hasBuilding(g, 'bld_wash', 'bld_remise', 'bld_workshop') },
+      count('Züge pflegen', s.services - b.services, 5),
+    ],
     unlock: [],
     level: 6,
     fp: 6,
@@ -178,6 +227,12 @@ export const MISSIONS: Mission[] = [
       return { value: Math.min(1, n / 20), text: `${Math.min(n, 20)}/20` };
     },
     tool: research('hump', { tool: 'facility', variant: 'bld_hump' }),
+    checks: (g, s, b) => [
+      { label: '„Schwerkraft macht\'s“ erforschen', done: g.researched('hump') },
+      { label: 'Abrollberg bauen', done: hasBuilding(g, 'bld_hump') },
+      { label: 'Richtungsgleise markieren', done: g.grid.cells.some((c) => c.sortDest !== null) },
+      count('Wagen sortiert abfahren lassen', s.sortedWagons - b.sortedWagons, 20),
+    ],
     unlock: [],
     level: 7,
     fp: 8,
