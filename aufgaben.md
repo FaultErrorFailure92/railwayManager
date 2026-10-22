@@ -51,3 +51,17 @@
     - [x] Schnellfahrweiche im Forschungsbaum: Darf in der Länge gerne doppelt so lang sein, wie eine normale Weiche. Ist eine voraussetzung dafür, dass Schnellzüge überhaupt angenommen werden können, und dann dürfen sie überhaupt nur dort fahren, wo es gerade ist, oder wo es eine Schnellfahrweiche gibt (und eine Oberleitung) *(Schnellfahr-Gleiswechsel, 6 Felder lang)*
     - [x] Tageszeiten: Lichtstimmung soll sich für die Tageszeiten etwas ändern, am Abend ist es dann dunkel, Bahnhof hat Licht und Züge auch. Eventuell Deko zum erforschen für mehr Laternen bzw. zum Freiplatzieren *(neu: Straßenlaterne)*
     - [x] Im Forschungsbaum wird nur ein Tile gezeigt. der restliche Text wird beim Hovern als "Tooltip" angezeigt
+
+===
+- [x] Anzeige beim Starten, was neu in dieser Version ist *(„Was ist neu?“ einmal je Version)*
+- [x] Die zweigleisigen Weichen schalte erst mit der Zweigleisigkeit frei *(Gleiswechsel gesperrt bis Forschung „Zweigleisiger Ausbau“)*
+- [x] Wenn neue elemente dazu kommen, dann zeig bitte an, wo man sie platzieren soll, oder mach die Markierung nach der ersten Benutzung weg *(„!“ verschwindet nach dem ersten Bauen)*
+- [x] Gestalte die ersten Quests optional als Tutorial, und alles, was nicht übers tutorial freigeschaltet wird, sollte etweder gleich verfügbar sein, oder über forschung freigeschaltet werden können *(Häkchen beim neuen Spiel; ohne Tutorial sind alle Grundwerkzeuge sofort frei)*
+- [x] stelle bitte sicher, dass das Sägewerk (privatbahn) als Stumpfgleis mit pendelfahrt verwendet werden kann. rangiert werden kann ja sonst auch im Bahnhof *(fährt bis zum Prellbock, wendet, fährt zurück – geht auch, wenn beide Enden angeschlossen sind)*
+- [x] Favicon fehlt noch *(kleiner Pixel-Zug)*
+- [x] Extra: Zeitungsmeldung „Volksfest“ (12 h mehr Fahrgäste) und Tagesbilanz im Log/Kassen-Tooltip
+
+
+===
+- Anzeige zu aktuelle Kosten pro Tag
+- Kredit-Funktion. Wenn man unter 0€ kommt, dann nimmt man automatisch einen kredit, zahlt aber dann täglich zinsen, bis man wieder im Plus ist. bei -50k€ ist das spiel dann automatisch game over 

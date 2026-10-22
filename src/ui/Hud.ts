@@ -1,5 +1,6 @@
 import { COST, STATION_UPGRADE } from '../config';
 import { Game, fmtTime } from '../game/Game';
+import { CHANGELOG, VERSION } from '../game/changelog';
 import { MISSIONS, ToolId } from '../game/Missions';
 import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
 import { OPERATORS } from '../sim/Operators';
@@ -189,8 +190,21 @@ export class Hud {
       $('menu').classList.add('hidden');
       this.askName();
     } else this.openMenu();
+    this.showChangelog();
     this.update();
     setInterval(() => this.update(), 120);
+  }
+
+  /** einmal je Version: was ist neu? */
+  private showChangelog() {
+    let seen = '';
+    try { seen = localStorage.getItem('rm_seen_version') ?? ''; } catch { /* egal */ }
+    if (seen === VERSION) return;
+    try { localStorage.setItem('rm_seen_version', VERSION); } catch { /* egal */ }
+    const c = CHANGELOG[0];
+    $('event').classList.add('top');
+    this.showEvent(`<h1 class="blue">WAS IST NEU?</h1><div class="ev-title">${c.title}</div>
+      <ul class="ev-changes">${c.items.map((i) => `<li>${i}</li>`).join('')}</ul>`, false);
   }
 
   // ------------------------------------------------------------ Hauptmenü
@@ -247,6 +261,8 @@ export class Hud {
     this.naming = { kind: 'company' };
     this.openNameDialog('Deine Bahngesellschaft', 'Wie soll dein Unternehmen heißen?', this.g.company, 'z.B. Donaubahn AG');
     $('name-ok').textContent = this.g.company ? 'Passt!' : "Los geht's!";
+    // neues Spiel: Tutorial an- oder abwählen
+    $('tut-row').classList.toggle('hidden', !!this.g.company || this.g.missionIdx > 0);
   }
 
   private askStation(id: number) {
@@ -255,12 +271,16 @@ export class Hud {
     this.naming = { kind: 'station', id };
     this.openNameDialog('Neuer Bahnhof', 'Wie soll dieser Bahnhof heißen?', b.name ?? '', 'z.B. Donaufeld');
     $('name-ok').textContent = 'Taufen!';
+    $('tut-row').classList.add('hidden');
   }
 
   private confirmName() {
     const v = ($('name-input') as HTMLInputElement).value.trim();
     const first = !this.g.company;
-    if (this.naming.kind === 'company') this.g.company = v || 'Meine Bahn AG';
+    if (this.naming.kind === 'company') {
+      if (first && !$('tut-row').classList.contains('hidden') && !($('tut-check') as HTMLInputElement).checked) this.g.skipTutorial();
+      this.g.company = v || 'Meine Bahn AG';
+    }
     else this.g.stationName(this.naming.id, v || this.g.suggestStationName());
     ($('name-input') as HTMLInputElement).blur();
     $('modal').classList.add('hidden');
@@ -413,6 +433,7 @@ export class Hud {
 
   private closeEvent() {
     $('event').classList.add('hidden');
+    $('event').classList.remove('top');
     this.g.paused = this.pausedBeforeEvent;
     const next = this.eventQueue.shift();
     if (next) this.showEvent(next);
@@ -456,7 +477,9 @@ export class Hud {
     if (!v || v.length < 2) return;
     v.forEach((item, i) => {
       const b = document.createElement('button');
-      const need = this.ui.tool === 'facility' ? FACILITY_RESEARCH[item.key] : undefined;
+      const need = this.ui.tool === 'facility' ? FACILITY_RESEARCH[item.key]
+        : this.ui.tool === 'switch' ? (item.key.endsWith('_fast') ? 'fastSwitch' : item.key.startsWith('xover') ? 'double' : undefined)
+        : this.ui.tool === 'signal' && item.key.startsWith('S') ? 'shunt' : undefined;
       const lockedV = !!need && !this.g.researched(need);
       b.className = `slot${i === sel ? ' on' : ''}${item.key === questVariant && i !== sel ? ' quest' : ''}${lockedV ? ' locked' : ''}`;
       b.title = item.label;
@@ -582,7 +605,8 @@ export class Hud {
     if (g.version !== this.maintVersion || now > this.maintAt) {
       this.maintVersion = g.version; this.maintAt = now + 5000;
       const m = g.maintenance();
-      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}`;
+      const bal = g.news.lastBalance;
+      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}${Number.isFinite(bal) ? ` · gestern: ${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €` : ''}`;
     }
     $('punct').textContent = g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–';
     $('pax').textContent = g.stats.passengers.toLocaleString('de-AT');
@@ -627,7 +651,7 @@ export class Hud {
       const locked = !g.unlocked.has(t.id);
       b.classList.toggle('locked', locked);
       b.classList.toggle('on', this.ui.tool === t.id);
-      const isQuest = !!mt && mt.tool === t.id && this.ui.tool !== t.id && !locked;
+      const isQuest = !!mt && mt.tool === t.id && this.ui.tool !== t.id && !locked && !g.questUsed.has(`${g.missionIdx}:${t.id}`);
       b.classList.toggle('quest', isQuest);
       const badge = isQuest ? '!' : this.fresh.has(t.id) ? 'NEU' : '';
       let el2 = b.querySelector('.badge') as HTMLElement | null;

@@ -335,3 +335,11 @@ ul { list-style: none; margin: 0; padding: 0; }
 .nw-date { font-size: 16px; text-align: center; border-bottom: 1px solid #2a2418; margin-bottom: 8px; color: #5a4c30; }
 .nw-title { font-size: 30px; line-height: 1; margin-bottom: 6px; }
 .nw-text { font-size: 19px; line-height: 1.15; columns: 2; column-gap: 16px; }
+
+.tut-row { display: flex; align-items: center; gap: 8px; font-size: 19px; margin: 4px 0 10px; cursor: pointer; text-align: left; }
+.tut-row.hidden { display: none; }
+.tut-row input { width: 18px; height: 18px; accent-color: var(--gold); }
+
+#event.top { z-index: 70; }
+.ev-changes { text-align: left; font-size: 20px; color: #d8d2c4; margin: 8px auto 14px; max-width: 460px; padding-left: 22px; line-height: 1.2; }
+.ev-changes li { margin: 2px 0; }

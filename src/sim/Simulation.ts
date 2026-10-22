@@ -99,6 +99,7 @@ export interface SimSave {
   nextDir: Record<OperatorId, Dir>;
   sortDep?: number[];
   vandalUntil?: number;
+  festUntil?: number;
   queue: TrainSave[];
   trains: TrainSave[];
 }
@@ -180,6 +181,8 @@ export class Simulation {
 
   /** bis dahin kommen wegen Vandalismus viele verschmutzte Züge an (Zeitungsmeldung) */
   vandalUntil = 0;
+  /** bis dahin mehr Fahrgäste (Volksfest) */
+  festUntil = 0;
   private hasWash() {
     for (const e of this.net.edges.values()) if (e.wash) return true;
     return false;
@@ -224,7 +227,8 @@ export class Simulation {
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
     const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80;
     const paxScale = base.length / op.cars.length;
-    const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale));
+    const fest = at < this.festUntil ? 1.6 : 1;
+    const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale * fest));
     return {
       id: this.nextId++, op, cars, length, dir,
       number: `${op.short} ${op.numberBase + this.counter[op.id]++ * 2 - (dir === 'E' ? 1 : 0)}`,
@@ -575,9 +579,11 @@ export class Simulation {
       }
       case 'hump':
         return this.net.pathsTo(from, (e) => e.hump, el, 50);
-      case 'load':
-        // bis ans Ende des Ladegleises (Prellbock)
-        return this.net.pathsTo(from, (e) => e.industry === job.ind && !(this.net.out.get(e.to) ?? []).some((f) => f.industry === job.ind), el, 50);
+      case 'load': {
+        // bis ans Ende des Ladegleises (Prellbock) – Pendelfahrt: dort wenden und zurück
+        const end = this.net.pathsTo(from, (e) => e.industry === job.ind && !(this.net.out.get(e.to) ?? []).some((f) => f.industry === job.ind), el, 50);
+        return end.length ? end : this.net.pathsTo(from, (e) => e.industry === job.ind, el, 50);
+      }
       case 'exit':
         if (job.dir && job.dir !== t.dir) return [];
         return this.net.paths(from, el);
@@ -1252,7 +1258,7 @@ export class Simulation {
 
   save(): SimSave {
     return {
-      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep], vandalUntil: this.vandalUntil,
+      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep], vandalUntil: this.vandalUntil, festUntil: this.festUntil,
       nextSpawn: { ...this.nextSpawn }, counter: { ...this.counter }, nextDir: { ...this.nextDir },
       queue: this.queue.map((t) => this.saveTrain(t)),
       trains: this.trains.map((t) => this.saveTrain(t)),
@@ -1263,6 +1269,7 @@ export class Simulation {
     Object.assign(this, { time: s.time, level: s.level, nextId: s.nextId });
     if (s.sortDep) this.sortDep = s.sortDep;
     this.vandalUntil = s.vandalUntil ?? 0;
+    this.festUntil = s.festUntil ?? 0;
     Object.assign(this.nextSpawn, s.nextSpawn);
     Object.assign(this.counter, s.counter);
     Object.assign(this.nextDir, s.nextDir);

@@ -39,6 +39,9 @@ const research = (id: ResearchId, then: { tool: ToolId; variant?: string } | nul
   (g.researched(id) ? then : { tool: 'research' as ToolId, variant: id });
 const hasStation = (g: Game) => [...g.grid.buildings.values()].some((b) => isStation(b.key));
 
+/** so viele Aufträge am Anfang sind das (abwählbare) Tutorial */
+export const TUTORIAL_MISSIONS = 5;
+
 export const MISSIONS: Mission[] = [
   {
     title: 'Bahnhof eröffnen',

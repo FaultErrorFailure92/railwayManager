@@ -32,7 +32,7 @@ export const RESEARCH: ResearchDef[] = [
     col: 0, row: 1, cost: 2500, fp: 4, hours: 3, requires: [], tools: ['wire'], apply: (g) => g.grid.electrifyLine() },
   { id: 'siding', name: 'Abstellgleise', info: 'Gleise als Abstellgleis markieren: Wendezüge machen dort Pause', icon: 'mark_siding',
     col: 0, row: 2, cost: 1500, fp: 3, hours: 2, requires: [], tools: ['facility'] },
-  { id: 'double', name: 'Zweigleisiger Ausbau', info: 'Der Netzbetreiber baut das 2. Streckengleis – Linksverkehr', icon: 'track',
+  { id: 'double', name: 'Zweigleisiger Ausbau', info: 'Der Netzbetreiber baut das 2. Streckengleis – Linksverkehr · Gleiswechsel-Weichen', icon: 'track',
     col: 1, row: 0, cost: 5000, fp: 8, hours: 6, requires: ['access'], apply: (g) => g.expandLine() },
   { id: 'stations', name: 'Weitere Bahnhöfe', info: 'Bis zu 4 Empfangsgebäude mit eigenem Namen', icon: 'bld_station',
     col: 1, row: 1, cost: 4000, fp: 6, hours: 4, requires: ['access'] },

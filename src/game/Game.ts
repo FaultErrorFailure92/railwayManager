@@ -8,7 +8,7 @@ import { INDUSTRIES } from '../world/industries';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
-import { FREE_PLAY, Mission, MISSIONS, ToolId } from './Missions';
+import { FREE_PLAY, Mission, MISSIONS, ToolId, TUTORIAL_MISSIONS } from './Missions';
 
 export interface Stats {
   handled: number;
@@ -138,8 +138,10 @@ export class Game {
   private loopCheck = 0;
   contracts = newContracts();
   private lastHour = 0;
+  /** Werkzeuge, die im aktuellen Auftrag schon benutzt wurden (dann kein „!“ mehr in der Leiste) */
+  readonly questUsed = new Set<string>();
   /** Zeitungsmeldungen: nächste Meldung, Vandalismus am Bahnhof bis, letzte abgerechnete Tag */
-  news = { nextAt: 0, stationUntil: 0, lastDay: -1 };
+  news = { nextAt: 0, stationUntil: 0, lastDay: -1, dayMoney: NaN, lastBalance: NaN };
   readonly uiEvents: UiEvent[] = [];
   readonly fx: FxEvent[] = [];
 
@@ -744,9 +746,17 @@ export class Game {
   private daily() {
     const m = this.maintenance();
     const cost = m.total * (m.vandal ? 2 : 1);
-    if (!cost) return;
-    this.money -= cost;
-    this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
+    if (cost) {
+      this.money -= cost;
+      this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
+    }
+    // Tagesbilanz (alles, was die Kasse heute bewegt hat)
+    if (Number.isFinite(this.news.dayMoney)) {
+      const bal = Math.round(this.money - this.news.dayMoney);
+      this.news.lastBalance = bal;
+      this.addLog(`Tagesbilanz: ${bal >= 0 ? '+' : '−'}${Math.abs(bal).toLocaleString('de-AT')} €`, bal >= 0 ? 'good' : 'bad');
+    }
+    this.news.dayMoney = this.money;
   }
 
   /** ab und zu eine Zeitungsmeldung mit Folgen */
@@ -756,8 +766,14 @@ export class Game {
     if (!this.news.nextAt) { this.news.nextAt = t + (20 + Math.random() * 16) * 3600; return; }
     if (t < this.news.nextAt) return;
     this.news.nextAt = t + (24 + Math.random() * 24) * 3600;
-    const trains = this.researched('wash') && Math.random() < 0.6;
-    if (trains) {
+    const r = Math.random();
+    const trains = this.researched('wash') && r < 0.4;
+    if (!trains && r < 0.7) {
+      this.sim.festUntil = t + 12 * 3600;
+      this.uiEvents.push({ type: 'news', tag: 'fest', title: 'Volksfest im Ort: Massenandrang erwartet',
+        text: 'Bierzelt, Blasmusik und Ringelspiel – in den nächsten 12 Stunden fahren deutlich mehr Leute mit dem Zug. Volle Züge bringen mehr Geld, aber pünktlich sollten sie sein!' });
+      this.addLog('Zeitung: Volksfest – 12 Stunden mehr Fahrgäste', 'good');
+    } else if (trains) {
       this.sim.vandalUntil = t + 8 * 3600;
       this.uiEvents.push({ type: 'news', tag: 'vandal-trains', title: 'Sprayer-Serie: Züge über Nacht beschmiert',
         text: 'In den Abstellanlagen der Umgebung wurden zahlreiche Garnituren besprüht. In den nächsten Stunden kommen viele verschmutzte Züge an. Wendezüge, die bei dir enden, fahren zur Waschanlage – das bringt Geld und zufriedene Fahrgäste.' });
@@ -855,6 +871,22 @@ export class Game {
     }
     if (changed) this.rebuild();
     this.loopsPending = left;
+  }
+
+  /** ohne Tutorial: alles aus den Tutorial-Aufträgen sofort freischalten und mit dem ersten richtigen Auftrag beginnen */
+  skipTutorial() {
+    if (this.missionIdx >= TUTORIAL_MISSIONS) return;
+    for (let i = this.missionIdx; i < TUTORIAL_MISSIONS; i++) {
+      const m = MISSIONS[i];
+      m.unlock.forEach((u) => this.unlocked.add(u));
+      this.research.points += m.fp;
+    }
+    this.unlocked.add('research');
+    this.sim.setLevel(MISSIONS[TUTORIAL_MISSIONS - 1].level);
+    this.missionIdx = TUTORIAL_MISSIONS;
+    this.missionBase = structuredClone(this.stats);
+    this.startMission();
+    this.addLog('Ohne Tutorial gestartet: alle Grundwerkzeuge frei', 'info');
   }
 
   private checkMission() {
@@ -1049,6 +1081,7 @@ export class Game {
       case 'diag': {
         if (!PIECES[variant]) return fail('');
         if (PIECES[variant].fast && !this.researched('fastSwitch')) return fail('Schnellfahrweichen erst erforschen');
+        if (variant.startsWith('xover') && !this.researched('double')) return fail('Gleiswechsel erst mit dem zweigleisigen Ausbau (Forschung)');
         const fp: XY[] = [];
         const pc = checkPieces(cells.map((a) => ({ key: variant, x: a.x, y: a.y })), fp);
         if (typeof pc === 'string') return fail(pc, fp);
@@ -1194,6 +1227,7 @@ export class Game {
   build(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const p = this.plan(tool, cells, variant);
     if (!p.ok) return p;
+    this.questUsed.add(`${this.missionIdx}:${tool}`);
     const g = this.grid;
     if (CLEARING.has(tool) || tool === 'track') this.natureIn(p.cells).forEach((id) => g.removeBuilding(id));
     switch (tool) {
