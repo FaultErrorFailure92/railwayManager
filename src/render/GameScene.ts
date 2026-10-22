@@ -16,6 +16,7 @@ import { People } from './People';
 import { Lighting } from './Lighting';
 import { Weather } from './Weather';
 import { Sound } from './Sound';
+import { currentMap } from '../world/maps';
 
 type SpriteInfo = { file: string; ox: number; oy: number; w: number; h: number };
 const SPRITES = manifest.sprites as Record<string, SpriteInfo>;
@@ -174,6 +175,8 @@ export class GameScene extends Phaser.Scene {
         }
       }
       rt.endDraw();
+      const tint = currentMap().tint;
+      if (tint !== 0xffffff) rt.setTint(tint);
     }
   }
 

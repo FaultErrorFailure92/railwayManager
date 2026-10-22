@@ -74,3 +74,15 @@
 - [x] Statistik-Seite: Tagesbilanz 7 Tage, Pünktlichkeit je Unternehmen
 - [x] Schnellspeichern F5 / Strg+S, Autosave alle 3 Spielstunden
 - [x] Geräusche: Gong bei Halt, Pfiff bei Abfahrt (Knopf „Ton“)
+
+
+
+===
+- [x] unterschiedliche Maps mit unterschiedlichen Terrains und Bahnunternehmen, gerne auch Themed *(Kartenauswahl: Donautal, Alpenbahn, Pannonische Ebene, Industrierevier)*
+- Demobahnhof für lokale Entwicklung
+- Bilder in den Zeitungsartikeln
+- Nimm da gerne auch Autoren mit Lustigen Namen hinein
+- Englische Version
+- bei neues Spiel lieber fragen, ob das alte gespeichert werde soll -> ja/Nein, bei Ja den Speicher Dialog öffnen
+- Begrüssungstext vom Bahnvorstand, wenn man ein neues Spiel anfängt. der Vorstand kann auch hin und wieder briefe schicken oder sich melden, wenn irgendwas gut oder schlecht läuft
+

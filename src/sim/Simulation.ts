@@ -1,6 +1,6 @@
 import { ACC, CAR_LEN, DEC, LOOP_SLACK, MAIN_ROW, MAP_W, PASSING_LOOPS, SECOND_ROW, START_TIME, TILE } from '../config';
 import { Dir, Edge, edgeRow, isOut, Network, ParkKind, SortRun } from '../world/Network';
-import { INDUSTRY_BY_ID } from '../world/industries';
+import { industryById } from '../world/industries';
 import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS } from './Operators';
 
 /** Aufgaben eines Zuges, der Reihe nach abgearbeitet */
@@ -183,6 +183,8 @@ export class Simulation {
   vandalUntil = 0;
   /** bis dahin mehr Fahrgäste (Volksfest) */
   festUntil = 0;
+  /** Bahnhofs-Bewertung: Faktor auf die Fahrgastzahl */
+  paxFactor = 1.1;
   private hasWash() {
     for (const e of this.net.edges.values()) if (e.wash) return true;
     return false;
@@ -218,7 +220,7 @@ export class Simulation {
     else jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit' }];
     // Wendezug: hin zum Bahnhof (ca. Kartenmitte) und wieder zurück, plus 1 min zum Wenden
     const stops = op.needsStop && contract;
-    const ind = op.industry && contract ? INDUSTRY_BY_ID[op.industry] : undefined;
+    const ind = op.industry && contract ? industryById(op.industry) : undefined;
     // Privatbahn: bis zum Ladegleis (plus Anschlussgleis) und zurück
     const indDist = ind ? 2 * ((dir === 'E' ? ind.x1 : MAP_W - ind.x0) + Math.abs(ind.row - MAIN_ROW) * 2 + 10) * TILE : 0;
     const dist = ind ? indDist : op.turnback && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
@@ -227,7 +229,7 @@ export class Simulation {
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
     const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80;
     const paxScale = base.length / op.cars.length;
-    const fest = at < this.festUntil ? 1.6 : 1;
+    const fest = (at < this.festUntil ? 1.6 : 1) * this.paxFactor;
     const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale * fest));
     return {
       id: this.nextId++, op, cars, length, dir,

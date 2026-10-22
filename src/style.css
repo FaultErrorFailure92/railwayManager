@@ -375,3 +375,54 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 #topbar .stat { white-space: nowrap; }
 #topbar .btn { white-space: nowrap; }
+
+/* Was ist neu? */
+#changelog { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(10, 12, 20, .75); }
+#changelog.hidden { display: none; }
+.cl-box { width: min(820px, 94vw); height: min(720px, 86vh); display: flex; flex-direction: column; padding: 18px 22px 16px; animation: pop .35s cubic-bezier(.2,1.6,.4,1); }
+.cl-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid var(--edge); padding-bottom: 8px; }
+.cl-head h2 { margin: 0; font-size: 44px; font-weight: 400; color: #8fd0ff; letter-spacing: 3px; text-shadow: 3px 3px 0 #000, -2px -2px 0 #1d3a6b; }
+.cl-main { display: flex; gap: 16px; margin-top: 12px; min-height: 0; flex: 1; }
+.cl-tabs { display: flex; flex-direction: column; gap: 6px; width: 120px; flex: none; overflow: auto; }
+.cl-tab { background: var(--slot); border: 0; box-shadow: 0 0 0 2px var(--edge); color: var(--text); font-family: inherit; text-align: left; padding: 6px 10px; cursor: pointer; }
+.cl-tab b { display: block; font-weight: 400; font-size: 22px; color: var(--gold); }
+.cl-tab small { font-size: 14px; color: var(--muted); }
+.cl-tab.on { box-shadow: 0 0 0 3px var(--gold); background: #3a3a46; }
+.cl-tab:hover { filter: brightness(1.2); }
+.cl-body { flex: 1; overflow: auto; padding-right: 6px; }
+.cl-ver { font-size: 18px; color: var(--muted); }
+.cl-latest { background: #3f7a32; color: #fff; padding: 0 6px; margin-left: 6px; font-size: 15px; }
+.cl-title { font-size: 32px; color: var(--gold); margin: 2px 0 10px; text-shadow: 2px 2px 0 #000; }
+.cl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cl-item { display: grid; grid-template-columns: 40px 76px 1fr; align-items: center; gap: 10px; background: rgba(255,255,255,.04); padding: 4px 8px 4px 4px; }
+.cl-item .slot { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: var(--slot); box-shadow: 0 0 0 2px var(--edge); }
+.cl-item .slot img { width: 36px; height: 36px; image-rendering: pixelated; }
+.cl-tag { font-size: 14px; text-align: center; padding: 1px 0; color: #fff; letter-spacing: 1px; }
+.cl-tag.neu { background: #3f7a32; } .cl-tag.besser { background: #2456aa; } .cl-tag.fix { background: #a8743c; }
+.cl-text { font-size: 19px; line-height: 1.15; }
+.cl-foot { display: flex; justify-content: center; margin-top: 12px; }
+
+.stat.stars { color: var(--gold); font-size: 20px; letter-spacing: 1px; cursor: help; }
+#goals { list-style: none; margin: 0; padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 4px; }
+.gl { display: flex; gap: 8px; align-items: flex-start; font-size: 18px; line-height: 1.05; }
+.gl-mark { width: 16px; color: var(--muted); }
+.gl.ok .gl-mark, .gl.ok small { color: var(--good); }
+.gl.no .gl-mark, .gl.no small { color: var(--bad); }
+.gl.ok .gl-text, .gl.no .gl-text { opacity: .75; }
+.gl-text small { display: block; font-size: 15px; color: var(--muted); }
+
+/* Kartenauswahl */
+#mappick { position: fixed; inset: 0; z-index: 85; display: flex; align-items: center; justify-content: center; background: rgba(10, 12, 20, .8); }
+#mappick.hidden { display: none; }
+.mp-box { width: min(1000px, 96vw); height: auto; max-height: 92vh; }
+.mp-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; overflow: auto; }
+.mp-card { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; background: var(--slot); border: 0; box-shadow: 0 0 0 3px var(--edge); color: var(--text); font-family: inherit; padding: 10px; cursor: pointer; }
+.mp-card:hover { box-shadow: 0 0 0 3px var(--gold); filter: brightness(1.1); }
+.mp-card b { font-weight: 400; font-size: 28px; color: var(--gold); }
+.mp-theme { font-size: 17px; color: #8fd0ff; }
+.mp-card small { font-size: 17px; color: #d8d2c4; line-height: 1.15; }
+.mp-money { font-size: 16px; color: var(--muted); margin-top: auto; }
+.mp-prev { position: relative; width: 192px; height: 48px; background: color-mix(in srgb, #6c9a3c 80%, var(--tint)); box-shadow: 0 0 0 2px #222; align-self: center; margin-bottom: 4px; }
+.mp-prev i { position: absolute; width: 3px; height: 3px; }
+#topbar .btn.small { padding-left: 8px; padding-right: 8px; }
+#topbar { gap: 8px; }

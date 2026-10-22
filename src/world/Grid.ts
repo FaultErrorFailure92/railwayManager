@@ -1,4 +1,5 @@
-import { INDUSTRIES } from './industries';
+import { industries } from './industries';
+import { currentMap } from './maps';
 import { MAIN_ROW, MAP_H, MAP_W, OLD_OFFSET, PARCEL, PARCEL_BASE_PRICE, PARCEL_STEP_PRICE, PASSING_LOOPS, SECOND_ROW, START_PARCELS } from '../config';
 
 /** Bodenart */
@@ -110,7 +111,7 @@ export class Grid {
 
   /** Privatbahn-Betriebe mit Ladegleis setzen (auch in alten Spielständen nachrüsten) */
   placeIndustries() {
-    for (const ind of INDUSTRIES) {
+    for (const ind of industries()) {
       for (let x = ind.x0; x <= ind.x1; x++) this.industryCells.set(this.key(x, ind.row), ind.id);
       if ([...this.buildings.values()].some((b) => b.key === ind.key)) continue;
       const area: [number, number][] = [];
@@ -132,12 +133,13 @@ export class Grid {
   // ------------------------------------------------------------ Gelände
   /** Flüsse, Seen und Felsgebiete – immer gleich (fester Zufall) */
   private generateTerrain() {
-    let seed = 987654;
+    const M = currentMap();
+    let seed = M.terrainSeed;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
     const T = this.terrain;
     const core = (x: number) => x >= CORE.x0 && x <= CORE.x1;
     // Felsgebiete (Gebirge): Nordwesten und Südosten, weich verrauscht
-    const ranges = [{ x0: 0, x1: 70, y0: 0, y1: 16, edge: 'N' }, { x0: 186, x1: 256, y0: 46, y1: 64, edge: 'S' }];
+    const ranges = M.rocks;
     const ph = Array.from({ length: 6 }, () => rnd() * 6.3);
     for (const r of ranges) {
       for (let y = r.y0; y < r.y1; y++) {
@@ -145,12 +147,12 @@ export class Grid {
           const depth = r.edge === 'N' ? 1 - y / (r.y1 - r.y0) : (y - r.y0) / (r.y1 - r.y0);
           const n = Math.sin(x * 0.21 + ph[0]) * 0.25 + Math.sin(x * 0.07 + y * 0.3 + ph[1]) * 0.2 + Math.sin(y * 0.5 + ph[2]) * 0.1;
           const side = Math.min(1, (x - r.x0) / 8, (r.x1 - x) / 8);
-          if (depth * side + n > 0.45) T[this.key(x, y)] = ROCK;
+          if (depth * side + n > M.rockLevel) T[this.key(x, y)] = ROCK;
         }
       }
     }
     // Seen
-    for (const l of [{ x: 20, y: 51, rx: 8, ry: 5 }, { x: 236, y: 13, rx: 7, ry: 4 }, { x: 196, y: 8, rx: 4, ry: 3 }, { x: 60, y: 54, rx: 5, ry: 3 }]) {
+    for (const l of M.lakes) {
       for (let y = l.y - l.ry - 2; y <= l.y + l.ry + 2; y++) {
         for (let x = l.x - l.rx - 2; x <= l.x + l.rx + 2; x++) {
           if (!this.inside(x, y)) continue;
@@ -160,7 +162,7 @@ export class Grid {
       }
     }
     // Flüsse (quer zur Strecke, von Nord nach Süd)
-    for (const rv of [{ x: 44, a: 7, b: 4, w: 1.3 }, { x: 212, a: 6, b: 3, w: 1.1 }]) {
+    for (const rv of M.rivers) {
       for (let y = 0; y < this.h; y++) {
         const c = rv.x + rv.a * Math.sin(y * 0.14 + rv.x) + rv.b * Math.sin(y * 0.05 + 1);
         for (let x = Math.floor(c - 3); x <= Math.ceil(c + 3); x++) {
@@ -169,7 +171,12 @@ export class Grid {
       }
     }
     // Startgebiet und alte Karte flach halten
-    for (let y = 0; y < this.h; y++) for (let x = CORE.x0; x <= CORE.x1; x++) T[this.key(x, y)] = GRASS;
+    // (andere Karten: nur ein Band um die Strecke, damit die Berge bleiben)
+    const band = M.id === 'donau' ? 99 : 9;
+    for (let y = 0; y < this.h; y++) {
+      if (Math.abs(y - MAIN_ROW) > band) continue;
+      for (let x = CORE.x0; x <= CORE.x1; x++) T[this.key(x, y)] = GRASS;
+    }
   }
 
   /** Netzbetreiber elektrifiziert alle Streckengleise (fest verlegte Gleise) */
@@ -329,7 +336,7 @@ export class Grid {
 
   /** Berge, Bäume, Büsche und Dörfer */
   private generateLandscape() {
-    let seed = 1234567;
+    let seed = currentMap().landscapeSeed;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
     const T = this.terrain;
     // Berge auf Fels: erst große, dann kleine, dann Felsbrocken
@@ -351,7 +358,7 @@ export class Grid {
       if (rockFree(x, y, 1, 1) && rnd() < 0.5) this.addBuilding(rnd() < 0.5 ? 'bld_rock0' : 'bld_rock1', x, y, true);
     }
     // Wälder: dichte Flecken
-    const forests = Array.from({ length: 26 }, () => ({ x: rnd() * this.w, y: rnd() < 0.5 ? rnd() * 22 : 41 + rnd() * 23, r: 3 + rnd() * 7 }));
+    const forests = Array.from({ length: currentMap().forests }, () => ({ x: rnd() * this.w, y: rnd() < 0.5 ? rnd() * 22 : 41 + rnd() * 23, r: 3 + rnd() * 7 }));
     for (let y = 0; y < this.h; y++) {
       for (let x = 0; x < this.w; x++) {
         let p = 0.02;
@@ -368,7 +375,7 @@ export class Grid {
       }
     }
     // Dörfer
-    for (const v of VILLAGES) {
+    for (const v of currentMap().villages) {
       for (let i = 0; i < 8; i++) {
         const x = Math.round(v.x + (rnd() - 0.5) * 12), y = Math.round(v.y + (rnd() - 0.5) * 7);
         if (this.free(x, y, 2, 2) && !this.isOwned(x, y)) this.addBuilding(rnd() < 0.5 ? 'bld_houseA' : 'bld_houseB', x, y, true);
@@ -377,8 +384,5 @@ export class Grid {
   }
 }
 
-/** Dorfmitten (auch Weiden für Kühe und Schafe liegen dort) */
-export const VILLAGES = [
-  { x: 90, y: 20 }, { x: 160, y: 41 }, { x: 150, y: 21 }, { x: 100, y: 42 },
-  { x: 30, y: 38 }, { x: 70, y: 24 }, { x: 200, y: 24 }, { x: 240, y: 40 }, { x: 130, y: 8 }, { x: 128, y: 56 },
-];
+/** Dorfmitten der aktuellen Karte (auch Weiden für Kühe und Schafe liegen dort) */
+export const villages = () => currentMap().villages;

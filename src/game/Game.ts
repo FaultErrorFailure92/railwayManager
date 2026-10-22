@@ -1,11 +1,13 @@
-import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW, START_MONEY } from '../config';
+import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
 import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
 import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
-import { INDUSTRIES } from '../world/industries';
+import { industries } from '../world/industries';
+import { currentMap } from '../world/maps';
 import { ACHIEVEMENTS } from './Achievements';
+import { Goal, goalProgress, newGoals } from './Goals';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
@@ -36,7 +38,7 @@ export interface Stats {
 }
 
 /** Tageswerte für die Statistik */
-export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number }
+export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number; shop?: number; maxDelay?: number }
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
 
@@ -67,7 +69,8 @@ export type UiEvent =
   | { type: 'autosave'; label: string }
   | { type: 'news'; title: string; text: string; tag: string }
   | { type: 'decision'; title: string; text: string; yes: string; no: string }
-  | { type: 'achievement'; id: string };
+  | { type: 'achievement'; id: string }
+  | { type: 'goal' };
 
 /** Effekte auf der Karte (schwebende Beträge) */
 export interface FxEvent { amount: number; x: number; y: number; train?: number; label?: string }
@@ -102,6 +105,8 @@ export interface GameSave {
   achievements?: string[];
   weather?: Game['weather'];
   faults?: Game['faults'];
+  goals?: Goal[];
+  mapId?: string;
   offers?: Game['offers'];
   news?: Game['news'];
 }
@@ -137,7 +142,7 @@ export class Game {
   net: Network;
   readonly sim: Simulation;
   company = '';
-  private _money = START_MONEY;
+  private _money = currentMap().startMoney;
   /** Kasse – jede Änderung landet in der Tagesstatistik */
   get money() { return this._money; }
   set money(v: number) {
@@ -238,6 +243,7 @@ export class Game {
     if (save?.achievements) this.achievements = save.achievements;
     if (save?.weather) Object.assign(this.weather, save.weather);
     if (save?.faults) this.faults = save.faults;
+    if (save?.goals) this.goals = save.goals;
     this.faults.forEach((f) => this.sim.faultCells.add(f.k));
     this.applyWeather();
     this.clampTakts();
@@ -300,7 +306,7 @@ export class Game {
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id,
     };
   }
 
@@ -314,7 +320,7 @@ export class Game {
   /** Vorschlag für einen neuen Bahnhofsnamen */
   suggestStationName() {
     const used = new Set([...this.grid.buildings.values()].map((b) => b.name));
-    const free = STATION_NAMES.filter((n) => !used.has(n));
+    const free = (currentMap().stationNames ?? STATION_NAMES).filter((n) => !used.has(n));
     return free[Math.floor(Math.random() * free.length)] ?? `Bahnhof ${used.size + 1}`;
   }
 
@@ -414,6 +420,7 @@ export class Game {
 
   /** Stimmung eines Fahrgasts beim Einsteigen (aus der Menschen-Simulation) */
   passengerMood(op: OperatorId, mood: -1 | 0 | 1) {
+    this.moodEma += (mood - this.moodEma) * 0.01;
     this.satisfaction[op] = Math.max(0, Math.min(100, this.satisfaction[op] + (mood < 0 ? -0.4 : mood > 0 ? 0.15 : 0)));
   }
 
@@ -472,6 +479,8 @@ export class Game {
           if (r > 1.3) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - (r - 1.3) * 2);
           if (r < 0.85) this.satisfaction[t.op.id] = Math.min(100, this.satisfaction[t.op.id] + 0.2);
         }
+        if (shopSum) { const td = this.today(); td.shop = (td.shop ?? 0) + shopSum; }
+        if (t.op.needsStop && !t.transit) this.cleanEma += ((1 - t.dirt / 100) - this.cleanEma) * 0.05;
         if (t.dirt > 70) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - 2);
         this.addLog(`${t.number} abgefertigt · ${t.passengers} Fahrgäste${shopSum ? ` · Läden +${shopSum} €` : ''}${t.dirt > 70 ? ' · Zug verschmutzt!' : ''}`, t.dirt > 70 ? 'bad' : 'info');
         // Haltgebühr wird bei der Abfahrt fällig
@@ -554,6 +563,8 @@ export class Game {
     td.handled++;
     if (punctual) td.punctual++;
     td.pax += t.passengers;
+    td.maxDelay = Math.max(td.maxDelay ?? 0, missed ? 99 : delayMin);
+    this.checkGoals();
     this.stats.recent.push(punctual);
     if (this.stats.recent.length > 50) this.stats.recent.shift();
   }
@@ -711,19 +722,20 @@ export class Game {
 
   // ------------------------------------------------------------ Wetter, Störungen, Erfolge, Entscheidungen
   applyWeather() {
-    this.sim.weatherV = this.weather.kind === 'snow' ? 0.85 : this.weather.kind === 'rain' ? 0.95 : 1;
+    this.sim.weatherV = this.weather.kind === 'snow' ? (this.researched('switchHeat') ? 0.95 : 0.85) : this.weather.kind === 'rain' ? 0.95 : 1;
   }
 
   private updateWeather() {
     const t = this.sim.time;
     if (t < this.weather.until) return;
     const r = Math.random();
-    const kind = r < 0.62 ? 'sun' : r < 0.9 ? 'rain' : 'snow';
+    const w = currentMap().weather;
+    const kind = r < w.snow ? 'snow' : r < w.snow + w.rain ? 'rain' : 'sun';
     const was = this.weather.kind;
     this.weather = { kind, until: t + (3 + Math.random() * 6) * 3600 };
     this.applyWeather();
     if (kind !== was) {
-      if (kind === 'snow') this.addLog('Schneefall: Züge fahren langsamer', 'bad');
+      if (kind === 'snow') this.addLog(this.researched('switchHeat') ? 'Schneefall – dank Weichenheizung kaum Behinderungen' : 'Schneefall: Züge fahren langsamer (Weichenheizung hilft)', 'bad');
       else if (kind === 'rain') this.addLog('Regen zieht auf', 'info');
       else this.addLog('Das Wetter klart auf', 'good');
     }
@@ -882,19 +894,19 @@ export class Game {
     // 1. Regionalverkehr, sobald ein Empfangsgebäude steht
     if (this.stations().length && !this.offers.done.includes('regio')) {
       this.openOffer({ kind: 'tender', title: 'Ausschreibung Regionalverkehr', text: 'Dein Bahnhof ist eröffnet! Wähle EIN Unternehmen, das bei dir hält.',
-        ops: ['ro', 'lb', 'dm'] }, 'regio');
+        ops: currentMap().tenderRegio }, 'regio');
       this.offers.freightAt = t + 2 * 3600;
       return;
     }
     // 2. Güterverkehr kurz danach
     if (this.offers.freightAt && t >= this.offers.freightAt && !this.offers.done.includes('freight')) {
       this.openOffer({ kind: 'tender', title: 'Ausschreibung Güterverkehr', text: 'Güterzüge fahren durch und zahlen für die Trasse. Wähle EIN Unternehmen.',
-        ops: ['tx', 'hv', 'cd'] }, 'freight');
+        ops: currentMap().tenderFreight }, 'freight');
       return;
     }
     // 3. danach melden sich immer wieder Unternehmen (E-Züge erst mit Oberleitung)
     if (!this.offers.done.includes('freight') || t < this.offers.nextInquiry) return;
-    const order: OperatorId[] = ['wx', 'cd', 'sb', 'tt', 'rx', 'nj', 'ro', 'lb', 'tx', 'hv', 'dm', 'cs', 'hs'];
+    const order: OperatorId[] = currentMap().inquiries;
     const cand = order.find((op) => none(op) && !this.canRun(op) && (this.contracts[op].declinedUntil ?? 0) <= t
       && (op !== 'hs' || this.grid.mainRows.includes(SECOND_ROW)));
     if (!cand) { this.offers.nextInquiry = t + 3600; return; }
@@ -948,7 +960,64 @@ export class Game {
   }
 
   /** um Mitternacht abrechnen */
+  // ------------------------------------------------------------ Tagesziele & Bahnhofs-Bewertung
+  goals: Goal[] = [];
+  /** gleitende Mittel für die Bewertung */
+  cleanEma = 0.7;
+  moodEma = 0.3;
+  rating = { stars: 3, parts: { Pünktlichkeit: 0.8, Sauberkeit: 0.7, Komfort: 0, Service: 0, Stimmung: 0.6 } as Record<string, number> };
+
+  /** Ziele des Tages prüfen (sofort erreichbare) */
+  checkGoals() {
+    if (!this.goals.length) return;
+    const d = this.today();
+    for (const goal of this.goals) {
+      if (goal.done || goal.failed) continue;
+      if (goal.kind === 'noLate') { if ((d?.maxDelay ?? 0) > goal.target) { goal.failed = true; this.addLog('Tagesziel verpasst: ein Zug war zu spät', 'bad'); } continue; }
+      if (goal.kind === 'balance') continue;
+      if (goalProgress(goal, d, this).value >= 1) this.rewardGoal(goal);
+    }
+  }
+
+  private rewardGoal(goal: Goal) {
+    goal.done = true;
+    this.money += goal.reward;
+    this.research.points += goal.fp;
+    this.addLog(`Tagesziel geschafft: ${goalProgress(goal, undefined, this).label} · +${goal.reward.toLocaleString('de-AT')} € · +${goal.fp} FP`, 'good');
+    this.uiEvents.push({ type: 'goal' });
+  }
+
+  /** um Mitternacht: Tagesziele abschließen und neue verteilen */
+  private rollGoals() {
+    const prev = this.history.find((h) => h.day === Math.floor(this.sim.time / 86400) - 1);
+    for (const goal of this.goals) {
+      if (goal.done || goal.failed) continue;
+      if (goal.kind === 'noLate' && prev && prev.handled > 0) this.rewardGoal(goal);
+      else if (goal.kind === 'balance' && prev && prev.income - prev.expense > 0) this.rewardGoal(goal);
+    }
+    this.goals = this.stations().length ? newGoals(this, prev) : [];
+  }
+
+  /** Bahnhofs-Bewertung 1–5 Sterne: mehr Sterne, mehr Fahrgäste */
+  updateRating() {
+    const r = this.stats.recent;
+    const punct = r.length ? r.filter(Boolean).length / r.length : 0.8;
+    const runs = Math.max(1, this.net.runs.filter((x) => x.accessible).length);
+    const count = (keys: string[]) => [...this.grid.buildings.values()].filter((b) => !b.decor && keys.includes(b.key)).length;
+    const comfort = Math.min(1, (count(['bld_shelter', 'bld_bench', 'bld_clock', 'bld_wc', 'bld_lamp']) / (runs * 3)));
+    const shopTypes = ['bld_kiosk', 'bld_cafe', 'bld_vending', 'bld_inn'].filter((k) => count([k]) > 0).length;
+    const service = Math.min(1, shopTypes / 3 + (count(['bld_parking', 'bld_bus']) ? 0.2 : 0));
+    const mood = Math.max(0, Math.min(1, (this.moodEma + 1) / 2));
+    const parts = { Pünktlichkeit: punct, Sauberkeit: this.cleanEma, Komfort: comfort, Service: service, Stimmung: mood };
+    const score = punct * 0.35 + this.cleanEma * 0.15 + comfort * 0.2 + service * 0.15 + mood * 0.15;
+    const stars = Math.max(1, Math.min(5, Math.round(score * 5)));
+    if (this.stations().length && stars !== this.rating.stars) this.addLog(`Bahnhofs-Bewertung: ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`, stars > this.rating.stars ? 'good' : 'bad');
+    this.rating = { stars, parts };
+    this.sim.paxFactor = 0.8 + 0.1 * stars;
+  }
+
   private daily() {
+    this.rollGoals();
     const m = this.maintenance();
     const cost = m.total * (m.vandal ? 2 : 1);
     if (cost) {
@@ -1020,6 +1089,8 @@ export class Game {
     if (this.news.lastDay < 0) this.news.lastDay = day;
     if (day !== this.news.lastDay) { this.news.lastDay = day; this.daily(); }
     this.checkNews();
+    this.updateRating();
+    if (!this.goals.length && this.stations().length) this.goals = newGoals(this, undefined);
     this.updateWeather();
     this.maybeFault();
     this.checkAchievements();
@@ -1546,7 +1617,7 @@ export class Game {
 
   /** Privatbahnen: angeschlossen → fahren und zahlen; getrennt → fahren nicht mehr */
   private checkIndustries() {
-    for (const ind of INDUSTRIES) {
+    for (const ind of industries()) {
       const c = this.contracts[ind.op];
       const on = this.industryConnected(ind.id);
       if (on && c.status !== 'active') {

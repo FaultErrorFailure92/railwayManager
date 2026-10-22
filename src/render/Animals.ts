@@ -3,7 +3,7 @@ import { MAIN_ROW, TILE } from '../config';
 import type { Game } from '../game/Game';
 import manifest from '../gen/manifest.json';
 import { toScreen } from '../iso';
-import { VILLAGES } from '../world/Grid';
+import { villages } from '../world/Grid';
 
 type Kind = 'cow' | 'sheep' | 'deer' | 'hare' | 'fox';
 
@@ -64,7 +64,7 @@ export class Animals {
 
   private spawnAll() {
     // Weiden bei den Dörfern: Kühe oder Schafe (nie auf der Strecken-Seite)
-    VILLAGES.forEach((v, i) => {
+    villages().forEach((v, i) => {
       const kind: Kind = i % 2 ? 'sheep' : 'cow';
       const side = v.y < MAIN_ROW ? -1 : 1;
       const hx = v.x + (this.rnd() - 0.5) * 8, hy = v.y + side * (4 + this.rnd() * 3);

@@ -24,6 +24,7 @@
     </div>
     <div class="sep"></div>
     <div class="stat" title="Kasse"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span><span class="loan hidden" id="loan" title="Automatischer Kredit – täglich Zinsen, bei −50 000 € ist Schluss">KREDIT</span></div>
+    <div class="stat stars" id="stars-wrap" title="Bahnhofs-Bewertung"><span id="stars">★★★☆☆</span></div>
     <div class="stat daycost" title="Laufende Kosten pro Tag (Instandhaltung + Zinsen)"><span id="daycost">−0 €/Tag</span></div>
     <div class="stat" title="Pünktlichkeit"><img src="assets/gen/ui/check.png" alt="" /><span id="punct">–</span></div>
     <div class="stat" title="Fahrgäste gesamt"><img src="assets/gen/ui/person.png" alt="" /><span id="pax">0</span></div>
@@ -51,6 +52,10 @@
         <span class="q-reward" id="q-reward"></span>
       </div>
       <button class="btn q-show" id="q-show">▼ Zeig mir wo</button>
+    </section>
+    <section class="panel fold" id="p-goals">
+      <h3 data-fold="p-goals">Tagesziele</h3>
+      <ul id="goals"></ul>
     </section>
     <section class="panel fold" id="p-trains">
       <h3 data-fold="p-trains">Zugverkehr</h3>
@@ -150,6 +155,24 @@
   </div>
   <div id="traincard" class="panel hidden"></div>
 
+  <div id="changelog" class="hidden">
+    <div class="panel cl-box">
+      <div class="cl-head"><h2>WAS IST NEU?</h2><button class="btn" id="cl-close">✕</button></div>
+      <div class="cl-main">
+        <nav class="cl-tabs" id="cl-tabs"></nav>
+        <div class="cl-body" id="cl-body"></div>
+      </div>
+      <div class="cl-foot"><button class="btn big" id="cl-ok">Los geht's!</button></div>
+    </div>
+  </div>
+
+  <div id="mappick" class="hidden">
+    <div class="panel cl-box mp-box">
+      <div class="cl-head"><h2>KARTE WÄHLEN</h2><button class="btn" id="mp-close">✕</button></div>
+      <div class="mp-cards" id="mp-cards"></div>
+    </div>
+  </div>
+
   <div id="menu" class="hidden">
     <div class="m-box">
       <img class="m-logo" src="assets/gen/ui/train.png" alt="" />
@@ -160,6 +183,7 @@
         <button class="btn big" id="m-new">Neues Spiel</button>
         <button class="btn big" id="m-load">Laden</button>
         <button class="btn big" id="m-help">Steuerung</button>
+        <button class="btn big" id="m-news">Was ist neu?</button>
       </div>
       <div class="panel slots hidden" id="m-slots"></div>
       <div class="panel m-help hidden" id="m-helpbox">

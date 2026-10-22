@@ -2,6 +2,8 @@ import { COST, STATION_UPGRADE } from '../config';
 import { Game, fmtTime } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
 import { ACHIEVEMENTS } from '../game/Achievements';
+import { goalProgress } from '../game/Goals';
+import { currentMap, MAPS } from '../world/maps';
 import { Sound } from '../render/Sound';
 import { MISSIONS, ToolId } from '../game/Missions';
 import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
@@ -67,7 +69,12 @@ export class Hud {
     };
     $('m-load').onclick = () => this.toggleSlots('m-slots');
     $('go-load').onclick = () => this.toggleSlots('go-slots');
-    $('go-new').onclick = () => { saveState.disabled = true; clearSave(); try { sessionStorage.setItem('rm_new', '1'); } catch { /* egal */ } location.reload(); };
+    $('go-new').onclick = () => { $('gameover').classList.add('hidden'); this.openMapPick(); };
+    $('mp-close').onclick = () => $('mappick').classList.add('hidden');
+    $('mp-cards').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-map]') as HTMLElement | null;
+      if (b) this.startOnMap(b.dataset.map!);
+    });
     for (const id of ['m-slots', 'go-slots']) {
       $(id).addEventListener('click', (e) => {
         const t = e.target as HTMLElement;
@@ -112,6 +119,13 @@ export class Hud {
     $('m-help').onclick = () => $('m-helpbox').classList.toggle('hidden');
 
     $('ev-ok').onclick = () => this.closeEvent();
+    $('m-news').onclick = () => this.openChangelog(0);
+    $('cl-close').onclick = () => this.closeChangelog();
+    $('cl-ok').onclick = () => this.closeChangelog();
+    $('cl-tabs').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-rel]') as HTMLElement | null;
+      if (b) this.openChangelog(Number(b.dataset.rel));
+    });
     $('ev-body').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-decide]') as HTMLElement | null;
       if (!b) return;
@@ -170,6 +184,10 @@ export class Hud {
       this.renderScreen(true);
     });
     window.addEventListener('keydown', (e) => {
+      if (!$('changelog').classList.contains('hidden')) {
+        if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); this.closeChangelog(); }
+        return;
+      }
       // Schnellspeichern
       if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's')) { e.preventDefault(); if (this.g.company) $('btn-save').click(); return; }
       if (!$('event').classList.contains('hidden')) {
@@ -216,11 +234,22 @@ export class Hud {
     try { seen = localStorage.getItem('rm_seen_version') ?? ''; } catch { /* egal */ }
     if (seen === VERSION) return;
     try { localStorage.setItem('rm_seen_version', VERSION); } catch { /* egal */ }
-    const c = CHANGELOG[0];
-    $('event').classList.add('top');
-    this.showEvent(`<h1 class="blue">WAS IST NEU?</h1><div class="ev-title">${c.title}</div>
-      <ul class="ev-changes">${c.items.map((i) => `<li>${i}</li>`).join('')}</ul>`, false);
+    this.openChangelog(0);
   }
+
+  /** Änderungsprotokoll: links die Versionen, rechts die Neuerungen */
+  private openChangelog(idx: number) {
+    const tabs = CHANGELOG.map((r, i) => `<button class="cl-tab${i === idx ? ' on' : ''}" data-rel="${i}"><b>${r.version}</b><small>${r.date}</small></button>`).join('');
+    const r = CHANGELOG[idx];
+    const label: Record<string, string> = { neu: 'NEU', besser: 'BESSER', fix: 'BEHOBEN' };
+    const items = r.items.map((it) => `<li class="cl-item"><span class="slot">${it.icon ? `<img src="${ICON(it.icon)}" alt="" />` : ''}</span>
+      <span class="cl-tag ${it.kind}">${label[it.kind]}</span><span class="cl-text">${it.text}</span></li>`).join('');
+    $('cl-tabs').innerHTML = tabs;
+    $('cl-body').innerHTML = `<div class="cl-ver">Version ${r.version}${idx === 0 ? ' <span class="cl-latest">aktuell</span>' : ''}</div><div class="cl-title">${r.title}</div><ul class="cl-list">${items}</ul>`;
+    $('changelog').classList.remove('hidden');
+  }
+
+  private closeChangelog() { $('changelog').classList.add('hidden'); }
 
   // ------------------------------------------------------------ Hauptmenü
   private openMenu() {
@@ -232,7 +261,7 @@ export class Hud {
     const running = this.hadSave || !!this.g.company;
     $('m-continue').style.display = running ? '' : 'none';
     $('m-new').textContent = running ? 'Neues Spiel' : 'Spiel starten';
-    $('m-sub').textContent = running ? (this.g.company || '') : '';
+    $('m-sub').textContent = running ? `${this.g.company || ''} · ${currentMap().name}` : '';
     this.newGameArmed = 0;
     $('menu').classList.remove('hidden');
   }
@@ -246,13 +275,45 @@ export class Hud {
 
   private newGame() {
     const running = this.hadSave || !!this.g.company;
-    if (!running) { this.pausedBeforeMenu = false; this.closeMenu(); return; }
-    if (performance.now() < this.newGameArmed) {
-      saveState.disabled = true;
-      clearSave();
-      try { sessionStorage.setItem('rm_new', '1'); } catch { /* egal */ }
-      location.reload();
-    } else this.newGameArmed = performance.now() + 5000;
+    if (!running || performance.now() < this.newGameArmed) this.openMapPick();
+    else this.newGameArmed = performance.now() + 5000;
+  }
+
+  /** Kartenauswahl vor einem neuen Spiel */
+  private openMapPick() {
+    const diff: Record<string, string> = { leicht: '★', mittel: '★★', schwer: '★★★' };
+    $('mp-cards').innerHTML = MAPS.map((m) => `<button class="mp-card" data-map="${m.id}" style="--tint:#${m.tint.toString(16).padStart(6, '0')}">
+      <div class="mp-prev">${this.mapPreview(m)}</div>
+      <b>${m.name}</b><span class="mp-theme">${m.theme} · Schwierigkeit ${diff[m.difficulty]}</span>
+      <small>${m.info}</small><span class="mp-money">Startkapital ${eur(m.startMoney)} €</span></button>`).join('');
+    $('mappick').classList.remove('hidden');
+  }
+
+  /** kleine Vorschau: Fels, Wasser, Wald grob als Pixel */
+  private mapPreview(m: (typeof MAPS)[number]) {
+    const W = 64, H = 16, px: string[] = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const gx = x * 4, gy = y * 4;
+      let c = '';
+      if (m.rocks.some((r) => gx >= r.x0 && gx < r.x1 && gy >= r.y0 && gy < r.y1 && (r.edge === 'N' ? gy < r.y0 + (r.y1 - r.y0) * 0.7 : gy > r.y0 + (r.y1 - r.y0) * 0.3))) c = '#8f887c';
+      if (m.lakes.some((l) => ((gx - l.x) / (l.rx + 1)) ** 2 + ((gy - l.y) / (l.ry + 1)) ** 2 <= 1)) c = '#4a7fc4';
+      if (m.rivers.some((rv) => Math.abs(gx - rv.x) <= 2)) c = '#4a7fc4';
+      if (gy === 28 || gy === 32) c = '#5a4632';
+      if (m.industries.some((i) => Math.abs(gx - i.x) <= 3 && Math.abs(gy - i.y) <= 3)) c = '#c0392b';
+      if (c) px.push(`<i style="left:${x * 3}px;top:${y * 3}px;background:${c}"></i>`);
+    }
+    return px.join('');
+  }
+
+  private startOnMap(id: string) {
+    const running = this.hadSave || !!this.g.company;
+    $('mappick').classList.add('hidden');
+    // erstes Spiel auf der schon geladenen Karte: kein Neuladen nötig
+    if (!running && id === currentMap().id) { this.pausedBeforeMenu = false; this.closeMenu(); return; }
+    saveState.disabled = true;
+    clearSave();
+    try { sessionStorage.setItem('rm_new', '1'); sessionStorage.setItem('rm_map', id); } catch { /* egal */ }
+    location.reload();
   }
 
   // ------------------------------------------------------------ Namen (Firma, Bahnhof)
@@ -307,6 +368,7 @@ export class Hud {
   private timetable!: Timetable;
   private rsTipId?: string;
   private maintVersion = -1;
+  private goalsKey = '';
   private maintAt = 0;
   private pausedBeforeScreen = false;
   private screenKey = '';
@@ -624,6 +686,21 @@ export class Hud {
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
     $('loan').classList.toggle('hidden', g.money >= 0);
+    // Bahnhofs-Bewertung und Tagesziele
+    const st = g.rating.stars;
+    $('stars').textContent = '★'.repeat(st) + '☆'.repeat(5 - st);
+    $('stars-wrap').title = `Bahnhofs-Bewertung – mehr Sterne bringen mehr Fahrgäste (×${(0.8 + 0.1 * st).toFixed(1)})\n`
+      + Object.entries(g.rating.parts).map(([k, v]) => `${k}: ${Math.round(v * 100)} %`).join('\n');
+    const gk = g.goals.map((x) => `${x.kind}${x.done}${x.failed}`).join() + '|' + (g.history[g.history.length - 1]?.handled ?? 0) + (g.history[g.history.length - 1]?.pax ?? 0);
+    if (gk !== this.goalsKey) {
+      this.goalsKey = gk;
+      const d = g.history[g.history.length - 1];
+      $('goals').innerHTML = g.goals.length ? g.goals.map((x) => {
+        const p = goalProgress(x, d, g);
+        const cls = x.done ? 'ok' : x.failed ? 'no' : '';
+        return `<li class="gl ${cls}"><span class="gl-mark">${x.done ? '✓' : x.failed ? '✗' : '○'}</span><span class="gl-text">${p.label}<small>${x.done ? 'geschafft' : p.text} · +${eur(x.reward)} €</small></span></li>`;
+      }).join('') : '<li class="gl"><span class="gl-text"><small>Ab dem ersten Bahnhof gibt es jeden Tag neue Ziele</small></span></li>';
+    }
     if (g.version !== this.maintVersion || now > this.maintAt) {
       this.maintVersion = g.version; this.maintAt = now + 5000;
       const m = g.maintenance();
@@ -803,6 +880,7 @@ export class Hud {
           <div class="dc-btns"><button class="btn big" data-decide="1">${ev.yes}</button><button class="btn" data-decide="0">${ev.no}</button></div>`, false);
         continue;
       }
+      if (ev.type === 'goal') { Sound.coin(); continue; }
       if (ev.type === 'achievement') {
         const a = ACHIEVEMENTS.find((x) => x.id === ev.id);
         Sound.coin();

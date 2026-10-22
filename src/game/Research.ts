@@ -1,7 +1,7 @@
 import type { Game } from './Game';
 import type { ToolId } from './Missions';
 
-export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump' | 'shunt'
+export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump' | 'shunt' | 'switchHeat'
   | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco';
 
 export interface ResearchDef {
@@ -58,6 +58,8 @@ export const RESEARCH: ResearchDef[] = [
     col: 3, row: 2, cost: 9000, fp: 10, hours: 8, requires: ['station2'] },
   { id: 'shunt', name: 'Verschubbereiche', info: 'Gleise als Verschubbereich markieren: dort nur Schrittgeschwindigkeit, günstige Rangiersignale teilen den Bereich in kurze Abschnitte', icon: 'mark_shunt',
     col: 1, row: 4, cost: 2500, fp: 4, hours: 3, requires: ['siding'] },
+  { id: 'switchHeat', name: 'Weichenheizung', info: 'Bei Schnee frieren die Weichen nicht ein: Züge fahren fast normal schnell', icon: 'piece_branch_divUp',
+    col: 2, row: 4, cost: 3500, fp: 5, hours: 3, requires: ['crossing'] },
   { id: 'workshop', name: 'Werkstatt', info: 'Verschlissene Züge reparieren', icon: 'bld_workshop',
     col: 2, row: 3, cost: 6000, fp: 8, hours: 5, requires: ['remise'] },
 ];

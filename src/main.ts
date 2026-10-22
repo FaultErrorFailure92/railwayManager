@@ -5,11 +5,16 @@ import { Game } from './game/Game';
 import { loadSave, writeSave } from './game/storage';
 import { GameScene, UiState } from './render/GameScene';
 import { Hud } from './ui/Hud';
+import { setMap } from './world/maps';
 
 let game: Game;
 let freshStart = false;
 try { freshStart = sessionStorage.getItem('rm_new') === '1'; sessionStorage.removeItem('rm_new'); } catch { /* egal */ }
 const saved = freshStart ? undefined : loadSave();
+// Karte: beim neuen Spiel die gewählte, sonst die des Spielstands
+let mapId: string | undefined;
+try { mapId = freshStart ? sessionStorage.getItem('rm_map') ?? undefined : saved?.mapId; } catch { /* egal */ }
+setMap(mapId);
 try {
   game = new Game(saved);
 } catch (e) {
