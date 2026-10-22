@@ -102,3 +102,4 @@
 - [x] Arbeite mir ein viel detaillieretes Forschungssystem aus. und die Forschungen können ruhig anders heissen als das, was sie freischalten, gerne auch mit einem Augenzwinkern. ich stelle mir 2-3 Bäume vor, wo einer wirklich Betriebliche Features freischaltet, einer Deko und einer Vielleicht dinge, mit denen Sich zusätzlich geld verdienen lässt. aber da mach zuerst einen plan und zeig ihn mir, bevor du das umsetzt. *(3 Bäume: Stellwerk, Verschönerungsverein, Kaufmännische Abteilung; je Baum eine Forschung parallel)*
 - [x] Schönere Vorschaubilder für die Themes *(echte Ausschnitte aus der Karte, neu erzeugen mit tools/map_previews.py)*
 - [x] Bei Wüste nimm bitte auch noch andere Gebäudetiles dazu *(Lehmhäuser, Kuppelhaus, Lehmhütte, Ziehbrunnen, Zelt)*
+- Elemente für Bahnsteige müssen drehbar sein, gilt auch für Gebäude. 
