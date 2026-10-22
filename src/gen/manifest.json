@@ -637,6 +637,195 @@
    "w": 25,
    "h": 22
   },
+  "car_lb_loco_0": {
+   "file": "car_lb_loco_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_lb_loco_1": {
+   "file": "car_lb_loco_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_lb_loco_2": {
+   "file": "car_lb_loco_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_lb_coach_0": {
+   "file": "car_lb_coach_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_lb_coach_1": {
+   "file": "car_lb_coach_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_lb_coach_2": {
+   "file": "car_lb_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_lb_cab_0": {
+   "file": "car_lb_cab_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_lb_cab_1": {
+   "file": "car_lb_cab_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_lb_cab_2": {
+   "file": "car_lb_cab_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hv_loco_0": {
+   "file": "car_hv_loco_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hv_loco_1": {
+   "file": "car_hv_loco_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hv_loco_2": {
+   "file": "car_hv_loco_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hv_wagon0_0": {
+   "file": "car_hv_wagon0_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hv_wagon0_1": {
+   "file": "car_hv_wagon0_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hv_wagon0_2": {
+   "file": "car_hv_wagon0_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hv_wagon1_0": {
+   "file": "car_hv_wagon1_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hv_wagon1_1": {
+   "file": "car_hv_wagon1_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hv_wagon1_2": {
+   "file": "car_hv_wagon1_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hv_wagon2_0": {
+   "file": "car_hv_wagon2_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hv_wagon2_1": {
+   "file": "car_hv_wagon2_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hv_wagon2_2": {
+   "file": "car_hv_wagon2_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hs_pcar_0": {
+   "file": "car_hs_pcar_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hs_pcar_1": {
+   "file": "car_hs_pcar_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hs_pcar_2": {
+   "file": "car_hs_pcar_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hs_coach_0": {
+   "file": "car_hs_coach_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hs_coach_1": {
+   "file": "car_hs_coach_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hs_coach_2": {
+   "file": "car_hs_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_dm_steam_0": {
    "file": "car_dm_steam_0.png",
    "ox": -13,
@@ -762,6 +951,195 @@
    "oy": 0,
    "w": 14,
    "h": 10
+  },
+  "bld_cafe": {
+   "file": "bld_cafe.png",
+   "ox": -35,
+   "oy": -23,
+   "w": 70,
+   "h": 58
+  },
+  "bld_parking": {
+   "file": "bld_parking.png",
+   "ox": -35,
+   "oy": -13,
+   "w": 86,
+   "h": 56
+  },
+  "bld_bus": {
+   "file": "bld_bus.png",
+   "ox": -35,
+   "oy": -25,
+   "w": 86,
+   "h": 68
+  },
+  "bld_station2": {
+   "file": "bld_station2.png",
+   "ox": -35,
+   "oy": -55,
+   "w": 86,
+   "h": 98
+  },
+  "bld_station3": {
+   "file": "bld_station3.png",
+   "ox": -35,
+   "oy": -55,
+   "w": 86,
+   "h": 98
+  },
+  "bld_fountain": {
+   "file": "bld_fountain.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
+  },
+  "bld_flowers": {
+   "file": "bld_flowers.png",
+   "ox": -19,
+   "oy": -9,
+   "w": 38,
+   "h": 28
+  },
+  "bld_statue": {
+   "file": "bld_statue.png",
+   "ox": -19,
+   "oy": -25,
+   "w": 38,
+   "h": 44
+  },
+  "bld_vending": {
+   "file": "bld_vending.png",
+   "ox": -19,
+   "oy": -23,
+   "w": 38,
+   "h": 38
+  },
+  "bld_lamp": {
+   "file": "bld_lamp.png",
+   "ox": -19,
+   "oy": -29,
+   "w": 38,
+   "h": 44
+  },
+  "bld_clock": {
+   "file": "bld_clock.png",
+   "ox": -19,
+   "oy": -29,
+   "w": 38,
+   "h": 44
+  },
+  "road_0": {
+   "file": "road_0.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_1": {
+   "file": "road_1.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_2": {
+   "file": "road_2.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_3": {
+   "file": "road_3.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_4": {
+   "file": "road_4.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_5": {
+   "file": "road_5.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_6": {
+   "file": "road_6.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_7": {
+   "file": "road_7.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_8": {
+   "file": "road_8.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_9": {
+   "file": "road_9.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_10": {
+   "file": "road_10.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_11": {
+   "file": "road_11.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_12": {
+   "file": "road_12.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_13": {
+   "file": "road_13.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_14": {
+   "file": "road_14.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
+  },
+  "road_15": {
+   "file": "road_15.png",
+   "ox": -19,
+   "oy": -5,
+   "w": 38,
+   "h": 24
   },
   "water_0": {
    "file": "water_0.png",

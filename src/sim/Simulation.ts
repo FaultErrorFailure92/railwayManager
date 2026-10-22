@@ -1,6 +1,6 @@
 import { ACC, CAR_LEN, DEC, LOOP_SLACK, MAIN_ROW, MAP_W, PASSING_LOOPS, SECOND_ROW, START_TIME, TILE } from '../config';
 import { Dir, Edge, edgeRow, isOut, Network, ParkKind, SortRun } from '../world/Network';
-import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS, TAKT } from './Operators';
+import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS } from './Operators';
 
 /** Aufgaben eines Zuges, der Reihe nach abgearbeitet */
 export type Job =
@@ -124,6 +124,12 @@ export class Simulation {
   private noted = new Map<string, number>();
   /** Vertrag mit dem Unternehmen aktiv? (sonst nur Durchfahrt) */
   contractActive: (id: OperatorId) => boolean = () => true;
+  /** Takt in Minuten je Unternehmen (0 = fährt nicht) – kommt aus den Verträgen */
+  taktOf: (id: OperatorId) => number = () => 0;
+  /** Züge in einem Stau-Kreis (gegenseitig blockiert) */
+  deadlock: number[] | null = null;
+  /** längster Bahnsteig mit Zugang (Felder) – Züge werden höchstens so lang */
+  maxPlatform = 0;
   /** Höchstgeschwindigkeit im abzweigenden Strang einer Weiche */
   switchV = (10 * TILE) / 60;
 
@@ -136,26 +142,30 @@ export class Simulation {
   // ------------------------------------------------------------ Fahrplan
   setLevel(level: number) {
     this.level = level;
-    const takt = TAKT[level];
+  }
+
+  /** Takt geändert / neuer Vertrag: geplante, noch ferne Züge des Unternehmens neu planen */
+  retime(id: OperatorId) {
     const keepUntil = this.time + 600;
-    this.queue = this.queue.filter((t) => t.plannedSpawn <= keepUntil);
-    for (const id of Object.keys(takt) as OperatorId[]) {
-      if (!takt[id]) continue;
+    this.queue = this.queue.filter((t) => t.op.id !== id || t.plannedSpawn <= keepUntil);
+    const takt = this.taktOf(id);
+    if (takt) {
       const last = Math.max(-Infinity, ...this.queue.filter((t) => t.op.id === id).map((t) => t.plannedSpawn));
-      this.nextSpawn[id] = Math.max(last + takt[id] * 60, this.time + 300);
+      this.nextSpawn[id] = Math.max(last + takt * 60, this.time + 300);
     }
     this.fillTimetable();
   }
 
-  private fillTimetable() {
-    const takt = TAKT[this.level];
-    for (const id of Object.keys(takt) as OperatorId[]) {
-      if (!takt[id]) continue;
+  fillTimetable() {
+    for (const id of Object.keys(OPERATORS) as OperatorId[]) {
+      const takt = this.taktOf(id);
+      if (!takt) continue;
+      if (this.nextSpawn[id] === undefined || this.nextSpawn[id] < this.time) this.nextSpawn[id] = this.time + 300;
       while (this.nextSpawn[id] < this.time + PLAN_AHEAD) {
         const at = this.nextSpawn[id];
-        this.nextSpawn[id] += takt[id] * 60;
+        this.nextSpawn[id] += takt * 60;
         if (!inHours(OPERATORS[id], at)) continue;
-        const dir = this.nextDir[id];
+        const dir = this.nextDir[id] ?? 'E';
         this.nextDir[id] = dir === 'E' ? 'W' : 'E';
         this.queue.push(this.createTrain(OPERATORS[id], at, dir));
       }
@@ -164,7 +174,18 @@ export class Simulation {
   }
 
   private createTrain(op: Operator, at: number, dir: Dir): Train {
-    const base = op.long && Math.random() < (op.longShare ?? 0) ? op.long : op.cars;
+    let base = op.long && Math.random() < (op.longShare ?? 0) ? op.long : op.cars;
+    if (op.needsStop && op.long) {
+      // Personenzüge: so lang, wie der längste Bahnsteig erlaubt (lange Züge bringen mehr)
+      const fit = this.maxPlatform;
+      if (fit >= op.long.length && Math.random() < 0.6) base = op.long;
+      else if (fit < op.long.length) base = op.cars;
+      if (base === op.long && fit >= op.long.length + 2 && Math.random() < 0.4) {
+        const extra = op.cars.includes('emu') ? 'emu' : 'coach';
+        const tail = base[base.length - 1];
+        base = tail === 'cab' || tail === 'pcar' ? [...base.slice(0, -1), extra, extra, tail] : [...base, extra, extra];
+      }
+    }
     const cars = base.map((c) => (c === 'wagon' ? `wagon${Math.floor(Math.random() * 3)}` : c));
     const contract = this.contractActive(op.id);
     const length = cars.length * CAR_LEN;
@@ -183,7 +204,7 @@ export class Simulation {
     const stopLoss = stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (op.turnback ? 60 : 0) : 0;
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
     const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu').length * 80;
-    const paxScale = base === op.cars ? 1 : 1.6;
+    const paxScale = base.length / op.cars.length;
     const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale));
     return {
       id: this.nextId++, op, cars, length, dir,
@@ -251,7 +272,7 @@ export class Simulation {
    * Würde die Reservierung von `blocks` für Zug t eine gegenseitige Blockade erzeugen?
    * Wartegraph: X wartet auf Y, wenn auf X' restlichem Weg ein Block von Y liegt.
    */
-  private wouldDeadlock(t: Train, blocks: Set<number>, tRemaining: Edge[]) {
+  private wouldDeadlock(t: Train, blocks: Set<number>, tRemaining: Edge[], relaxed = false) {
     const ownerOf = (b: number) => (blocks.has(b) ? t.id : this.blockOwner(b));
     const byId = new Map(this.trains.map((x) => [x.id, x]));
     /** nur bis zur nächsten Kreuzungsstelle schauen: dort können sich Züge ausweichen */
@@ -261,7 +282,10 @@ export class Simulation {
     };
     const waitsFor = (x: Train): number[] => {
       if (x.state === 'rolling' || x.state === 'stored') return [];
-      const rest = horizon(x === t ? tRemaining : [...x.route.slice(x.committed + 1), ...(x.ahead ?? [])]);
+      // locker: fahrende Züge nur bis zu ihrem nächsten Ziel (danach geben sie Blöcke hinter sich frei)
+      const own = x.route.slice(x.committed + 1);
+      const useAhead = !relaxed || x.state !== 'running' || !own.length;
+      const rest = horizon(x === t ? tRemaining : useAhead ? [...own, ...(x.ahead ?? [])] : own);
       const res = new Set<number>();
       for (const e of rest) {
         if (e.block < 0) continue;
@@ -288,7 +312,11 @@ export class Simulation {
     const idx = this.section(t.route, i);
     const blocks = this.sectionBlocks(t.route, idx);
     for (const b of blocks) if (!this.blockFree(b, t.id)) return false;
-    if (this.wouldDeadlock(t, blocks, [...t.route.slice(i), ...(t.ahead ?? [])])) return false;
+    if (this.wouldDeadlock(t, blocks, [...t.route.slice(i), ...(t.ahead ?? [])])) {
+      // gegenseitiges Warten auflösen: wer schon länger wartet, darf fahren, wenn es bis zum nächsten Ziel sicher ist
+      const long = t.waitSince !== undefined && this.time - t.waitSince > 60;
+      if (!long || this.wouldDeadlock(t, blocks, t.route.slice(i), true)) return false;
+    }
     for (const b of blocks) this.reserve(t, b);
     t.committed = idx[idx.length - 1];
     return true;
@@ -368,13 +396,22 @@ export class Simulation {
   private estimateAhead(t: Train, path: Edge[]): Edge[] {
     const next = t.jobs[1];
     if (!next) return [];
-    // Wendezüge fahren über ihren bisherigen Weg zurück
-    if (t.op.turnback && !t.turned) return [...t.route, ...path];
     const end = path[path.length - 1];
+    /** nach dem Wenden: tatsächlichen Weg in Gegenrichtung schätzen */
+    const afterReverse = () => {
+      const rev = this.net.twin(end);
+      if (!rev) return null;
+      const saved = t.dir;
+      t.dir = saved === 'E' ? 'W' : 'E';
+      const c2 = this.candidates(t, rev.to, next);
+      t.dir = saved;
+      return c2[0] ? [rev, ...c2[0]] : null;
+    };
+    if (t.op.turnback && !t.turned) return afterReverse() ?? [...t.route, ...path];
     const c = this.candidates(t, end.to, next);
     if (c[0]) return c[0];
-    // muss dort wenden (z.B. im Stumpfgleis): fährt über den bisherigen Weg zurück
-    if (this.canReverse(t)) return [...t.route, ...path];
+    // muss dort wenden (z.B. im Stumpfgleis)
+    if (this.canReverse(t)) return afterReverse() ?? [...t.route, ...path];
     return [];
   }
 
@@ -452,7 +489,7 @@ export class Simulation {
         else if (t.state !== 'stored' && t.state !== 'done') this.moveTrain(t, dt);
       }
       this.sortDepartures();
-      if (Math.floor(this.time / 30) !== Math.floor((this.time - dt) / 30)) this.resolveDeadlocks();
+      if (Math.floor(this.time / 30) !== Math.floor((this.time - dt) / 30)) this.deadlock = this.findDeadlock();
       this.trains = this.trains.filter((t) => t.state !== 'done');
     }
     this.fillTimetable();
@@ -815,9 +852,10 @@ export class Simulation {
    * Notbremse gegen Blockaden: stehen mehrere Züge seit Minuten im Kreis aufeinander wartend,
    * fällt der zuletzt eingefahrene aus (Strafe), damit der Rest weiterfahren kann.
    */
-  private resolveDeadlocks() {
+  /** Züge, die sich gegenseitig blockieren (Kreis), sonst null */
+  private findDeadlock(): number[] | null {
     const stuck = this.trains.filter((t) => t.state === 'running' && !t.rake && t.waiting && t.waitSince !== undefined && this.time - t.waitSince > 240);
-    if (stuck.length < 2) return;
+    if (stuck.length < 2) return null;
     const ids = new Set(stuck.map((t) => t.id));
     const byId = new Map(this.trains.map((t) => [t.id, t]));
     const waitsFor = (x: Train) => {
@@ -845,15 +883,21 @@ export class Simulation {
         return false;
       };
       if (!dfs(start.id)) continue;
-      const cycle = path.map((id) => byId.get(id)!).filter((t) => ids.has(t.id));
-      const victim = cycle.sort((a, b) => b.plannedSpawn - a.plannedSpawn)[0];
-      if (!victim) return;
-      for (const k of victim.reserved) if (this.owner[k] === victim.id) this.owner[k] = 0;
-      victim.reserved.clear();
-      victim.state = 'done';
-      this.events.push({ type: 'cancel', train: victim });
-      return;
+      return path.slice();
     }
+    return null;
+  }
+
+  /** Zug aus dem Verkehr nehmen (Ausweg aus einem Stau) */
+  cancelTrain(id: number) {
+    const t = this.trains.find((x) => x.id === id);
+    if (!t) return;
+    for (const k of t.reserved) if (this.owner[k] === t.id) this.owner[k] = 0;
+    t.reserved.clear();
+    t.state = 'done';
+    this.trains = this.trains.filter((x) => x !== t);
+    this.events.push({ type: 'cancel', train: t });
+    this.deadlock = null;
   }
 
   // ------------------------------------------------------------ Wenden

@@ -6,7 +6,7 @@ import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
 
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
-const CARD_W = 236, CARD_H = 132, GAP_X = 64, GAP_Y = 16;
+const CARD_W = 272, CARD_H = 134, GAP_X = 52, GAP_Y = 14;
 
 const hm = (sec: number) => {
   const m = Math.max(0, Math.ceil(sec / 60));
@@ -57,20 +57,19 @@ export function researchHtml(g: Game, quest?: string) {
 
 /** Unternehmen für die Vertragsliste */
 function contractOps(g: Game) {
-  const act = new Set(g.activeOperators().map((o) => o.id));
-  return Object.values(OPERATORS).filter((o) => o.kind !== 'sort' && (act.has(o.id) || !g.contracts[o.id].active));
+  return g.activeOperators().filter((o) => o.kind !== 'sort' || true);
 }
 
 export function contractsKey(g: Game) {
   return contractOps(g).map((o) => {
     const c = g.contracts[o.id];
-    return `${o.id}${c.active}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
-  }).join('|');
+    return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
+  }).join('|') + g.minTakt;
 }
 
 export function contractsHtml(g: Game) {
   const ops = contractOps(g);
-  if (!ops.length) return '<div class="ct-empty">Noch keine Unternehmen unterwegs.</div>';
+  if (!ops.length) return '<div class="ct-empty">Noch keine Verträge. Sobald dein Empfangsgebäude steht, gibt es eine Ausschreibung.</div>';
   const rows = ops.map((o) => {
     const c = g.contracts[o.id];
     const sat = Math.round(g.satisfaction[o.id]);
@@ -82,8 +81,11 @@ export function contractsHtml(g: Game) {
         <span class="${tone}">${eur(v)} €</span><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="10">+</button>
         <small>fair ${eur(fair)}</small></div>`;
     };
+    const takt = `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1">−</button>
+      <span>${c.takt} min</span><button class="btn" data-takt="${o.id}" data-d="-1"${c.takt <= g.minTakt ? ' disabled' : ''}>+</button>
+      <small>${c.takt <= g.minTakt && g.minTakt > 15 ? 'öfter erst mit 2. Gleis' : ''}</small></div>`;
     let status: string;
-    if (c.active) {
+    if (c.status === 'active') {
       const risk = cancelRisk(o, c, sat);
       status = risk > 0 ? `<span class="no">⚠ Kündigung droht (${Math.round(risk * 100)} %/h)</span>` : '<span class="ok">Vertrag läuft</span>';
     } else if (g.sim.time < c.talkAfter) {
@@ -92,8 +94,9 @@ export function contractsHtml(g: Game) {
       const ch = Math.round(acceptChance(o, c, sat) * 100);
       status = `<button class="btn ct-offer" data-offer="${o.id}">Angebot senden · ${ch} %</button>`;
     }
-    return `<div class="ct-row${c.active ? '' : ' off'}">
+    return `<div class="ct-row${c.status === 'active' ? '' : ' off'}">
       <div class="ct-name"><span class="dot" style="background:${o.color}"></span><div><b>${o.name}</b><small>${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}</small></div></div>
+      <div><small class="ct-lbl">Takt</small>${takt}</div>
       <div><small class="ct-lbl">kurzer Zug</small>${price('short')}</div>
       <div><small class="ct-lbl">langer Zug</small>${price('long')}</div>
       <div class="ct-sat"><small class="ct-lbl">Zufriedenheit</small><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
@@ -101,6 +104,31 @@ export function contractsHtml(g: Game) {
     </div>`;
   }).join('');
   return rows;
+}
+
+/** Ausschreibung / Anfrage als Karten */
+export function offerHtml(g: Game) {
+  const o = g.offers.open;
+  if (!o) return '';
+  const cards = o.ops.map((id) => {
+    const op = OPERATORS[id];
+    const block = g.canRun(id);
+    const cars = op.cars.map((c) => `<img src="assets/gen/car_${op.id}_${c === 'wagon' ? 'wagon0' : c}_0.png" alt="" />`).join('');
+    const fair = (cls: 'short' | 'long') => eur(fairPrice(op, cls));
+    return `<div class="of-card${block ? ' off' : ''}">
+      <div class="tc-head"><span class="dot" style="background:${op.color}"></span><b>${op.name}</b></div>
+      <div class="tc-sub">${TRAFFIC_LABEL[trafficClass(op)]} · ${op.category}</div>
+      <div class="tc-cars">${cars}</div>
+      <div class="tc-row"><span>Antrieb</span><span>${op.traction === 'electric' ? '⚡ elektrisch' : op.traction === 'steam' ? '♨ Dampf' : '⛽ Diesel'}</span></div>
+      <div class="tc-row"><span>Takt</span><span>alle ${Math.max(g.minTakt, op.takt)} min</span></div>
+      <div class="tc-row"><span>Preis</span><span>${fair('short')} € / ${fair('long')} € lang</span></div>
+      <div class="tc-row"><span>Halt</span><span>${op.needsStop ? (op.turnback ? 'endet hier, wendet' : 'hält bei dir') : 'fährt durch'}</span></div>
+      ${block ? `<div class="no of-block">${block}</div>` : `<button class="btn big" data-accept="${id}">${o.kind === 'tender' ? 'Wählen' : 'Annehmen'}</button>`}
+    </div>`;
+  }).join('');
+  return `<h1 class="${o.kind === 'tender' ? '' : 'blue'}">${o.title.toUpperCase()}</h1><div class="ev-info">${o.text}</div>
+    <div class="of-cards">${cards}</div>
+    ${o.kind === 'inquiry' ? '<button class="btn" data-decline="1">Ablehnen</button>' : ''}`;
 }
 
 export { TRANSIT_FEE };

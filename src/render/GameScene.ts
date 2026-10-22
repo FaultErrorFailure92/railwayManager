@@ -6,6 +6,7 @@ import manifest from '../gen/manifest.json';
 import { toScreen, toWorld } from '../iso';
 import type { Train } from '../sim/Simulation';
 import { ROCK, WATER } from '../world/Grid';
+import { isStation, SHOPS } from '../world/buildings';
 import { Animals, preloadAnimals } from './Animals';
 import { SORT_DESTS } from '../sim/Operators';
 import { BUILD_MENU, BUILDINGS } from '../world/buildings';
@@ -68,7 +69,11 @@ const D_GROUND = -100000;
 const D_TRACK = -50000;
 const D_OVERLAY = 90000;
 const D_UI = 100000;
-const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility'];
+const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility', 'road'];
+/** Gebäude mit Infofenster beim Anklicken */
+const PANEL_BUILDING = (k?: string) => !!k && (isStation(k) || !!SHOPS[k]);
+/** Nebel: ab so vielen Feldern Abstand zur eigenen Fläche, voll nach weiteren … */
+const FOG_START = 4, FOG_FULL = 9;
 const FONT = '"VT323", monospace';
 
 export class GameScene extends Phaser.Scene {
@@ -197,9 +202,9 @@ export class GameScene extends Phaser.Scene {
       const d = this.g.diagSteps(s.x, s.y, h.x, h.y, variant);
       return { cells: d.anchors, variant: d.key };
     }
-    // Gleis: bei mindestens 2 Reihen Versatz automatisch mit Kurven/Diagonale/Weichen
-    if (t === 'track' && this.dragStart && Math.abs(h.y - this.dragStart.y) >= 2) return { cells: [this.dragStart, h], variant };
-    const line = t === 'platform' || t === 'track' || t === 'wire' || t === 'access' || (t === 'facility' && variant.startsWith('mark_'));
+    // Gleis: schräg gezogen = Diagonale (mit automatischer Kreuzung)
+    if (t === 'track' && this.dragStart && h.y !== this.dragStart.y) return { cells: [this.dragStart, h], variant };
+    const line = t === 'platform' || t === 'track' || t === 'wire' || t === 'road' || t === 'access' || (t === 'facility' && variant.startsWith('mark_'));
     if (line && this.dragStart) {
       return { cells: this.g.lineCells(t, this.dragStart.x, this.dragStart.y, h.x, h.y), variant };
     }
@@ -244,7 +249,7 @@ export class GameScene extends Phaser.Scene {
         if (d && Math.hypot(p.x - d.x, p.y - d.y) < 5 && this.ui.tool === 'select') {
           const c = this.cellAt(p.x, p.y);
           const id = c ? this.g.grid.get(c.x, c.y)?.building : null;
-          if (id != null && this.g.grid.buildings.get(id)?.key === 'bld_station') this.ui.stationClick = id;
+          if (id != null && PANEL_BUILDING(this.g.grid.buildings.get(id)?.key)) this.ui.stationClick = id;
         }
         return;
       }
@@ -335,6 +340,11 @@ export class GameScene extends Phaser.Scene {
       for (let x = 0; x < g.w; x++) {
         const c = g.get(x, y)!;
         if (c.track && c.piece === null) this.staticObjs.push(this.place('track', x * TILE, y * TILE, D_TRACK + x + y));
+        if (c.road) {
+          const r = (xx: number, yy: number) => !!g.get(xx, yy)?.road;
+          const m = (r(x, y - 1) ? 1 : 0) | (r(x + 1, y) ? 2 : 0) | (r(x, y + 1) ? 4 : 0) | (r(x - 1, y) ? 8 : 0);
+          this.staticObjs.push(this.place(`road_${m || 10}`, x * TILE, y * TILE, D_TRACK + x + y - 0.1));
+        }
         if ((c.track || c.piece !== null) && g.isWater(x, y)) this.staticObjs.push(this.place('rail_bridge', x * TILE, y * TILE, D_TRACK + x + y + 0.2));
         if (c.platform) {
           const cy = toScreen(x * TILE + 8, y * TILE + 8).y;
@@ -455,6 +465,29 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** dunkle Fläche = noch nicht gekauft; mit Werkzeug „Land“ Preise der kaufbaren Parzellen */
+  /** Nebel über Flächen weit weg von der eigenen: je weiter, desto dichter */
+  private drawFog(gfx: Phaser.GameObjects.Graphics) {
+    const g = this.g.grid;
+    const owned: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    for (let py = 0; py < g.ph; py++) for (let px = 0; px < g.pw; px++) {
+      if (g.parcelOwned(px, py)) owned.push({ x0: px * PARCEL, y0: py * PARCEL, x1: (px + 1) * PARCEL, y1: (py + 1) * PARCEL });
+    }
+    const B = 2;
+    for (let y = 0; y < g.h; y += B) {
+      for (let x = 0; x < g.w; x += B) {
+        const cx = x + B / 2, cy = y + B / 2;
+        let d = Infinity;
+        for (const r of owned) d = Math.min(d, Math.max(r.x0 - cx, cx - r.x1, 0) + Math.max(r.y0 - cy, cy - r.y1, 0) * 0.8);
+        const a = Math.min(0.94, Math.max(0, (d - FOG_START) / FOG_FULL) * 0.94);
+        if (a < 0.02) continue;
+        // leicht wolkig
+        const n = Math.sin(x * 0.31 + y * 0.17) * 0.04 + Math.sin(x * 0.07 - y * 0.23) * 0.04;
+        gfx.fillStyle(0xdce3ea, Math.min(0.96, a + n * a));
+        this.diamond(gfx, x, y, x + B, y + B);
+      }
+    }
+  }
+
   private drawOverlay() {
     const g = this.g.grid;
     const gfx = this.overlay;
@@ -467,7 +500,7 @@ export class GameScene extends Phaser.Scene {
         const x0 = px * PARCEL, y0 = py * PARCEL;
         if (!g.parcelOwned(px, py)) {
           const buy = land && g.parcelBuyable(px, py);
-          gfx.fillStyle(buy ? 0xffe066 : 0x0b0e18, buy ? 0.16 : 0.38);
+          gfx.fillStyle(buy ? 0xffe066 : 0x0b0e18, buy ? 0.16 : 0.22);
           this.diamond(gfx, x0, y0, x0 + PARCEL, y0 + PARCEL);
           if (buy) {
             gfx.lineStyle(1, 0xffe066, 0.9);
@@ -481,6 +514,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+    this.drawFog(gfx);
     // Grenze der eigenen Fläche
     gfx.lineStyle(1.5, 0xfff2b0, 0.8);
     for (let py = 0; py < g.ph; py++) {

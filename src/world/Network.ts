@@ -1,4 +1,5 @@
 import { MAP_W, TILE } from '../config';
+import { isStation } from './buildings';
 import type { Vec } from '../iso';
 import { Grid } from './Grid';
 import { PIECES, PortType } from './pieces';
@@ -330,7 +331,7 @@ export class Network {
     });
     const open = new Set<number>();
     for (const b of g.buildings.values()) {
-      if (b.key !== 'bld_station') continue;
+      if (!isStation(b.key)) continue;
       for (const k of g.buildingCells(b)) {
         const { x, y } = g.xy(k);
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {

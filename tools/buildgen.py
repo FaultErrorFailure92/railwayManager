@@ -563,3 +563,140 @@ def tool_icon(name):
         for (x, y) in ((6, 7), (7, 8), (6, 9), (7, 10)):
             put(x, y, (250, 210, 60))
     return Image.fromarray(a, "RGBA")
+
+
+# ---------------------------------------------------------------- Paket 5: Läden, Straße, Bahnhofsausbau, Deko
+def cafe():
+    """Café 2x2 mit Markise und Tischen davor"""
+    img, ox, oy = gable_house(2, 2, (238, 226, 200), (120, 70, 50), H=11, R=6, sign=(110, 60, 40, 255))
+    iso = Iso(32, 32, 20)
+    iso.img.paste(img, (int(ox - iso.x0), int(oy - iso.y0)), img)
+    for i in range(8):
+        c = (40, 120, 90, 255) if i % 2 == 0 else (240, 236, 220, 255)
+        xa = 2 + i * 3.5
+        iso.poly([(xa, 30.5, 9), (xa + 3.5, 30.5, 9), (xa + 3.5, 34, 6.5), (xa, 34, 6.5)], c)
+    return iso.result()
+
+
+def vending():
+    iso = Iso(16, 16, 16)
+    iso.box(5, 6, 11, 10, 0, 12, (200, 40, 40))
+    iso.wall_rect_y(10, 6, 10, 5, 11, (220, 230, 240, 255))
+    for z in (6, 8, 10):
+        iso.line((6.5, 10, z), (9.5, 10, z), (60, 120, 200, 255))
+    return iso.result()
+
+
+def parking():
+    """Parkplatz 3x2: Asphalt, Markierungen, zwei Autos"""
+    iso = Iso(48, 32, 10)
+    iso.poly([(0, 0, 0.5), (48, 0, 0.5), (48, 32, 0.5), (0, 32, 0.5)], (88, 90, 96, 255))
+    for x in range(4, 48, 8):
+        iso.line((x, 2, 0.6), (x, 12, 0.6), (230, 230, 220, 255))
+        iso.line((x, 20, 0.6), (x, 30, 0.6), (230, 230, 220, 255))
+    for (x, y, col) in ((6, 3, (200, 60, 50)), (22, 21, (60, 110, 190)), (30, 3, (230, 200, 70))):
+        iso.box(x, y, x + 6, y + 8, 0.6, 3.5, col)
+        iso.box(x + 1, y + 2, x + 5, y + 6, 3.5, 5.5, shade(col, 0.85), top=(150, 190, 220, 255))
+    return iso.result()
+
+
+def bus_terminal():
+    """Bushaltestelle 3x2: Dach, Bus"""
+    iso = Iso(48, 32, 22)
+    iso.poly([(0, 0, 0.5), (48, 0, 0.5), (48, 32, 0.5), (0, 32, 0.5)], (96, 96, 102, 255))
+    iso.poly([(0, 20, 0.6), (48, 20, 0.6), (48, 22, 0.6), (0, 22, 0.6)], (230, 200, 60, 255))
+    # Bus
+    bus = (232, 180, 40)
+    iso.box(6, 6, 40, 16, 1, 11, bus)
+    for x in range(9, 38, 5):
+        iso.wall_rect_y(16, x, x + 3.5, 6, 9.5, (60, 90, 120, 255))
+    # Dach der Wartehalle
+    post = (70, 76, 86, 255)
+    for x in (4, 44):
+        iso.line((x, 28, 0), (x, 28, 13), post)
+    iso.poly([(2, 24, 13), (46, 24, 13), (46, 31, 13.5), (2, 31, 13.5)], (176, 216, 236, 220), (90, 110, 130, 255))
+    return iso.result()
+
+
+def road(mask):
+    """Straßenstück; mask: 1=N(y-1) 2=E(x+1) 4=S(y+1) 8=W(x-1)"""
+    iso = Iso(16, 16, 2)
+    asphalt, line = (92, 94, 100, 255), (236, 226, 160, 255)
+    iso.poly([(1, 1, 0.3), (15, 1, 0.3), (15, 15, 0.3), (1, 15, 0.3)], asphalt)
+    if mask & 1: iso.poly([(1, 0, 0.3), (15, 0, 0.3), (15, 1, 0.3), (1, 1, 0.3)], asphalt)
+    if mask & 4: iso.poly([(1, 15, 0.3), (15, 15, 0.3), (15, 16, 0.3), (1, 16, 0.3)], asphalt)
+    if mask & 8: iso.poly([(0, 1, 0.3), (1, 1, 0.3), (1, 15, 0.3), (0, 15, 0.3)], asphalt)
+    if mask & 2: iso.poly([(15, 1, 0.3), (16, 1, 0.3), (16, 15, 0.3), (15, 15, 0.3)], asphalt)
+    # Mittellinie
+    if mask & 5:
+        iso.line((8, 0 if mask & 1 else 8, 0.4), (8, 16 if mask & 4 else 8, 0.4), line)
+    if mask & 10:
+        iso.line((0 if mask & 8 else 8, 8, 0.4), (16 if mask & 2 else 8, 8, 0.4), line)
+    return iso.result()
+
+
+def station_big(level):
+    """Empfangsgebäude Stufe 2 (größer, Uhr) und 3 (mit Turm)"""
+    wall = (226, 214, 180) if level == 2 else (214, 190, 160)
+    roof = (168, 72, 56) if level == 2 else (90, 96, 110)
+    img, ox, oy = gable_house(3, 2, wall, roof, H=18 if level == 2 else 20, R=9, sign=(40, 70, 130, 255))
+    iso = Iso(48, 32, 52)
+    iso.img.paste(img, (int(ox - iso.x0), int(oy - iso.y0)), img)
+    if level == 3:
+        iso.box(18, 10, 28, 20, 20, 40, wall)
+        iso.poly([(17, 9, 40), (29, 9, 40), (23, 15, 48)], shade(roof, 0.8))
+        iso.poly([(29, 9, 40), (29, 21, 40), (23, 15, 48)], shade(roof, 0.65))
+        iso.poly([(17, 21, 40), (29, 21, 40), (23, 15, 48)], roof + (255,))
+        iso.wall_rect_y(20, 20, 26, 30, 36, (245, 245, 235, 255))
+    else:
+        iso.wall_rect_y(32 - 1.5, 20, 28, 13, 17, (245, 245, 235, 255))
+    # Vordach über dem Eingang
+    iso.poly([(10, 30, 9), (38, 30, 9), (38, 36, 8), (10, 36, 8)], (80, 86, 96, 255), (50, 54, 60, 255))
+    return iso.result()
+
+
+def fountain():
+    iso = Iso(16, 16, 12)
+    iso.box(2, 2, 14, 14, 0, 2.5, (176, 170, 160), top=(90, 150, 220, 255))
+    iso.box(7, 7, 9, 9, 2.5, 7, (190, 184, 172))
+    iso.box(6, 6, 10, 10, 7, 8, (190, 184, 172), top=(120, 180, 240, 255))
+    return iso.result()
+
+
+def flowers(seed):
+    rng = np.random.default_rng(seed)
+    iso = Iso(16, 16, 6)
+    iso.box(2, 2, 14, 14, 0, 2, (130, 92, 60), top=(84, 150, 64, 255))
+    a = np.array(iso.img)
+    cols = [(240, 80, 90), (250, 210, 70), (240, 240, 250), (190, 110, 230)]
+    ys, xs = np.nonzero(a[:, :, 3])
+    for i in rng.choice(len(xs), size=len(xs) // 9, replace=False):
+        if a[ys[i], xs[i], 1] > 140:
+            a[ys[i], xs[i]] = cols[int(rng.integers(4))] + (255,)
+    return Image.fromarray(a), int(iso.x0), int(iso.y0)
+
+
+def lamp():
+    iso = Iso(16, 16, 22)
+    iso.line((8, 8, 0), (8, 8, 18), (50, 54, 62, 255))
+    iso.box(6.5, 6.5, 9.5, 9.5, 17, 20, (60, 64, 72), top=(255, 236, 150, 255))
+    return iso.result()
+
+
+def statue():
+    iso = Iso(16, 16, 22)
+    iso.box(4, 4, 12, 12, 0, 5, (170, 166, 156))
+    stone = (120, 150, 140)
+    iso.box(7, 7, 9.5, 9.5, 5, 13, stone)
+    iso.box(6.5, 6.5, 10, 10, 13, 16, shade(stone, 1.05))
+    iso.box(7.5, 7.5, 9, 9, 16, 18, stone)
+    return iso.result()
+
+
+def platform_clock():
+    iso = Iso(16, 16, 22)
+    iso.line((8, 8, 0), (8, 8, 14), (60, 64, 72, 255))
+    iso.box(6, 7, 10, 9, 14, 19, (40, 44, 52), top=(60, 64, 72, 255))
+    iso.wall_rect_y(9, 6.6, 9.4, 14.6, 18.4, (245, 245, 235, 255))
+    iso.line((8, 9, 16.5), (8, 9, 18), (20, 20, 20, 255))
+    return iso.result()

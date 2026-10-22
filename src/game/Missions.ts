@@ -1,9 +1,10 @@
 import { MAIN_ROW, SECOND_ROW } from '../config';
 import type { ResearchId } from './Research';
+import { isStation } from '../world/buildings';
 import type { Game, Stats } from './Game';
 
 export type ToolId = 'select' | 'land' | 'platform' | 'track' | 'signal' | 'switch' | 'curve' | 'diag' | 'wire' | 'access'
-  | 'building' | 'facility' | 'remove' | 'research';
+  | 'building' | 'facility' | 'remove' | 'research' | 'road';
 
 type XY = { x: number; y: number };
 
@@ -36,12 +37,12 @@ const ownedSpan = (g: Game) => {
 const platforms = (g: Game) => g.grid.cells.map((c, k) => (c.platform ? g.grid.xy(k) : null)).filter((p): p is XY => !!p);
 const research = (id: ResearchId, then: { tool: ToolId; variant?: string } | null) => (g: Game) =>
   (g.researched(id) ? then : { tool: 'research' as ToolId, variant: id });
-const hasStation = (g: Game) => [...g.grid.buildings.values()].some((b) => b.key === 'bld_station');
+const hasStation = (g: Game) => [...g.grid.buildings.values()].some((b) => isStation(b.key));
 
 export const MISSIONS: Mission[] = [
   {
     title: 'Bahnhof eröffnen',
-    short: 'Bahnsteig + Empfangsgebäude direkt daneben, 3 Regionalzüge halten',
+    short: 'Bahnsteig + Empfangsgebäude, Vertrag wählen, 3 Regionalzüge halten',
     reward: 2000,
     progress: (s, b) => {
       const n = s.stopsRegio - b.stopsRegio;
@@ -91,9 +92,12 @@ export const MISSIONS: Mission[] = [
   },
   {
     title: 'Zweites Bahnsteiggleis',
-    short: 'Weichen, Gleis und Unterführung bauen: 2 Züge gleichzeitig halten',
+    short: 'Weiche, Gleis, Bahnsteig und Unterführung: auf 2 verschiedenen Gleisen je einen Zug abfertigen',
     reward: 3000,
-    progress: (s) => ({ value: s.maxDwellSince >= 2 ? 1 : 0, text: `${Math.min(s.maxDwellSince, 2)}/2` }),
+    progress: (s) => {
+      const n = Math.min(2, (s.platformRuns ?? []).length);
+      return { value: n / 2, text: `${n}/2` };
+    },
     tool: (g) => (g.grid.links.size || !g.grid.pieces.size ? { tool: 'switch' } : { tool: 'access' }),
     unlock: [],
     level: 4,
@@ -101,13 +105,14 @@ export const MISSIONS: Mission[] = [
   },
   {
     title: 'Wendezüge',
-    short: 'S-Bahnen enden bei dir: 3 Wendezüge wenden lassen',
+    short: 'Wendezug-Unternehmen wählen, 3 Wendezüge bei dir wenden lassen',
     reward: 2500,
     progress: (s, b) => {
       const n = s.turnbacks - b.turnbacks;
       return { value: Math.min(1, n / 3), text: `${Math.min(n, 3)}/3` };
     },
     tool: () => ({ tool: 'track' }),
+    onStart: (g) => g.requestTurnback(),
     unlock: [],
     level: 4,
     fp: 4,

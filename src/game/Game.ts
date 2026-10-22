@@ -1,9 +1,9 @@
-import { COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW, START_MONEY } from '../config';
-import { OperatorId, OPERATORS, SORT_DESTS } from '../sim/Operators';
-import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, newContracts, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
+import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW, START_MONEY } from '../config';
+import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
+import { acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
-import { BUILDINGS } from '../world/buildings';
+import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
@@ -24,6 +24,8 @@ export interface Stats {
   services: number;
   sortedWagons: number;
   recent: boolean[];
+  /** Bahnsteiggleise, an denen schon ein Zug abgefertigt wurde */
+  platformRuns: string[];
 }
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
@@ -48,7 +50,11 @@ export type UiEvent =
   | { type: 'missionStart'; title: string }
   | { type: 'station'; id: number }
   | { type: 'research'; id: ResearchId }
-  | { type: 'contract'; op: OperatorId; kind: 'cancel' | 'accept' | 'reject' };
+  | { type: 'contract'; op: OperatorId; kind: 'cancel' | 'accept' | 'reject' }
+  | { type: 'offer' }
+  | { type: 'deadlock' }
+  | { type: 'gameover' }
+  | { type: 'autosave'; label: string };
 
 /** Effekte auf der Karte (schwebende Beträge) */
 export interface FxEvent { amount: number; x: number; y: number; train?: number; label?: string }
@@ -78,6 +84,8 @@ export interface GameSave {
   sim: SimSave;
   research?: ResearchState;
   contracts?: Record<OperatorId, Contract>;
+  shopPrices?: Record<string, number>;
+  offers?: Game['offers'];
 }
 
 export const fmtTime = (t: number) => {
@@ -89,13 +97,18 @@ export const fmtTime = (t: number) => {
 /** Werkzeuge, die Bäume und Büsche automatisch fällen */
 const CLEARING = new Set<ToolId>(['platform', 'switch', 'curve', 'diag', 'building']);
 
+/** Stau: so lange (Spielsekunden) bleibt Zeit zum Lösen */
+const DEADLOCK_LIMIT = 3600;
+/** Kosten, wenn ein Zug aus dem Verkehr genommen wird */
+export const CANCEL_COST = 500;
+
 const unpackCell = (b: number, sortDest: number | null) => ({
   track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
-  wire: !!(b & 32), siding: !!(b & 64), sortDest,
+  wire: !!(b & 32), siding: !!(b & 64), road: !!(b & 128), sortDest,
 });
 
 const newStats = (): Stats => ({
-  handled: 0, punctual: 0, streak: 0, stopsRegio: 0, stopsIC: 0, passengers: 0, missed: 0, maxDwellSince: 0, secondRuns: 0, turnbacks: 0, parks: 0, services: 0, sortedWagons: 0, recent: [],
+  handled: 0, punctual: 0, streak: 0, stopsRegio: 0, stopsIC: 0, passengers: 0, missed: 0, maxDwellSince: 0, secondRuns: 0, turnbacks: 0, parks: 0, services: 0, sortedWagons: 0, recent: [], platformRuns: [],
 });
 
 export class Game {
@@ -115,6 +128,11 @@ export class Game {
   readonly unlocked = new Set<ToolId>(['select', 'land', 'platform', 'building', 'remove']);
   log: LogEntry[] = [];
   research: ResearchState = { done: [], current: null, points: 0 };
+  /** Verkaufspreise der Läden (€ je Einkauf) */
+  shopPrices: Record<string, number> = Object.fromEntries(Object.entries(SHOPS).map(([k, v]) => [k, v.ref]));
+  /** Ausweichstellen nach dem zweigleisigen Ausbau abbauen */
+  private loopsPending = false;
+  private loopCheck = 0;
   contracts = newContracts();
   private lastHour = 0;
   readonly uiEvents: UiEvent[] = [];
@@ -145,6 +163,7 @@ export class Game {
       else this.migrateResearch(save);
       if (old) this.missionIdx = Math.min(this.missionIdx, MISSIONS.length);
       if (save.contracts) Object.assign(this.contracts, save.contracts);
+      if (save.shopPrices) Object.assign(this.shopPrices, save.shopPrices);
     }
     this.net = new Network(this.grid);
     this.sim = new Simulation(this.net, old ? undefined : save?.sim);
@@ -152,9 +171,16 @@ export class Game {
       this.sim.time = save.sim.time;
       this.sim.setLevel(save.sim.level);
     }
-    this.sim.contractActive = (id) => this.contracts[id].active;
+    this.sim.contractActive = (id) => this.contracts[id].status === 'active';
+    this.sim.taktOf = (id) => (this.contracts[id].status === 'none' ? 0 : this.contracts[id].takt);
+    if (save && !save.offers) this.migrateContracts(save);
+    if (save?.offers) Object.assign(this.offers, save.offers);
+    this.clampTakts();
+    this.updatePlatformLength();
+    this.sim.fillTimetable();
     this.applySwitchSpeed();
     this.lastHour = Math.floor(this.sim.time / 3600);
+    this.loopsPending = this.grid.mainRows.includes(SECOND_ROW) && this.grid.fixedPieces.size > 0;
   }
 
   /** Spielstand der kleinen Karte (96x32) mittig in die große Welt setzen */
@@ -186,7 +212,7 @@ export class Game {
     if (save.unlocked.includes('wire')) done.add('wire');
     if (save.unlocked.includes('facility')) (['siding', 'wash', 'remise', 'workshop', 'hump'] as ResearchId[]).forEach((r) => done.add(r));
     if (save.mainRows.length > 1) done.add('double');
-    if (this.count('bld_station') > 1) done.add('stations');
+    if (this.stations().length > 1) done.add('stations');
     this.research.done = [...done];
     if (this.missionIdx >= 2) this.unlocked.add('research');
     if (this.missionIdx >= 3) this.missionIdx++;
@@ -198,7 +224,7 @@ export class Game {
       v: 5,
       company: this.company,
       cells: g.cells.map((c) => (+c.track) | (+c.fixed << 1) | (+c.platform << 2) | (+c.signal << 3) | (+c.signalW << 4)
-        | (+c.wire << 5) | (+c.siding << 6)),
+        | (+c.wire << 5) | (+c.siding << 6) | (+c.road << 7)),
       sortDest: g.cells.map((c) => c.sortDest),
       links: [...g.links.values()].map((l) => ({ ...l })),
       pieces: [...g.pieces.values()].map((p) => ({ ...p })),
@@ -208,7 +234,7 @@ export class Game {
       money: this.money, stats: this.stats, missionBase: this.missionBase,
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
-      research: this.research, contracts: this.contracts,
+      research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers,
     };
   }
 
@@ -231,8 +257,94 @@ export class Game {
     if (b) { b.name = name; this.version++; }
   }
 
-  /** Einnahmen-Faktor Personenverkehr durch Empfangsgebäude */
-  get incomeFactor() { return 1 + 0.15 * Math.min(2, this.count('bld_station')); }
+  stations() { return [...this.grid.buildings.values()].filter((b) => isStation(b.key) && !b.decor); }
+
+  stationLevel(key: string) { return key === 'bld_station3' ? 3 : key === 'bld_station2' ? 2 : 1; }
+
+  private connCache = { version: -1, map: new Map<number, { parking: boolean; bus: boolean }>() };
+  /** Straßenanbindung je Bahnhof: Parkplatz / Busterminal über Straßen erreichbar */
+  connections(id: number) {
+    if (this.connCache.version !== this.version) {
+      this.connCache = { version: this.version, map: new Map() };
+      const g = this.grid;
+      for (const st of this.stations()) {
+        const seen = new Set<number>(), stack: number[] = [];
+        const near = (cells: number[]) => {
+          for (const k of cells) {
+            const { x, y } = g.xy(k);
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+              const c = g.get(x + dx, y + dy);
+              if (c?.road) { const nk = g.key(x + dx, y + dy); if (!seen.has(nk)) { seen.add(nk); stack.push(nk); } }
+            }
+          }
+        };
+        near(g.buildingCells(st));
+        const found = { parking: false, bus: false };
+        while (stack.length) {
+          const k = stack.pop()!;
+          const { x, y } = g.xy(k);
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const c = g.get(x + dx, y + dy);
+            if (!c) continue;
+            const bk = c.building !== null ? g.buildings.get(c.building)?.key : undefined;
+            if (bk === 'bld_parking') found.parking = true;
+            if (bk === 'bld_bus') found.bus = true;
+            const nk = g.key(x + dx, y + dy);
+            if (c.road && !seen.has(nk)) { seen.add(nk); stack.push(nk); }
+          }
+        }
+        this.connCache.map.set(st.id, found);
+      }
+    }
+    return this.connCache.map.get(id) ?? { parking: false, bus: false };
+  }
+
+  /** Zuschlag eines Bahnhofs auf die Einnahmen */
+  stationBonus(id: number) {
+    const b = this.grid.buildings.get(id);
+    if (!b) return 0;
+    const lvl = this.stationLevel(b.key);
+    const c = this.connections(id);
+    return [0, 0.15, 0.25, 0.4][lvl] + (c.parking ? 0.1 : 0) + (c.bus ? 0.15 : 0);
+  }
+
+  /** Einnahmen-Faktor Personenverkehr durch Empfangsgebäude, Parkplatz und Bus */
+  get incomeFactor() { return 1 + Math.min(1.2, this.stations().reduce((a, b) => a + this.stationBonus(b.id), 0)); }
+
+  /** Empfangsgebäude ausbauen; gibt Grund zurück, wenn es nicht geht */
+  upgradeBlock(id: number): string | null {
+    const b = this.grid.buildings.get(id);
+    if (!b) return 'Kein Gebäude';
+    const next = this.stationLevel(b.key) + 1;
+    if (next > 3) return 'Schon voll ausgebaut';
+    if (!this.researched(next === 2 ? 'station2' : 'station3')) return `Erst erforschen: Bahnhofsausbau ${next === 2 ? 'I' : 'II'}`;
+    if (this.money < STATION_UPGRADE[next]) return 'Zu wenig Geld';
+    return null;
+  }
+
+  upgradeStation(id: number) {
+    if (this.upgradeBlock(id)) return false;
+    const b = this.grid.buildings.get(id)!;
+    const next = this.stationLevel(b.key) + 1;
+    this.money -= STATION_UPGRADE[next];
+    b.key = next === 2 ? 'bld_station2' : 'bld_station3';
+    this.fx.push({ amount: -STATION_UPGRADE[next], x: b.x + 1, y: b.y + 1 });
+    this.addLog(`${b.name ?? 'Bahnhof'} ausgebaut`, 'good');
+    this.version++;
+    return true;
+  }
+
+  // ------------------------------------------------------------ Läden
+  /** Kaufquote je Fahrgast bei einem Preis */
+  shopRate(key: string, price = this.shopPrices[key]) {
+    const s = SHOPS[key];
+    return Math.max(0, s.rate * Math.min(1.5, 2 - price / s.ref));
+  }
+
+  setShopPrice(key: string, price: number) {
+    const ref = SHOPS[key].ref;
+    this.shopPrices[key] = Math.round(Math.max(ref * 0.4, Math.min(ref * 2.5, price)) * 10) / 10;
+  }
 
   /** Stimmung eines Fahrgasts beim Einsteigen (aus der Menschen-Simulation) */
   passengerMood(op: OperatorId, mood: -1 | 0 | 1) {
@@ -241,12 +353,15 @@ export class Game {
 
   // ------------------------------------------------------------ Ablauf
   tick(dtReal: number) {
-    if (this.paused) return;
+    if (this.paused || this.gameOver) return;
     const dtGame = dtReal * GAME_SEC_PER_REAL_SEC * this.speed;
     this.sim.step(dtGame);
     this.tickResearch(dtGame);
+    if (this.loopsPending && this.sim.time > this.loopCheck) { this.loopCheck = this.sim.time + 60; this.removeLoops(); }
     const hour = Math.floor(this.sim.time / 3600);
     if (hour !== this.lastHour) { this.lastHour = hour; this.hourly(); }
+    this.checkOffers();
+    this.checkDeadlock();
     for (const ev of this.sim.events.splice(0)) {
       if (ev.type === 'note') { this.addLog(ev.text, 'bad'); continue; }
       if (ev.type === 'sorted') {
@@ -258,27 +373,40 @@ export class Game {
       }
       const t = ev.train;
       if (ev.type === 'cancel') {
-        this.money -= 300;
+        this.money -= CANCEL_COST;
         this.stats.handled++;
         this.stats.streak = 0;
         this.stats.recent.push(false);
         this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - 10);
-        this.addLog(`Blockade! ${t.number} fällt aus (−300 €) – mehr Ausweichgleise oder Signale bauen`, 'bad');
+        this.addLog(`${t.number} aus dem Verkehr genommen (−${CANCEL_COST} €)`, 'bad');
+        this.fx.push({ amount: -CANCEL_COST, x: 0, y: 0, train: t.id, label: 'Zug fällt aus' });
         continue;
       }
       if (ev.type === 'stop') {
         this.stats.passengers += t.passengers;
-        if (t.op.kind === 'regio') this.stats.stopsRegio++;
+        if (trafficClass(t.op) === 'regional') this.stats.stopsRegio++;
+        const run = t.route[this.sim.posOnTrain(t, 0).i]?.stopRun?.id ?? t.route[t.route.length - 1]?.stopRun?.id;
+        if (run && !this.stats.platformRuns.includes(run)) this.stats.platformRuns.push(run);
         if (t.op.kind === 'ic') this.stats.stopsIC++;
-        const kiosks = [...this.grid.buildings.values()].filter((b) => b.key === 'bld_kiosk' && !b.decor);
-        const kiosk = Math.round(Math.min(3, kiosks.length) * t.passengers * 0.25);
-        if (kiosk) {
-          this.money += kiosk;
-          const k = kiosks[Math.floor(Math.random() * Math.min(3, kiosks.length))];
-          this.fx.push({ amount: kiosk, x: k.x, y: k.y, label: 'Kiosk' });
+        let shopSum = 0;
+        for (const key of Object.keys(SHOPS)) {
+          const list = [...this.grid.buildings.values()].filter((b) => b.key === key && !b.decor);
+          if (!list.length) continue;
+          // mehrere Läden gleicher Art: mehr Kunden, aber abnehmend
+          const reach = Math.min(1.8, 1 + 0.4 * (list.length - 1));
+          const sum = Math.round(t.passengers * this.shopRate(key) * reach * this.shopPrices[key]);
+          if (!sum) continue;
+          shopSum += sum;
+          this.money += sum;
+          const b = list[Math.floor(Math.random() * list.length)];
+          this.fx.push({ amount: sum, x: b.x, y: b.y, label: SHOPS[key].name });
+          // zu teuer verärgert, günstig freut
+          const r = this.shopPrices[key] / SHOPS[key].ref;
+          if (r > 1.3) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - (r - 1.3) * 2);
+          if (r < 0.85) this.satisfaction[t.op.id] = Math.min(100, this.satisfaction[t.op.id] + 0.2);
         }
         if (t.dirt > 70) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - 2);
-        this.addLog(`${t.number} abgefertigt · ${t.passengers} Fahrgäste${kiosk ? ` · Kiosk +${kiosk} €` : ''}${t.dirt > 70 ? ' · Zug verschmutzt!' : ''}`, t.dirt > 70 ? 'bad' : 'info');
+        this.addLog(`${t.number} abgefertigt · ${t.passengers} Fahrgäste${shopSum ? ` · Läden +${shopSum} €` : ''}${t.dirt > 70 ? ' · Zug verschmutzt!' : ''}`, t.dirt > 70 ? 'bad' : 'info');
         // Haltgebühr wird bei der Abfahrt fällig
         if (!t.paid) this.settle(t, this.sim.delayNow(t), false);
         continue;
@@ -390,9 +518,10 @@ export class Game {
     r.tools?.forEach((t) => this.unlocked.add(t));
     r.apply?.(this);
     this.applySwitchSpeed();
-    this.version++;
+    if (r.apply) this.rebuild(); else this.version++;
     this.addLog(`Forschung abgeschlossen: ${r.name}`, 'good');
     this.uiEvents.push({ type: 'research', id });
+    this.uiEvents.push({ type: 'autosave', label: `Forschung: ${r.name}` });
   }
 
   private applySwitchSpeed() {
@@ -402,9 +531,27 @@ export class Game {
   get maxStations() { return this.researched('stations') ? 4 : 1; }
 
   // ------------------------------------------------------------ Verträge
-  /** Unternehmen, die gerade bei uns fahren */
+  /** Ausschreibungen und Anfragen, die gerade offen sind / noch kommen */
+  offers = {
+    /** aktuell angezeigtes Angebot */
+    open: null as Offer | null,
+    /** Spielzeit, ab der die nächste Anfrage kommen darf */
+    nextInquiry: 0,
+    /** Güter-Ausschreibung kommt um diese Zeit (0 = noch nicht geplant) */
+    freightAt: 0,
+    done: [] as string[],
+  };
+
+  /** Unternehmen mit Vertrag (oder gekündigt: fahren durch) */
   activeOperators() {
-    return Object.values(OPERATORS).filter((o) => this.sim.queue.some((t) => t.op === o) || this.sim.trains.some((t) => t.op === o));
+    return Object.values(OPERATORS).filter((o) => this.contracts[o.id].status !== 'none');
+  }
+
+  /** dichtester erlaubter Takt: erst mit 2. Streckengleis öfter als stündlich */
+  get minTakt() { return this.grid.mainRows.includes(SECOND_ROW) ? MIN_TAKT_DOUBLE : MIN_TAKT_SINGLE; }
+
+  private clampTakts() {
+    for (const c of Object.values(this.contracts)) c.takt = Math.max(this.minTakt, c.takt);
   }
 
   setPrice(op: OperatorId, cls: LengthClass, price: number) {
@@ -412,13 +559,26 @@ export class Game {
     this.contracts[op].price[cls] = Math.max(Math.round(fair * 0.5), Math.min(Math.round(fair * 2), Math.round(price / 10) * 10));
   }
 
-  /** neues Angebot an ein Unternehmen ohne Vertrag */
+  /** Takt um eine Stufe ändern (dir −1 = öfter, +1 = seltener) */
+  stepTakt(op: OperatorId, dir: number) {
+    const c = this.contracts[op];
+    const steps = TAKT_STEPS.filter((m) => m >= this.minTakt);
+    const i = steps.indexOf(c.takt);
+    const next = steps[Math.max(0, Math.min(steps.length - 1, (i < 0 ? 0 : i) + (dir < 0 ? 1 : -1)))];
+    if (next === c.takt) return;
+    // mehr Züge freuen das Unternehmen, weniger ärgern es
+    this.satisfaction[op] = Math.max(0, Math.min(100, this.satisfaction[op] + (next < c.takt ? 4 : -6)));
+    c.takt = next;
+    this.sim.retime(op);
+  }
+
+  /** neues Angebot an ein Unternehmen, das gekündigt hat */
   offer(op: OperatorId) {
     const c = this.contracts[op];
-    if (c.active || this.sim.time < c.talkAfter) return false;
+    if (c.status !== 'cancelled' || this.sim.time < c.talkAfter) return false;
     const ok = Math.random() < acceptChance(OPERATORS[op], c, this.satisfaction[op]);
     if (ok) {
-      c.active = true;
+      c.status = 'active';
       this.sim.recontract(op);
       this.addLog(`${OPERATORS[op].name} unterschreibt den neuen Vertrag`, 'good');
     } else {
@@ -429,19 +589,136 @@ export class Game {
     return ok;
   }
 
+  /** Kann das Unternehmen bei uns fahren? (E-Züge brauchen Oberleitung) */
+  canRun(op: OperatorId) {
+    const o = OPERATORS[op];
+    if (o.traction === 'electric' && !this.researched('wire')) return 'braucht Oberleitung';
+    if (o.kind === 'sort' && !this.researched('hump')) return 'braucht Rangierbahnhof';
+    return null;
+  }
+
+  /** Angebot annehmen (bei Ausschreibung: dieses eine Unternehmen) */
+  acceptOffer(op: OperatorId) {
+    const o = this.offers.open;
+    if (!o || !o.ops.includes(op) || this.canRun(op)) return false;
+    const c = this.contracts[op];
+    c.status = 'active';
+    c.takt = Math.max(this.minTakt, OPERATORS[op].takt);
+    this.satisfaction[op] = 70;
+    this.offers.open = null;
+    this.offers.nextInquiry = this.sim.time + 3 * 3600;
+    this.sim.retime(op);
+    this.addLog(`Vertrag mit ${OPERATORS[op].name}: ${OPERATORS[op].category} alle ${c.takt} min`, 'good');
+    return true;
+  }
+
+  /** Anfrage ablehnen / Ausschreibung schließen */
+  declineOffer() {
+    const o = this.offers.open;
+    if (!o) return;
+    if (o.kind === 'inquiry') o.ops.forEach((op) => (this.contracts[op].declinedUntil = this.sim.time + 12 * 3600));
+    this.offers.open = null;
+    this.offers.nextInquiry = this.sim.time + 2 * 3600;
+  }
+
+  private openOffer(o: Offer, key: string) {
+    if (this.offers.open || this.offers.done.includes(key)) return;
+    this.offers.done.push(key);
+    this.offers.open = o;
+    this.uiEvents.push({ type: 'offer' });
+  }
+
+  // ------------------------------------------------------------ Stau / Game Over
+  /** Spielzeit, seit der sich Züge gegenseitig blockieren (0 = kein Stau) */
+  deadlockSince = 0;
+  gameOver = false;
+
+  private checkDeadlock() {
+    if (this.gameOver) return;
+    if (!this.sim.deadlock) { this.deadlockSince = 0; return; }
+    if (!this.deadlockSince) {
+      this.deadlockSince = this.sim.time;
+      this.addLog('STAU! Züge blockieren sich gegenseitig – schnell lösen!', 'bad');
+      this.uiEvents.push({ type: 'deadlock' });
+    }
+    if (this.sim.time - this.deadlockSince > DEADLOCK_LIMIT) {
+      this.gameOver = true;
+      this.paused = true;
+      this.uiEvents.push({ type: 'gameover' });
+    }
+  }
+
+  /** verbleibende Spielsekunden bis Game Over */
+  get deadlockLeft() { return this.deadlockSince ? Math.max(0, DEADLOCK_LIMIT - (this.sim.time - this.deadlockSince)) : 0; }
+
+  /** Mission „Wendezüge“: ein Wendezug-Unternehmen fragt an */
+  requestTurnback() {
+    if (Object.values(OPERATORS).some((o) => o.turnback && this.contracts[o.id].status !== 'none')) return;
+    const ops = (['lb', 'sb', 'rx'] as OperatorId[]).filter((op) => !this.canRun(op));
+    this.offers.done = this.offers.done.filter((k) => k !== 'turnback');
+    this.openOffer({ kind: 'tender', title: 'Ausschreibung Wendezüge', text: 'Diese Züge enden bei dir und fahren zurück. Wähle einen Partner.', ops }, 'turnback');
+  }
+
+  /** Ausschreibungen und Anfragen auslösen */
+  private checkOffers() {
+    if (this.offers.open) return;
+    const none = (op: OperatorId) => this.contracts[op].status === 'none';
+    const t = this.sim.time;
+    // 1. Regionalverkehr, sobald ein Empfangsgebäude steht
+    if (this.stations().length && !this.offers.done.includes('regio')) {
+      this.openOffer({ kind: 'tender', title: 'Ausschreibung Regionalverkehr', text: 'Dein Bahnhof ist eröffnet! Wähle EIN Unternehmen, das bei dir hält.',
+        ops: ['ro', 'lb', 'dm'] }, 'regio');
+      this.offers.freightAt = t + 2 * 3600;
+      return;
+    }
+    // 2. Güterverkehr kurz danach
+    if (this.offers.freightAt && t >= this.offers.freightAt && !this.offers.done.includes('freight')) {
+      this.openOffer({ kind: 'tender', title: 'Ausschreibung Güterverkehr', text: 'Güterzüge fahren durch und zahlen für die Trasse. Wähle EIN Unternehmen.',
+        ops: ['tx', 'hv', 'cd'] }, 'freight');
+      return;
+    }
+    // 3. danach melden sich immer wieder Unternehmen (E-Züge erst mit Oberleitung)
+    if (!this.offers.done.includes('freight') || t < this.offers.nextInquiry) return;
+    const order: OperatorId[] = ['wx', 'cd', 'sb', 'rx', 'nj', 'ro', 'lb', 'tx', 'hv', 'dm', 'cs', 'hs'];
+    const cand = order.find((op) => none(op) && !this.canRun(op) && (this.contracts[op].declinedUntil ?? 0) <= t
+      && (op !== 'hs' || this.grid.mainRows.includes(SECOND_ROW)));
+    if (!cand) { this.offers.nextInquiry = t + 3600; return; }
+    const o = OPERATORS[cand];
+    this.offers.done = this.offers.done.filter((k) => k !== `ask:${cand}`);
+    this.openOffer({ kind: 'inquiry', title: 'Anfrage', text: `${o.name} möchte bei dir fahren: ${o.category}.`, ops: [cand] }, `ask:${cand}`);
+  }
+
+  /** alte Spielstände: wer nach altem Takt fuhr, bekommt einen Vertrag */
+  private migrateContracts(save: GameSave) {
+    const takt = TAKT[save.sim.level] ?? TAKT[1];
+    for (const id of Object.keys(OPERATORS) as OperatorId[]) {
+      const c = this.contracts[id] as Contract & { active?: boolean };
+      if (!c.status) c.status = takt[id] ? (c.active === false ? 'cancelled' : 'active') : 'none';
+      if (!c.takt) c.takt = takt[id] || OPERATORS[id].takt;
+      delete c.active;
+    }
+    this.offers.done = ['regio', 'freight'];
+    this.offers.nextInquiry = this.sim.time + 3600;
+  }
+
+  /** längster Bahnsteig mit Zugang → Züge dürfen so lang werden */
+  updatePlatformLength() {
+    this.sim.maxPlatform = Math.max(0, ...this.net.runs.filter((r) => r.accessible).map((r) => r.len));
+  }
+
   /** stündlich: Zufriedenheit je nach Preis, Kündigungen */
   private hourly() {
     for (const o of this.activeOperators()) {
       const c = this.contracts[o.id];
       if (o.kind === 'sort') continue;
-      if (!c.active) {
+      if (c.status === 'cancelled') {
         this.satisfaction[o.id] = Math.min(50, this.satisfaction[o.id] + 2);
         continue;
       }
       const ratio = Math.max(c.price.short / fairPrice(o, 'short'), c.price.long / fairPrice(o, 'long'));
       this.satisfaction[o.id] = Math.max(0, Math.min(100, this.satisfaction[o.id] - (ratio - 1) * 3));
       if (Math.random() < cancelRisk(o, c, this.satisfaction[o.id])) {
-        c.active = false;
+        c.status = 'cancelled';
         c.talkAfter = this.sim.time + TALK_PAUSE;
         this.satisfaction[o.id] = Math.max(0, this.satisfaction[o.id] - 20);
         this.sim.recontract(o.id);
@@ -487,8 +764,29 @@ export class Game {
   expandLine() {
     if (this.grid.mainRows.includes(SECOND_ROW)) return;
     this.grid.expandLine();
+    if (this.researched('wire')) this.grid.electrifyLine();
     this.rebuild();
+    this.loopsPending = true;
     this.addLog('Netzbetreiber baut das 2. Streckengleis', 'info');
+  }
+
+  /** Ausweichstellen abbauen, sobald dort kein Zug mehr steht (nach dem zweigleisigen Ausbau) */
+  private removeLoops() {
+    const g = this.grid;
+    let changed = false, left = false;
+    for (const [xa, xb] of PASSING_LOOPS) {
+      const cells: number[] = [];
+      for (let x = xa; x <= xb + 2; x++) for (const y of [MAIN_ROW, SECOND_ROW]) cells.push(g.key(x, y));
+      const pieces = [...new Set(cells.map((k) => g.cells[k].piece).filter((id): id is number => id !== null && g.fixedPieces.has(id)))];
+      const sig = cells.filter((k) => (g.cells[k].signal || g.cells[k].signalW) && !g.isOwned(g.xy(k).x, g.xy(k).y));
+      if (!pieces.length && !sig.length) continue;
+      if (cells.some((k) => this.sim.owner[k] !== 0)) { left = true; continue; }
+      pieces.forEach((id) => { g.removePiece(id); g.fixedPieces.delete(id); });
+      sig.forEach((k) => { g.cells[k].signal = false; g.cells[k].signalW = false; });
+      changed = true;
+    }
+    if (changed) this.rebuild();
+    this.loopsPending = left;
   }
 
   private checkMission() {
@@ -507,6 +805,7 @@ export class Game {
     this.startMission();
     const next = this.mission;
     if (next) this.uiEvents.push({ type: 'missionStart', title: next.title });
+    this.uiEvents.push({ type: 'autosave', label: `Auftrag erfüllt: ${m.title}` });
   }
 
   get punctuality() {
@@ -528,51 +827,22 @@ export class Game {
   }
 
   /**
-   * Gleis mit automatischer Richtung von a nach b: gerade – Kurve – Diagonale – Kurve – gerade.
-   * Der Bogen liegt am Startpunkt. Liegt dort schon ein Gleis, wird automatisch eine Weiche gesetzt;
-   * kreuzt die Diagonale ein Gleis, eine Gleiskreuzung.
+   * Schräges Gleis von a nach b: lauter Diagonalstücke. Kreuzt es ein gerades Gleis,
+   * wird automatisch eine Gleiskreuzung gesetzt. Kurven baut man mit dem Kurven-Werkzeug.
    */
   trackLayout(a: XY, b: XY): TrackLayout | string {
     const g = this.grid;
-    const dr = b.y - a.y;
-    if (Math.abs(dr) === 1) return 'Eine Reihe Versatz: dafür einen Gleiswechsel (Weiche) setzen';
-    const m = Math.abs(dr) - 2;
-    const width = 6 + m;
-    const xL = Math.min(a.x, b.x), xR = Math.max(a.x, b.x);
-    if (xR - xL + 1 < width) return `Zu steil – mindestens ${width} Felder weit ziehen`;
-    const fromLeft = a.x <= b.x;
-    // Reihe links und rechts
-    const rl = fromLeft ? a.y : b.y, rr = fromLeft ? b.y : a.y;
-    const xc = fromLeft ? xL : xR - width + 1;
     const plain = (x: number, y: number) => { const c = g.get(x, y); return !!c && c.track && c.piece === null; };
-    const anyTrack = (x: number, y: number) => [0, 1, 2].some((i) => plain(x + i, y));
-    const straight: XY[] = [];
-    for (let x = xL; x < xc; x++) straight.push({ x, y: rl });
-    for (let x = xc + width; x <= xR; x++) straight.push({ x, y: rr });
+    const d = this.diagSteps(a.x, a.y, b.x, b.y, b.x >= a.x === b.y >= a.y ? 'diag_desc' : 'diag_asc');
+    const desc = d.key === 'diag_desc';
     const pieces: PiecePlace[] = [];
-    const down = rr > rl;
-    if (down) {
-      pieces.push({ key: anyTrack(xc, rl) ? 'branch_divDown' : 'curve_divDown', x: xc, y: rl });
-      for (let i = 0; i < m; i++) {
-        const ax = xc + 3 + i, ay = rl + 1 + i;
-        const k = plain(ax, ay) ? 'cross_desc0' : plain(ax, ay + 1) ? 'cross_desc1' : 'diag_desc';
-        if (plain(ax, ay) && plain(ax, ay + 1)) return 'Diagonale würde zwei Gleise kreuzen';
-        pieces.push({ key: k, x: ax, y: ay });
-      }
-      const ex = xc + 3 + m, ey = rl + 1 + m;
-      pieces.push({ key: anyTrack(ex, ey + 1) ? 'branch_mergeAbove' : 'curve_mergeAbove', x: ex, y: ey });
-    } else {
-      pieces.push({ key: anyTrack(xc, rl) ? 'branch_divUp' : 'curve_divUp', x: xc, y: rl - 1 });
-      for (let i = 0; i < m; i++) {
-        const ax = xc + 3 + i, ay = rl - 2 - i;
-        const k = plain(ax, ay) ? 'cross_asc0' : plain(ax, ay + 1) ? 'cross_asc1' : 'diag_asc';
-        if (plain(ax, ay) && plain(ax, ay + 1)) return 'Diagonale würde zwei Gleise kreuzen';
-        pieces.push({ key: k, x: ax, y: ay });
-      }
-      const ex = xc + 3 + m, ey = rl - 2 - m;
-      pieces.push({ key: anyTrack(ex, ey) ? 'branch_mergeBelow' : 'curve_mergeBelow', x: ex, y: ey });
+    for (const p of d.anchors) {
+      const ay = p.y;
+      if (plain(p.x, ay) && plain(p.x, ay + 1)) return 'Diagonale würde zwei Gleise kreuzen';
+      const k = plain(p.x, ay) ? `cross_${desc ? 'desc' : 'asc'}0` : plain(p.x, ay + 1) ? `cross_${desc ? 'desc' : 'asc'}1` : d.key;
+      pieces.push({ key: k, x: p.x, y: ay });
     }
-    return { straight, pieces };
+    return { straight: [], pieces };
   }
 
   /** Diagonale ziehen: Ankerzellen der einzelnen Schritte + Teiltyp */
@@ -608,7 +878,10 @@ export class Game {
     if (!cells.length) return fail('');
     const need = tool === 'facility' ? FACILITY_RESEARCH[variant] : undefined;
     if (need && !this.researched(need)) return fail(`Erst erforschen: ${RESEARCH_BY_ID[need].name}`);
-    if (tool === 'building' && variant === 'bld_station' && this.count('bld_station') >= this.maxStations) {
+    if (tool === 'building' && BUILDING_RESEARCH[variant] && !this.researched(BUILDING_RESEARCH[variant] as ResearchId)) {
+      return fail(`Erst erforschen: ${RESEARCH_BY_ID[BUILDING_RESEARCH[variant] as ResearchId].name}`);
+    }
+    if (tool === 'building' && variant === 'bld_station' && this.stations().length >= this.maxStations) {
       return fail(this.researched('stations') ? 'Mehr Bahnhöfe gehen nicht' : 'Erst erforschen: Weitere Bahnhöfe');
     }
     const notOwned = (cs: XY[]) => cs.some((c) => !g.isOwned(c.x, c.y));
@@ -727,6 +1000,14 @@ export class Game {
         cost = def.cost;
         break;
       }
+      case 'road': {
+        if (notOwned(cells)) return fail('Fläche nicht gekauft');
+        if (rough(cells)) return fail(rough(cells)!);
+        if (cells.some((c) => { const cc = g.get(c.x, c.y)!; return cc.track || cc.piece !== null || cc.platform; })) return fail('Gleis oder Bahnsteig im Weg');
+        if (cells.some((c) => solid(g.get(c.x, c.y)))) return fail('Gebäude im Weg');
+        cost = cells.filter((c) => !g.get(c.x, c.y)!.road).length * COST.road + this.clearCost(cells);
+        break;
+      }
       case 'wire': {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
         const todo = cells.filter((c) => { const cc = g.get(c.x, c.y)!; return (cc.track || cc.piece !== null) && !cc.wire; });
@@ -789,6 +1070,7 @@ export class Game {
           return { ok: true, cost: -cs.length * (link.kind === 'bridge' ? COST.bridge : COST.tunnel) * REFUND, cells: cs };
         }
         if (c.platform) { cost = -COST.platform * REFUND; break; }
+        if (c.road) { cost = -COST.road * REFUND; break; }
         if (c.siding || c.sortDest !== null) { cost = 0; break; }
         if (c.piece !== null) {
           const p = g.pieces.get(c.piece)!;
@@ -868,6 +1150,10 @@ export class Game {
         break;
       }
       case 'wire': cells.forEach((c) => (g.get(c.x, c.y)!.wire = true)); break;
+      case 'road':
+        this.natureIn(cells).forEach((id) => g.removeBuilding(id));
+        cells.forEach((c) => (g.get(c.x, c.y)!.road = true));
+        break;
       case 'access': g.addLink(variant as 'tunnel' | 'bridge', cells[0].x, cells[0].y, cells[cells.length - 1].y); break;
       case 'facility':
         if (variant === 'mark_siding') cells.forEach((c) => Object.assign(g.get(c.x, c.y)!, { siding: true, sortDest: null }));
@@ -882,6 +1168,7 @@ export class Game {
         else if (c.building !== null) g.removeBuilding(c.building);
         else if (link) g.links.delete(link.id);
         else if (c.platform) c.platform = false;
+        else if (c.road) c.road = false;
         else if (c.siding || c.sortDest !== null) { c.siding = false; c.sortDest = null; }
         else if (c.piece !== null) g.removePiece(c.piece);
         else if (c.track) { c.track = false; c.wire = false; }
@@ -895,9 +1182,10 @@ export class Game {
     return p;
   }
 
-  private rebuild() {
+  rebuild() {
     this.net = new Network(this.grid);
     this.sim.setNetwork(this.net);
+    this.updatePlatformLength();
     this.version++;
   }
 }

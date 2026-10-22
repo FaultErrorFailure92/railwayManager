@@ -28,6 +28,7 @@
     <div class="stat" title="Stimmung am Bahnsteig"><img src="assets/gen/ui/smile.png" alt="" /><span id="mood">–</span></div>
     <div class="sep"></div>
     <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
+    <button class="btn small tb" id="btn-timetable" title="Fahrplan (T)"><img src="assets/gen/ui/clock.png" alt="" />Fahrplan</button>
     <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" />Verträge<span class="tb-warn" id="ct-warn"></span></button>
     <div class="grow"></div>
     <button class="btn small" id="btn-save">Speichern</button>
@@ -91,6 +92,40 @@
     </div>
   </div>
 
+  <div id="timetable" class="screen hidden">
+    <div class="panel sc-box">
+      <div class="sc-head">
+        <h2>Fahrplan</h2>
+        <div class="sc-stats"><span>gestrichelt = Plan · durchgezogen = tatsächlich</span></div>
+        <button class="btn" data-close="timetable">✕</button>
+      </div>
+      <div class="sc-hint">Weg-Zeit-Diagramm: Strecke von West nach Ost, Zeit nach unten. Je flacher eine Linie, desto schneller der Zug; senkrechte Stücke = Halt oder Warten.</div>
+      <canvas id="tt-canvas" width="1180" height="620"></canvas>
+    </div>
+  </div>
+
+  <div id="bpanel" class="panel hidden"></div>
+
+  <div id="offer" class="hidden">
+    <div class="panel ev-box of-box"><div id="of-body"></div></div>
+  </div>
+
+  <div id="deadlock" class="panel hidden">
+    <div class="dl-title">⚠ STAU! Züge blockieren sich</div>
+    <div class="dl-text" id="dl-text"></div>
+    <div class="dl-btns"><button class="btn" id="dl-show">Zeig mir</button><button class="btn warn" id="dl-cancel">Zug aufgeben (−500 €)</button></div>
+  </div>
+
+  <div id="gameover" class="hidden">
+    <div class="panel ev-box">
+      <h1 class="red">GAME OVER</h1>
+      <div class="ev-title">Deine Strecke ist dicht.</div>
+      <div class="ev-info">Die Züge haben sich eine Stunde lang gegenseitig blockiert. Lade einen Spielstand oder fang neu an.</div>
+      <div class="m-buttons"><button class="btn big" id="go-load">Spielstand laden</button><button class="btn big" id="go-new">Neues Spiel</button></div>
+      <div class="panel slots hidden" id="go-slots"></div>
+    </div>
+  </div>
+
   <div id="event" class="hidden">
     <div id="ev-confetti"></div>
     <div class="panel ev-box">
@@ -108,12 +143,15 @@
       <div class="m-buttons">
         <button class="btn big" id="m-continue">Weiterspielen</button>
         <button class="btn big" id="m-new">Neues Spiel</button>
+        <button class="btn big" id="m-load">Laden</button>
         <button class="btn big" id="m-help">Steuerung</button>
       </div>
+      <div class="panel slots hidden" id="m-slots"></div>
       <div class="panel m-help hidden" id="m-helpbox">
         <div><b>Maus ziehen</b> Karte verschieben</div>
         <div><b>Mausrad</b> Zoom</div>
-        <div><b>1–8, B, N, X</b> Werkzeuge</div>
+        <div><b>1–0, B, N, X</b> Werkzeuge</div>
+        <div><b>T</b> Fahrplan</div>
         <div><b>R</b> Variante / Richtung</div>
         <div><b>Rechtsklick</b> Abbrechen</div>
         <div><b>Leertaste</b> Pause</div>

@@ -2,7 +2,7 @@ import type { Game } from './Game';
 import type { ToolId } from './Missions';
 
 export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump'
-  | 'crossing' | 'railBridge';
+  | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco';
 
 export interface ResearchDef {
   id: ResearchId;
@@ -28,8 +28,8 @@ export interface ResearchDef {
 export const RESEARCH: ResearchDef[] = [
   { id: 'access', name: 'Bahnsteigzugänge', info: 'Unterführungen und Fußgängerbrücken zu weiteren Bahnsteigen', icon: 'access_tunnel',
     col: 0, row: 0, cost: 1500, fp: 3, hours: 2, requires: [], tools: ['access'] },
-  { id: 'wire', name: 'Oberleitung', info: 'Eigene Gleise elektrifizieren – dann halten auch E-Züge dort', icon: 'tool_wire',
-    col: 0, row: 1, cost: 2500, fp: 4, hours: 3, requires: [], tools: ['wire'] },
+  { id: 'wire', name: 'Oberleitung', info: 'Strecke wird elektrifiziert, eigene Gleise auch – dann fahren E-Züge', icon: 'tool_wire',
+    col: 0, row: 1, cost: 2500, fp: 4, hours: 3, requires: [], tools: ['wire'], apply: (g) => g.grid.electrifyLine() },
   { id: 'siding', name: 'Abstellgleise', info: 'Gleise als Abstellgleis markieren: Wendezüge machen dort Pause', icon: 'mark_siding',
     col: 0, row: 2, cost: 1500, fp: 3, hours: 2, requires: [], tools: ['facility'] },
   { id: 'double', name: 'Zweigleisiger Ausbau', info: 'Der Netzbetreiber baut das 2. Streckengleis – Linksverkehr', icon: 'track',
@@ -48,6 +48,14 @@ export const RESEARCH: ResearchDef[] = [
     col: 0, row: 3, cost: 2000, fp: 4, hours: 2, requires: [] },
   { id: 'railBridge', name: 'Eisenbahnbrücken', info: 'Gleise über Flüsse und Seen bauen', icon: 'rail_bridge_icon',
     col: 2, row: 2, cost: 5000, fp: 7, hours: 5, requires: ['double'] },
+  { id: 'deco', name: 'Mehr Deko', info: 'Laternen, Bahnhofsuhr, Blumenbeete, Brunnen und Denkmal', icon: 'bld_fountain',
+    col: 0, row: 4, cost: 1500, fp: 3, hours: 2, requires: [] },
+  { id: 'road', name: 'Straßenanbindung', info: 'Straßen, Parkplatz und Busterminal: mehr Fahrgäste', icon: 'bld_bus',
+    col: 3, row: 0, cost: 4000, fp: 6, hours: 4, requires: ['access'], tools: ['road'] },
+  { id: 'station2', name: 'Bahnhofsausbau I', info: 'Empfangsgebäude vergrößern: +25 % statt +15 %', icon: 'bld_station2',
+    col: 3, row: 1, cost: 5000, fp: 7, hours: 5, requires: ['stations'] },
+  { id: 'station3', name: 'Bahnhofsausbau II', info: 'Empfangsgebäude mit Uhrturm: +40 %', icon: 'bld_station3',
+    col: 3, row: 2, cost: 9000, fp: 10, hours: 8, requires: ['station2'] },
   { id: 'workshop', name: 'Werkstatt', info: 'Verschlissene Züge reparieren', icon: 'bld_workshop',
     col: 2, row: 3, cost: 6000, fp: 8, hours: 5, requires: ['remise'] },
 ];

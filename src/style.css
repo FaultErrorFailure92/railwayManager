@@ -138,7 +138,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 /* ---------- Banner & Dialog ---------- */
 
-#modal { position: fixed; inset: 0; z-index: 10; background: rgba(10, 12, 20, .65); display: flex; align-items: center; justify-content: center; }
+#modal { position: fixed; inset: 0; z-index: 45; background: rgba(10, 12, 20, .65); display: flex; align-items: center; justify-content: center; }
 .dialog { padding: 24px 30px; width: 420px; text-align: center; }
 .dialog h2 { margin: 0 0 6px; color: var(--gold); font-size: 35px; font-weight: 400; text-shadow: 3px 3px 0 #000; }
 .dialog p { margin: 0 0 14px; color: #d8d2c4; }
@@ -251,8 +251,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .rs-prog { flex: 1; height: 10px; background: #222; box-shadow: 0 0 0 2px var(--edge); }
 .rs-prog div { height: 100%; background: #5ab4ff; }
 
-#ct-table { display: flex; flex-direction: column; gap: 8px; min-width: 860px; }
-.ct-row { display: grid; grid-template-columns: 250px 170px 170px 130px 1fr; gap: 14px; align-items: center; padding: 8px 12px; background: var(--slot); box-shadow: 0 0 0 2px var(--edge); }
+#ct-table { display: flex; flex-direction: column; gap: 8px; min-width: 1080px; }
+.ct-row { display: grid; grid-template-columns: 240px 170px 170px 170px 120px 1fr; gap: 14px; align-items: center; padding: 8px 12px; background: var(--slot); box-shadow: 0 0 0 2px var(--edge); }
 .ct-row.off { box-shadow: 0 0 0 2px var(--bad); }
 .ct-name { display: flex; align-items: center; gap: 8px; }
 .ct-name b { display: block; font-weight: 400; font-size: 22px; line-height: 1; }
@@ -273,3 +273,54 @@ ul { list-style: none; margin: 0; padding: 0; }
 .ev-tool.big .slot { width: 84px; height: 84px; }
 .ev-tool.big .slot img { width: 64px; height: 64px; }
 .ev-reward img + img { margin-left: 14px; }
+
+/* Infofenster Bahnhof / Laden */
+#bpanel { position: fixed; left: 50%; top: 90px; transform: translateX(-50%); z-index: 20; width: 380px; padding: 10px 14px; font-size: 19px; text-shadow: 1px 1px 0 #000; }
+#bpanel.hidden { display: none; }
+.bp-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.bp-head img { width: 48px; height: 48px; image-rendering: pixelated; }
+.bp-head b { display: block; color: var(--gold); font-weight: 400; font-size: 26px; line-height: 1; }
+.bp-head small { color: var(--muted); font-size: 16px; }
+.bp-head .btn { margin-left: auto; }
+.bp-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; border-bottom: 2px solid #313136; }
+.bp-row > span:first-child { color: var(--muted); }
+.bp-btns { display: flex; gap: 8px; margin-top: 8px; }
+.bp-btns .btn { font-size: 18px; padding: 3px 10px; }
+.btn.off { opacity: .45; }
+.bp-note { margin-top: 6px; font-size: 17px; }
+#tt-canvas { display: block; max-width: 100%; image-rendering: pixelated; box-shadow: 0 0 0 3px #6b5a3c, 4px 4px 0 3px #00000055; }
+
+/* Ausschreibung */
+#offer { position: fixed; inset: 0; z-index: 38; display: flex; align-items: center; justify-content: center; background: rgba(10, 12, 20, .72); }
+#offer.hidden { display: none; }
+.of-box { max-width: calc(100vw - 40px); }
+.of-box h1 { font-size: 48px; }
+.of-cards { display: flex; gap: 14px; justify-content: center; margin: 10px 0 14px; flex-wrap: wrap; }
+.of-card { width: 260px; padding: 10px 12px; background: var(--slot); box-shadow: 0 0 0 3px var(--edge); text-align: left; font-size: 18px; display: flex; flex-direction: column; gap: 2px; }
+.of-card .tc-head { font-size: 22px; }
+.of-card .tc-head b { color: var(--gold); font-weight: 400; }
+.of-card.off { opacity: .55; }
+.of-card .btn.big { margin-top: 8px; font-size: 22px; }
+.of-block { margin-top: 8px; text-align: center; }
+.ct-price .btn[disabled] { opacity: .35; }
+
+/* Spielstände */
+.slots { margin: 14px auto 0; max-width: 620px; max-height: 320px; overflow: auto; padding: 8px 12px; text-align: left; }
+.slots.hidden { display: none; }
+.slot-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 2px solid #313136; font-size: 18px; }
+.slot-row b { display: block; font-weight: 400; color: var(--gold); font-size: 20px; }
+.slot-row small { color: var(--muted); }
+.slot-row .btn { padding: 2px 10px; font-size: 18px; }
+.slot-row.auto b { color: #8fd0ff; }
+.slots-empty { color: var(--muted); padding: 10px; }
+
+/* Stau-Warnung */
+#deadlock { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); z-index: 25; padding: 8px 16px; text-align: center; box-shadow: 0 0 0 3px var(--bad), 0 0 24px #d9534f88; animation: dlpulse 1s ease-in-out infinite alternate; }
+#deadlock.hidden { display: none; }
+@keyframes dlpulse { to { box-shadow: 0 0 0 3px var(--bad), 0 0 6px #d9534f44; } }
+.dl-title { color: #ff7a6a; font-size: 28px; text-shadow: 2px 2px 0 #000; }
+.dl-text { font-size: 19px; margin: 2px 0 6px; }
+.dl-btns { display: flex; gap: 8px; justify-content: center; }
+.dl-btns .btn { font-size: 18px; padding: 3px 12px; }
+#gameover { position: fixed; inset: 0; z-index: 48; display: flex; align-items: center; justify-content: center; background: rgba(30, 6, 6, .82); }
+#gameover.hidden { display: none; }

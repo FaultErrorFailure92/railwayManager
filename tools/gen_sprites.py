@@ -246,10 +246,13 @@ def car(body, roof, kind, accent=None, orient=0):
         if abs(nrm[0] - nrm[1]) < 0.05:
             f = 0.9
         d.polygon(S(pts), fill=shade(body, f))
-        if kind_f == "side" and kind in ("loco", "coach", "emu", "cab"):
+        if kind_f == "side" and kind in ("loco", "coach", "emu", "cab", "pcar"):
             v = sgn * hw
-            band = (30, 40, 56, 255) if kind == "loco" else (40, 56, 80, 255)
-            if kind != "loco":
+            band = (30, 40, 56, 255) if kind in ("loco", "pcar") else (40, 56, 80, 255)
+            if kind == "pcar":
+                d.polygon(S([P(-hl + 1, v, 6), P(-hl + 4, v, 6), P(-hl + 4, v, 8.5), P(-hl + 1, v, 8.5)]), fill=band)
+                d.polygon(S([P(hl - 4, v, 6), P(hl - 1, v, 6), P(hl - 1, v, 8.5), P(hl - 4, v, 8.5)]), fill=band)
+            elif kind != "loco":
                 u = -hl + 1.5
                 while u + 2.2 <= hl - 1.2:
                     d.polygon(S([P(u, v, 6), P(u + 2.2, v, 6), P(u + 2.2, v, 8.5), P(u, v, 8.5)]), fill=band)
@@ -266,7 +269,7 @@ def car(body, roof, kind, accent=None, orient=0):
         if kind_f == "side" and kind == "steam":
             v = sgn * hw
             d.polygon(S([P(-hl, v, 2), P(hl, v, 2), P(hl, v, 3.5), P(-hl, v, 3.5)]), fill=(170, 40, 36, 255))
-        if kind_f == "end" and kind in ("loco", "emu", "cab"):
+        if kind_f == "end" and kind in ("loco", "emu", "cab", "pcar"):
             u = sgn * hl
             d.polygon(S([P(u, -hw + 1.5, 6), P(u, hw - 1.5, 6), P(u, hw - 1.5, 8.5), P(u, -hw + 1.5, 8.5)]),
                       fill=(30, 40, 56, 255))
@@ -323,6 +326,15 @@ SCHEMES = {
            "wagon0": ((52, 96, 160), (70, 116, 180), None),
            "wagon1": ((170, 60, 50), (190, 80, 66), None),
            "wagon2": ((70, 130, 80), (90, 150, 100), None)},
+    "lb": {"loco": ((240, 196, 40), (110, 116, 124), (47, 127, 184, 255)),
+           "coach": ((47, 127, 184), (140, 146, 150), (240, 196, 40, 255)),
+           "cab": ((47, 127, 184), (140, 146, 150), (240, 196, 40, 255))},
+    "hv": {"loco": ((138, 90, 44), (90, 90, 94), (240, 220, 160, 255)),
+           "wagon0": ((120, 84, 48), (160, 116, 70), None),
+           "wagon1": ((104, 74, 44), (150, 110, 64), None),
+           "wagon2": ((132, 96, 58), (170, 128, 80), None)},
+    "hs": {"pcar": ((240, 240, 236), (60, 64, 72), (200, 16, 46, 255)),
+           "coach": ((240, 240, 236), (150, 156, 164), (200, 16, 46, 255))},
     "dm": {"steam": ((34, 34, 38), (52, 52, 58), None),
            "coach": ((122, 42, 36), (70, 60, 56), (214, 176, 80, 255))},
 }
@@ -402,6 +414,20 @@ for i in range(2):
 NATURE["bld_bush0"] = bg.bush(30)
 for name, (img, ox, oy) in NATURE.items():
     save(name, img, ox, oy + 8)  # Anker = Tile-Ecke, Baum steht in der Tile-Mitte (Bildschirm +8)
+
+# ---------------------------------------------------------------- Läden, Straße, Bahnhofsausbau, Deko
+P5 = {
+    "bld_cafe": bg.cafe(), "bld_parking": bg.parking(), "bld_bus": bg.bus_terminal(),
+    "bld_station2": bg.station_big(2), "bld_station3": bg.station_big(3),
+    "bld_fountain": bg.fountain(), "bld_flowers": bg.flowers(5), "bld_statue": bg.statue(),
+}
+for name, (img, ox, oy) in P5.items():
+    save(name, img, ox, oy)
+for name, (img, ox, oy) in {"bld_vending": bg.vending(), "bld_lamp": bg.lamp(), "bld_clock": bg.platform_clock()}.items():
+    save(name, img, ox, oy - 4)   # stehen auf dem Bahnsteig
+for m in range(16):
+    img, ox, oy = bg.road(m)
+    save(f"road_{m}", img, ox, oy)
 
 # ---------------------------------------------------------------- Landschaft: Wasser, Fels, Berge, Brücke, Tiere
 import terraingen as trg  # noqa: E402
@@ -492,6 +518,12 @@ for name in NATURE:
 for n in ("cursor", "flag", "shovel", "house"):
     ic = Image.open(os.path.join(OUT, "ui", n + ".png"))
     icon_save("tool_" + n, ic.resize((36, 36), Image.NEAREST))
+for name, d in (("bld_cafe", (2, 2)), ("bld_parking", (3, 2)), ("bld_bus", (3, 2)), ("bld_station2", (3, 2)), ("bld_station3", (3, 2)),
+                ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1))):
+    icon_save(name, compose([(name, 0, 0)], [(x, y) for x in range(d[0]) for y in range(d[1])]))
+for name in ("bld_vending", "bld_lamp", "bld_clock"):
+    icon_save(name, compose([("platform", 0, 0), (name, 0, 0)], T1))
+icon_save("tool_road", compose([("road_10", 0, 0), ("road_10", 1, 0), ("road_10", 2, 0)], [(0, 0), (1, 0), (2, 0)]))
 icon_save("rail_bridge_icon", compose([("water_10", 0, 0), ("water_10", 1, 0), ("track", 0, 0), ("track", 1, 0), ("rail_bridge", 0, 0), ("rail_bridge", 1, 0)], []))
 
 # ---------------------------------------------------------------- Oberleitung, Prellbock, Zugänge, Anlagen

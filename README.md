@@ -41,13 +41,14 @@ npm run sprites
 | --- | --- |
 | Maus ziehen / WASD | Karte verschieben |
 | Mausrad | Zoom |
-| 1–8, B, N, X | Werkzeuge |
+| 1–0, B, N, X | Werkzeuge |
 | R | Variante bzw. Fahrtrichtung wechseln |
 | Rechtsklick | Abbrechen |
 | Leertaste | Pause |
 | + / − | Spieltempo |
 | F | Forschung |
 | V | Verträge |
+| T | Fahrplan (Weg-Zeit-Diagramm) |
 | Esc | Werkzeug weglegen, sonst Hauptmenü |
 
 Über einen Zug fahren zeigt seine Daten; ein Klick auf ein Empfangsgebäude benennt den Bahnhof um.

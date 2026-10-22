@@ -27,6 +27,8 @@ export interface Cell {
   siding: boolean;
   /** Richtungsgleis im Rangierbahnhof (Ziel 0..2) */
   sortDest: number | null;
+  /** Straße */
+  road: boolean;
 }
 
 /** Bahnsteigzugang quer über die Gleise */
@@ -83,13 +85,13 @@ export class Grid {
   constructor(fresh = true) {
     for (let i = 0; i < this.w * this.h; i++) {
       this.cells.push({ track: false, fixed: false, platform: false, signal: false, signalW: false, piece: null, building: null,
-        wire: false, siding: false, sortDest: null });
+        wire: false, siding: false, sortDest: null, road: false });
     }
     this.owned = new Array(this.pw * this.ph).fill(false);
     this.terrain = new Uint8Array(this.w * this.h);
     this.generateTerrain();
     if (!fresh) return;
-    for (let x = 0; x < this.w; x++) Object.assign(this.get(x, MAIN_ROW)!, { track: true, fixed: true, wire: true });
+    for (let x = 0; x < this.w; x++) Object.assign(this.get(x, MAIN_ROW)!, { track: true, fixed: true });
     for (let py = START_PARCELS.y0; py <= START_PARCELS.y1; py++) {
       for (let px = START_PARCELS.x0; px <= START_PARCELS.x1; px++) this.owned[py * this.pw + px] = true;
     }
@@ -144,6 +146,12 @@ export class Grid {
     for (let y = 0; y < this.h; y++) for (let x = CORE.x0; x <= CORE.x1; x++) T[this.key(x, y)] = GRASS;
   }
 
+  /** Netzbetreiber elektrifiziert alle Streckengleise (fest verlegte Gleise) */
+  electrifyLine() {
+    for (const c of this.cells) if (c.fixed && c.track) c.wire = true;
+    for (const id of this.fixedPieces) for (const k of this.pieceCells(this.pieces.get(id)!)) this.cells[k].wire = true;
+  }
+
   /** Zelle gehört zu einer Kreuzungsstelle des Netzbetreibers */
   isLoopCell(x: number, y: number) {
     return (y === MAIN_ROW || y === SECOND_ROW) && PASSING_LOOPS.some(([a, b]) => x >= a && x <= b + 2);
@@ -172,8 +180,7 @@ export class Grid {
       this.fixedPieces.add(p1.id).add(p2.id);
       for (let x = xa; x <= xb + 2; x++) {
         const c = this.get(x, SECOND_ROW)!;
-        Object.assign(c, { track: true, fixed: true, wire: true });
-        this.get(x, MAIN_ROW)!.wire = true;
+        Object.assign(c, { track: true, fixed: true });
       }
       for (const y of [MAIN_ROW, SECOND_ROW]) {
         this.get(xb - 1, y)!.signal = true;
@@ -215,7 +222,7 @@ export class Grid {
       const c = this.get(x, SECOND_ROW)!;
       if (this.isOwned(x, SECOND_ROW)) continue;
       if (c.building !== null) this.removeBuilding(c.building);
-      Object.assign(c, { track: true, fixed: true, platform: false, wire: true });
+      Object.assign(c, { track: true, fixed: true, platform: false });
     }
     this.mainRows.push(SECOND_ROW);
   }

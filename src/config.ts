@@ -27,7 +27,9 @@ export const CAR_LEN = 16;
 
 // Wirtschaft
 export const START_MONEY = 4000;
-export const COST = { track: 40, platform: 80, signal: 250, switch: 900, curve: 300, diag: 60, wire: 30, tunnel: 200, bridge: 150, marker: 20, crossing: 400, railBridge: 250 } as const;
+export const COST = { track: 40, platform: 80, signal: 250, switch: 900, curve: 300, diag: 60, wire: 30, tunnel: 200, bridge: 150, marker: 20, crossing: 400, railBridge: 250, road: 25 } as const;
+/** Ausbau des Empfangsgebäudes auf Stufe 2 / 3 */
+export const STATION_UPGRADE = [0, 0, 6000, 12000];
 export const PARCEL_BASE_PRICE = 1500;
 export const PARCEL_STEP_PRICE = 600;
 export const REFUND = 0.5;

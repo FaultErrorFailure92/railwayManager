@@ -1,11 +1,13 @@
-import { COST } from '../config';
+import { COST, STATION_UPGRADE } from '../config';
 import { Game, fmtTime } from '../game/Game';
 import { MISSIONS, ToolId } from '../game/Missions';
-import { clearSave, saveState, writeSave } from '../game/storage';
+import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
 import { OPERATORS } from '../sim/Operators';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
-import { contractsHtml, contractsKey, researchHtml, researchKey, TRANSIT_FEE } from './Screens';
+import { Timetable } from './Timetable';
+import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
+import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { GameScene, UiState } from '../render/GameScene';
 import { VARIANTS, typing, variantOf } from '../render/GameScene';
@@ -22,11 +24,13 @@ const TOOLS: ToolDef[] = [
   { id: 'land', label: 'Land kaufen', key: '2', icon: 'tool_flag', help: 'Gelbe Parzelle anklicken' },
   { id: 'platform', label: 'Bahnsteig', key: '3', icon: 'platform', cost: COST.platform, help: 'Neben dem Gleis ziehen' },
   { id: 'track', label: 'Gleis', key: '4', icon: 'track', cost: COST.track,
-    help: 'Ziehen: gerade oder schräg in eine andere Reihe – Kurven, Weichen und Kreuzungen setzt das Spiel selbst' },
-  { id: 'switch', label: 'Weiche', key: '5', cost: COST.switch, help: 'Gleiswechsel und Abzweige · R = nächste Variante' },
-  { id: 'signal', label: 'Signal', key: '6', cost: COST.signal, help: 'Auf Gleis klicken · R = Fahrtrichtung' },
-  { id: 'wire', label: 'Oberleitung', key: '7', icon: 'tool_wire', cost: COST.wire, help: 'Über Gleise ziehen · ohne Oberleitung halten nur Dieselzüge' },
-  { id: 'access', label: 'Zugang', key: '8', help: 'Von Bahnsteig zu Bahnsteig quer über die Gleise ziehen' },
+    help: 'Ziehen: waagrecht = gerade, schräg = Diagonale (kreuzt Gleise automatisch)' },
+  { id: 'curve', label: 'Kurve', key: '5', cost: COST.curve, help: 'Klicken · R = nächste Variante' },
+  { id: 'switch', label: 'Weiche', key: '6', cost: COST.switch, help: 'Gleiswechsel und Abzweige · R = nächste Variante' },
+  { id: 'signal', label: 'Signal', key: '7', cost: COST.signal, help: 'Auf Gleis klicken · R = Fahrtrichtung' },
+  { id: 'wire', label: 'Oberleitung', key: '8', icon: 'tool_wire', cost: COST.wire, help: 'Über Gleise ziehen · ohne Oberleitung halten nur Dieselzüge' },
+  { id: 'access', label: 'Zugang', key: '9', help: 'Von Bahnsteig zu Bahnsteig quer über die Gleise ziehen' },
+  { id: 'road', label: 'Straße', key: '0', icon: 'tool_road', cost: COST.road, help: 'Ziehen · verbindet Empfangsgebäude mit Parkplatz und Busterminal' },
   { id: 'building', label: 'Gebäude', key: 'B', help: 'Klicken zum Bauen · R = nächstes Gebäude' },
   { id: 'facility', label: 'Anlagen', key: 'N', help: 'Auf Gleise setzen bzw. Gleise markieren · R = nächste' },
   { id: 'remove', label: 'Abriss', key: 'X', icon: 'tool_shovel', help: 'Klick: Signal → Gebäude → Zugang → Bahnsteig → Markierung → Gleis' },
@@ -54,7 +58,30 @@ export class Hud {
     $('speed').querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => this.setSpeed(Number((b as HTMLElement).dataset.speed)));
     });
-    $('btn-save').onclick = () => { if (writeSave(this.g.save())) this.savedFlash = performance.now() + 1500; };
+    $('btn-save').onclick = () => {
+      const s = this.g.save();
+      if (writeSave(s) && writeSlot(`${this.g.company || 'Spiel'} · ${fmtTime(this.g.sim.time)}`, false, s)) this.savedFlash = performance.now() + 1500;
+    };
+    $('m-load').onclick = () => this.toggleSlots('m-slots');
+    $('go-load').onclick = () => this.toggleSlots('go-slots');
+    $('go-new').onclick = () => { saveState.disabled = true; clearSave(); try { sessionStorage.setItem('rm_new', '1'); } catch { /* egal */ } location.reload(); };
+    for (const id of ['m-slots', 'go-slots']) {
+      $(id).addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        const l = t.closest('[data-load]') as HTMLElement | null;
+        if (l && activateSlot(l.dataset.load!)) { saveState.disabled = true; location.reload(); }
+        const d = t.closest('[data-del]') as HTMLElement | null;
+        if (d) { deleteSlot(d.dataset.del!); this.renderSlots(id); }
+      });
+    }
+    $('dl-show').onclick = () => { const id = this.g.sim.deadlock?.[0]; if (id) this.scene()?.focusTrain(id); };
+    $('dl-cancel').onclick = () => {
+      const ids = this.g.sim.deadlock;
+      if (!ids?.length) return;
+      // jüngsten Zug im Kreis aufgeben
+      const t = ids.map((i) => this.g.sim.trains.find((x) => x.id === i)).filter(Boolean).sort((a, b) => b!.plannedSpawn - a!.plannedSpawn)[0];
+      if (t) this.g.sim.cancelTrain(t.id);
+    };
     $('btn-menu').onclick = () => this.openMenu();
     $('company').onclick = () => this.askName();
     $('name-ok').onclick = () => this.confirmName();
@@ -82,8 +109,17 @@ export class Hud {
     $('m-help').onclick = () => $('m-helpbox').classList.toggle('hidden');
 
     $('ev-ok').onclick = () => this.closeEvent();
+    $('offer').addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const a = t.closest('[data-accept]') as HTMLElement | null;
+      if (a && this.g.acceptOffer(a.dataset.accept as keyof typeof OPERATORS)) this.closeOffer();
+      if (t.closest('[data-decline]')) { this.g.declineOffer(); this.closeOffer(); }
+    });
     $('btn-research').onclick = () => this.openScreen('research');
     $('btn-contracts').onclick = () => this.openScreen('contracts');
+    $('btn-timetable').onclick = () => this.openScreen('timetable');
+    this.timetable = new Timetable(this.g);
+    $('bpanel').addEventListener('click', (e) => this.onPanelClick(e as MouseEvent));
     document.querySelectorAll('[data-close]').forEach((b) => {
       (b as HTMLElement).onclick = () => this.closeScreen();
     });
@@ -95,11 +131,13 @@ export class Hud {
     $('ct-table').addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       const b = t.closest('[data-op]') as HTMLElement | null;
-      if (b) {
+      if (b && b.dataset.cls) {
         const op = b.dataset.op as keyof typeof OPERATORS, cls = b.dataset.cls as 'short' | 'long';
         const step = Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 5 : 1);
         this.g.setPrice(op, cls, this.g.contracts[op].price[cls] + step);
       }
+      const tk = t.closest('[data-takt]') as HTMLElement | null;
+      if (tk) this.g.stepTakt(tk.dataset.takt as keyof typeof OPERATORS, Number(tk.dataset.d));
       const o = t.closest('[data-offer]') as HTMLElement | null;
       if (o) this.g.offer(o.dataset.offer as keyof typeof OPERATORS);
       this.renderScreen(true);
@@ -111,11 +149,14 @@ export class Hud {
       }
       if (!$('modal').classList.contains('hidden') || typing()) return;
       if (this.screen) {
-        if (e.key === 'Escape' || (e.key.toLowerCase() === 'f' && this.screen === 'research') || (e.key.toLowerCase() === 'v' && this.screen === 'contracts')) this.closeScreen();
+        const k = e.key.toLowerCase();
+        if (e.key === 'Escape' || (k === 'f' && this.screen === 'research') || (k === 'v' && this.screen === 'contracts') || (k === 't' && this.screen === 'timetable')) this.closeScreen();
         return;
       }
       if (!this.ui.menu && e.key.toLowerCase() === 'f') { this.openScreen('research'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'v') { this.openScreen('contracts'); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 't') { this.openScreen('timetable'); return; }
+      if (e.key === 'Escape' && !$('bpanel').classList.contains('hidden')) { this.closePanel(); return; }
       if (e.key === 'Escape') {
         if (this.ui.menu) { if (this.hadSave || this.g.company) this.closeMenu(); }
         else if (this.ui.tool !== 'select') this.ui.tool = 'select';
@@ -214,11 +255,12 @@ export class Hud {
   }
 
   // ------------------------------------------------------------ Forschung / Verträge
-  private screen: 'research' | 'contracts' | null = null;
+  private screen: 'research' | 'contracts' | 'timetable' | null = null;
+  private timetable!: Timetable;
   private pausedBeforeScreen = false;
   private screenKey = '';
 
-  private openScreen(name: 'research' | 'contracts') {
+  private openScreen(name: 'research' | 'contracts' | 'timetable') {
     if (name === 'research' && !this.g.unlocked.has('research')) return;
     if (this.screen === name) { this.closeScreen(); return; }
     if (!this.screen) { this.pausedBeforeScreen = this.g.paused; this.g.paused = true; }
@@ -238,6 +280,7 @@ export class Hud {
 
   private renderScreen(force = false) {
     if (!this.screen) return;
+    if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); return; }
     const mt = this.g.missionTool();
     const quest = mt?.tool === 'research' ? mt.variant : undefined;
     const key = this.screen === 'research' ? researchKey(this.g, quest) : contractsKey(this.g);
@@ -248,6 +291,90 @@ export class Hud {
       $('rs-money').textContent = eur(this.g.money);
       $('rs-tree').innerHTML = researchHtml(this.g, quest);
     } else $('ct-table').innerHTML = contractsHtml(this.g);
+  }
+
+  // ------------------------------------------------------------ Infofenster für Bahnhof / Laden
+  private panelId: number | null = null;
+  private panelKey = '';
+
+  private closePanel() { this.panelId = null; $('bpanel').classList.add('hidden'); }
+
+  private renderPanel() {
+    const box = $('bpanel');
+    const b = this.panelId !== null ? this.g.grid.buildings.get(this.panelId) : undefined;
+    if (!b) { box.classList.add('hidden'); this.panelId = null; return; }
+    const g = this.g;
+    let key: string, html: string;
+    if (isStation(b.key)) {
+      const lvl = g.stationLevel(b.key), c = g.connections(b.id), bonus = Math.round(g.stationBonus(b.id) * 100);
+      const block = g.upgradeBlock(b.id);
+      key = `s${b.id}${b.key}${b.name}${c.parking}${c.bus}${block}`;
+      html = `<div class="bp-head"><img src="assets/gen/icons/${b.key}.png" alt="" /><div><b>${b.name ?? 'Bahnhof'}</b><small>${BUILDINGS[b.key].label} · Stufe ${lvl}</small></div><button class="btn" data-bp="close">✕</button></div>
+        <div class="bp-row"><span>Einnahmen</span><span class="ok">+${bonus} %</span></div>
+        <div class="bp-row"><span>Parkplatz</span><span class="${c.parking ? 'ok' : 'no'}">${c.parking ? '✓ über Straße angebunden (+10 %)' : '✗ nicht angebunden'}</span></div>
+        <div class="bp-row"><span>Busterminal</span><span class="${c.bus ? 'ok' : 'no'}">${c.bus ? '✓ über Straße angebunden (+15 %)' : '✗ nicht angebunden'}</span></div>
+        <div class="bp-btns"><button class="btn" data-bp="rename">Umbenennen</button>
+        ${lvl < 3 ? `<button class="btn${block ? ' off' : ''}" data-bp="upgrade" title="${block ?? ''}">Ausbauen · ${eur(STATION_UPGRADE[lvl + 1])} €</button>` : ''}</div>
+        ${lvl < 3 && block ? `<div class="bp-note no">${block}</div>` : ''}`;
+    } else if (SHOPS[b.key]) {
+      const sh = SHOPS[b.key], price = g.shopPrices[b.key], rate = g.shopRate(b.key);
+      const r = price / sh.ref;
+      key = `p${b.key}${price}`;
+      html = `<div class="bp-head"><img src="assets/gen/icons/${b.key}.png" alt="" /><div><b>${sh.name}</b><small>Preis gilt für alle ${sh.name === 'Café' ? 'Cafés' : sh.name === 'Kiosk' ? 'Kioske' : 'Automaten'}</small></div><button class="btn" data-bp="close">✕</button></div>
+        <div class="bp-row"><span>Preis</span><span class="ct-price"><button class="btn" data-bp="price" data-d="-0.5">−</button><b>${price.toFixed(2).replace('.', ',')} €</b><button class="btn" data-bp="price" data-d="0.5">+</button></span></div>
+        <div class="bp-row"><span>üblich</span><span>${sh.ref.toFixed(2).replace('.', ',')} €</span></div>
+        <div class="bp-row"><span>Kunden</span><span>${Math.round(rate * 100)} von 100 Fahrgästen</span></div>
+        <div class="bp-row"><span>Umsatz</span><span>${(rate * price * 100).toFixed(0)} € je 100 Fahrgäste</span></div>
+        <div class="bp-note ${r > 1.3 ? 'no' : r < 0.85 ? 'ok' : ''}">${r > 1.3 ? 'Zu teuer – Fahrgäste ärgern sich' : r < 0.85 ? 'Günstig – Fahrgäste freuen sich' : 'Fairer Preis'}</div>`;
+    } else { this.closePanel(); return; }
+    if (key !== this.panelKey) { this.panelKey = key; box.innerHTML = html; }
+    box.classList.remove('hidden');
+  }
+
+  private onPanelClick(e: MouseEvent) {
+    const t = (e.target as HTMLElement).closest('[data-bp]') as HTMLElement | null;
+    if (!t || this.panelId === null) return;
+    const b = this.g.grid.buildings.get(this.panelId);
+    if (!b) return;
+    const act = t.dataset.bp;
+    if (act === 'close') this.closePanel();
+    if (act === 'rename') this.askStation(b.id);
+    if (act === 'upgrade') this.g.upgradeStation(b.id);
+    if (act === 'price') this.g.setShopPrice(b.key, this.g.shopPrices[b.key] + Number(t.dataset.d) * (e.shiftKey ? 2 : 1));
+    this.panelKey = '';
+    this.renderPanel();
+  }
+
+  // ------------------------------------------------------------ Spielstände
+  private toggleSlots(id: string) {
+    $(id).classList.toggle('hidden');
+    this.renderSlots(id);
+  }
+
+  private renderSlots(id: string) {
+    const list = listSlots();
+    $(id).innerHTML = list.length ? list.map((x) => {
+      const day = Math.floor(x.gameTime / 86400) + 1;
+      const date = new Date(x.saved).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return `<div class="slot-row${x.auto ? ' auto' : ''}"><div><b>${x.auto ? '⟳ ' : ''}${x.label}</b><small>${x.company} · Tag ${day}, ${fmtTime(x.gameTime)} · ${eur(x.money)} € · ${date}</small></div>
+        <button class="btn" data-load="${x.id}">Laden</button><button class="btn" data-del="${x.id}">✕</button></div>`;
+    }).join('') : '<div class="slots-empty">Noch keine Spielstände. „Speichern“ oben rechts legt einen an, Aufträge und Forschung speichern automatisch.</div>';
+  }
+
+  // ------------------------------------------------------------ Ausschreibung / Anfrage
+  private pausedBeforeOffer = false;
+
+  private showOffer() {
+    if (!this.g.offers.open || !$('offer').classList.contains('hidden')) return;
+    this.pausedBeforeOffer = this.g.paused;
+    this.g.paused = true;
+    $('of-body').innerHTML = offerHtml(this.g);
+    $('offer').classList.remove('hidden');
+  }
+
+  private closeOffer() {
+    $('offer').classList.add('hidden');
+    this.g.paused = this.pausedBeforeOffer;
   }
 
   // ------------------------------------------------------------ Ereignis-Screen (Auftrag erfüllt)
@@ -455,7 +582,7 @@ export class Hud {
     $('btn-research').classList.toggle('quest', mtq?.tool === 'research' && this.screen !== 'research');
     const warn = Object.values(OPERATORS).some((o) => {
       const c = g.contracts[o.id];
-      return o.kind !== 'sort' && (!c.active ? g.sim.time >= c.talkAfter && g.activeOperators().includes(o) : cancelRisk(o, c, g.satisfaction[o.id]) > 0);
+      return c.status === 'cancelled' ? g.sim.time >= c.talkAfter : c.status === 'active' && cancelRisk(o, c, g.satisfaction[o.id]) > 0;
     });
     $('ct-warn').textContent = warn ? '!' : '';
     this.renderScreen();
@@ -497,7 +624,7 @@ export class Hud {
     const locked = !g.unlocked.has(t.id);
     let html = `<b>${t.label}</b>${v ? ` · ${v.label}` : ''}`;
     if (v?.info && v.info !== 'Deko') html += ` <small>(${v.info})</small>`;
-    const viaResearch: Partial<Record<ToolId, string>> = { wire: 'Oberleitung', access: 'Bahnsteigzugänge', facility: 'Abstellgleise' };
+    const viaResearch: Partial<Record<ToolId, string>> = { wire: 'Oberleitung', access: 'Bahnsteigzugänge', facility: 'Abstellgleise', road: 'Straßenanbindung' };
     if (locked) html += ` <span class="no">· ${viaResearch[t.id] ? `im Forschungsbaum: ${viaResearch[t.id]}` : 'kommt mit einem späteren Auftrag'}</span>`;
     else if (!hovered && this.ui.message) {
       const bad = !/€$/.test(this.ui.message);
@@ -568,9 +695,22 @@ export class Hud {
     this.updateCard();
 
     // Ereignisse
-    if (this.ui.stationClick !== null) { this.askStation(this.ui.stationClick); this.ui.stationClick = null; }
+    if (this.ui.stationClick !== null) { this.panelId = this.ui.stationClick; this.ui.stationClick = null; this.panelKey = ''; }
+    this.timetable.sample();
+    // Stau-Warnung mit Countdown
+    const dl = g.sim.deadlock && g.deadlockSince && !g.gameOver;
+    $('deadlock').classList.toggle('hidden', !dl);
+    if (dl) {
+      const names = g.sim.deadlock!.map((i) => g.sim.trains.find((x) => x.id === i)?.number).filter(Boolean).join(', ');
+      $('dl-text').textContent = `${names} · noch ${Math.ceil(g.deadlockLeft / 60)} min bis Game Over – Gleis bauen oder einen Zug aufgeben`;
+    }
+    if (this.g.offers.open && $('modal').classList.contains('hidden') && $('event').classList.contains('hidden') && !this.ui.menu) this.showOffer();
+    this.renderPanel();
     for (const ev of g.uiEvents.splice(0)) {
       if (ev.type === 'station') { this.askStation(ev.id); continue; }
+      if (ev.type === 'offer' || ev.type === 'deadlock') continue;
+      if (ev.type === 'autosave') { writeSlot(ev.label, true, this.g.save()); this.savedFlash = now + 1500; continue; }
+      if (ev.type === 'gameover') { $('gameover').classList.remove('hidden'); continue; }
       if (ev.type === 'research') {
         const r = RESEARCH_BY_ID[ev.id];
         this.showEvent(`<h1 class="blue">FORSCHUNG FERTIG!</h1>

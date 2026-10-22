@@ -74,7 +74,8 @@ export class People {
     for (const b of this.g.grid.buildings.values()) {
       if (b.key === 'bld_shelter') add(b.x, b.y, 1, 1.7);
       if (b.key === 'bld_bench') add(b.x, b.y, 1, 1.3);
-      if (b.key === 'bld_kiosk') {
+      if (b.key === 'bld_clock') add(b.x, b.y, 2, 1.2);
+      if (b.key === 'bld_kiosk' || b.key === 'bld_vending') {
         add(b.x, b.y, 2, 1.3);
         for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) this.kioskNear.add(`${b.x + dx},${b.y + dy}`);
       }
