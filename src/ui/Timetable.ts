@@ -1,3 +1,4 @@
+import { currentMap } from '../world/maps';
 import { MAP_W, TILE } from '../config';
 import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
@@ -99,8 +100,8 @@ export class Timetable {
       ctx.fillText(st.name ?? 'Bahnhof', (xa + xb) / 2, T - 8);
     }
     ctx.fillStyle = '#6b5a3c';
-    ctx.textAlign = 'left'; ctx.fillText('West', L, T - 8);
-    ctx.textAlign = 'right'; ctx.fillText('Ost', W - R, T - 8);
+    ctx.textAlign = 'left'; ctx.fillText(`← ${currentMap().ends[0]} (West)`, L, T - 8);
+    ctx.textAlign = 'right'; ctx.fillText(`${currentMap().ends[1]} (Ost) →`, W - R, T - 8);
     // Zeitraster in Bleistift
     for (let m = Math.ceil(t0 / 1800) * 1800; m <= t1; m += 1800) {
       ctx.strokeStyle = m % 3600 === 0 ? 'rgba(90,80,60,0.45)' : 'rgba(90,80,60,0.2)';

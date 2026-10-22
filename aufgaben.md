@@ -84,7 +84,6 @@
 - [x] Demobahnhof für lokale Entwicklung *(nur bei npm run dev: Menü → „Demobahnhof (Dev)“)*
 - [x] Bilder in den Zeitungsartikeln *(Pixel-Fotos mit Bildunterschrift, eigene Zeitung je Karte)*
 - [x] Nimm da gerne auch Autoren mit Lustigen Namen hinein *(z. B. Gerti Gleisbett, Herta Hemmschuh)*
-- Englische Version
 - [x] bei neues Spiel lieber fragen, ob das alte gespeichert werde soll -> ja/Nein, bei Ja den Speicher Dialog öffnen
 - [x] Begrüssungstext vom Bahnvorstand, wenn man ein neues Spiel anfängt. der Vorstand kann auch hin und wieder briefe schicken oder sich melden, wenn irgendwas gut oder schlecht läuft *(Hofrat Dr. Ferdinand Fahrplan; Lob teils mit Prämie)*
 - [x] mehrere Themes - Wüste oder Schneelandschaft fänd ich noch gut *(Wüstenbahn + Schneeland mit eigenem Boden, Kakteen/Palmen, verschneiten Tannen)*
@@ -102,4 +101,65 @@
 - [x] Arbeite mir ein viel detaillieretes Forschungssystem aus. und die Forschungen können ruhig anders heissen als das, was sie freischalten, gerne auch mit einem Augenzwinkern. ich stelle mir 2-3 Bäume vor, wo einer wirklich Betriebliche Features freischaltet, einer Deko und einer Vielleicht dinge, mit denen Sich zusätzlich geld verdienen lässt. aber da mach zuerst einen plan und zeig ihn mir, bevor du das umsetzt. *(3 Bäume: Stellwerk, Verschönerungsverein, Kaufmännische Abteilung; je Baum eine Forschung parallel)*
 - [x] Schönere Vorschaubilder für die Themes *(echte Ausschnitte aus der Karte, neu erzeugen mit tools/map_previews.py)*
 - [x] Bei Wüste nimm bitte auch noch andere Gebäudetiles dazu *(Lehmhäuser, Kuppelhaus, Lehmhütte, Ziehbrunnen, Zelt)*
-- Elemente für Bahnsteige müssen drehbar sein, gilt auch für Gebäude. 
+
+===
+
+# Arbeitspakete (offen, Reihenfolge = Abarbeitung)
+
+## AP1 – Bugs *(schnell, zuerst)*
+- [x] BUG: Deadlock bei Stumpfgleis direkt hinter einem Gleiswechsel (Wendezug will abstellen, Gegenzug auf Gleis 2) *(Fahrdienstleiter rechnet Wendezüge/Abstellgleise richtig, Verschubbereiche eigene Abschnitte)*
+- [x] BUG: Signal setzen wird nicht erkannt in der Aufgabe 2
+- [x] BUG: In Aufgabe 5 blinkt das gleis, aber es wird nicht angezeigt wo ich eines platzieren soll bzw. was ich damit tun soll
+- [x] BUG: Wenn ein Gleis gelöscht wird, auf dem sich ein Zug befindet, soll der Zug mitgelöscht werden oder der Zug noch abfahren, bevor das Gleis gelöscht wird. kann gerne auch mit einer strafe verbunden sein
+- [x] BUG: Forschungsbaum Ansicht sieht derzeit zusammengestaucht aus und hat bei jedem Baum eine andere größe. Mach die gleich groß, verschieb die 3 Tabs nach Links und gib den Bäumen genug Raum zur Darstellung
+- [x] BUG: bei der Aufgabe 2. Gleis kann das 2. Gleis nicht verwendet/angebunden werden, es ist an den Bildschirmrändern einfach ein Stumpfgleis. Das muss geändert werden. 
+
+## AP2 – Kleine UI-Verbesserungen *(einfach)*
+- [x] FEATURE: Titelleiste: Zufriedenheitsskala sollte immer den gleichen Platz brauchen. Du kannst die Anzeigen und Buttons ruhgi soweit optisch trennen, dass klar wird, dass es sich um unterschiedliche Bereiche mit unterschiedlichen Funktionen handelt
+- [x] FEATURE: Die Buttons in der Leiste oben sollten alle nur ein Icon haben und den Text nur beim hovern anzeigen
+- [x] FEATURE: Wenn ich wo drüber hovern kann, sollten die Tooltips immer im Theme des Spiels angezegit werden, nicht im OS Theme
+- [x] FEATURE: Bei Fahrplan diagramm, Verträgen und Forschungsbaum halte die Zeit bitte nicht an
+- [x] FEATURE: beim Fahrplandiagramm zeig mir statt West und Ost 2 Städte an (und West/Ost) in Klammern
+- [x] FEATURE: Wenn das Spiel neu gesartet wird, zeige bitte keine Bahnhofsdaten an im Menü. Und wenn ein Bahnhof gestartet/geöffnet ist, dann mach dafür irgendwo ein fensterchen und fass dort mehr aus den Stats zusammen, als nur den Namen und die Map. Kannst gerne ein 2. Menü dafür erfinden - kann zB wirklich nur ein Menü als Modal oder sowas sein, nicht das normale Hauptmenü. Und falls du das so machst, brauchen wir einen schließen button und einen Button zurück zum Hauptmenü
+- [x] FEATURE: mach mir bitte statt den Laufenden Kosten in der Leiste oben den erwarteten Umsatz am Tag und nur bei Hover zeigst du dann die Gewinne und Verluste auf, das kann ein Tooltip sein, aber auch ein größeres Fenster, dass das schön grafisch aufarbeitet
+- [x] FEATURE: Wenn Störungen auftreten soll beim Hovern ein Fensterchen anzeigt, was das für eine Störung ist, gleich mit dem Button Störtrupp senden (und den Kosten)
+- [x] FEATURE: Unterführung für Bahnsteige wird rot angezeigt beim platzieren bis man es in die richtige länge gezogen hat. vielleciht kann man grundsätzlich bei der auswahl highlighten, wo ein element platziert werden kann und den USer dann dabei unterstützen, was man beim platzieren machen muss, bei der UNterführung ziehen zum nächsten Bahnsteig
+- [x] FEATURE: Beim Platzieren der Oberleitung zeig bitte an, wo die überall hin kann, zB durch highlighten der Felder. und zeig an, wenn eine Oberleitung "offen" da hängt, bzw da kein zug fahren kann
+- [x] FEATURE: Unterführungen und Brücken für Bahnsteige kommen ins Menü 3 beim Bahnsteig
+
+## AP3 – Bedienung Baumenü *(mittel)*
+- [x] FEATURE: Bei Langen menüs im baumenü, zB bei Gebäude, mach bitte 2 oder 3 Reihen draus. und mach auch gerne shortcuts wie man auf eine bestimmte variante dann kommt, zB 9 für gebäude und dann 1 für bahnhof. dann kann man den platzieren und dann ist man automatisch wieder auf 1 - betrachten
+- [x] FEATURE: Gleise, Kurven und weichen in ein Menü in der Toolbar und dann weiter auswählbar
+- [x] FEATURE: Statt Signale und Verschubbereich definieren mach ein Menü mit Bahnbetrieb oder sowas und dann kann man dort langfristig mehr bedienen in Untermenüs. 
+- [x] FEATURE: Für Remisen, Waschanlagen usw machen wir dann auch ein Menü mit Unterstützungsanlagen oder sowas.
+- [x] FEATURE: Für die Eisenbahnkreuzung machen wir auch ein Menü
+- [x] FEATURE: beim Löschen will ich nicht jedes Eelement einzeln anklicken müssen, sondern auch per drag and drop löschen können.
+- [x] FEATURE: Elemente für Bahnsteige (Kiosk,...)müssen drehbar sein, gilt auch für Gebäude. 
+- [x] FEATURE: weichen sollen über kurven drüber platziert werden können, wenn sie in der Auslenkung auch die kurve berücksichtigen  *(Weiche über passende Kurve setzen)*
+
+## AP4 – Züge & Info *(mittel)*
+- [x] FEATURE: Wenn ein Zug nicht weiter kann, dann zeige bitte auch ein ! und bei Hovern bzw. im Zugmenü zeig mir, was das problem ist und wie man es beheben kann
+- [x] FEATURE: Bei Klick auf einen Zug im Zugverkehrsfenster gib mir bitte 2 optionen: Zug fokusieren und dann Gleise festlegen und man kann die defaultmässigen bahnsteige manuell ändern. Das kann auch gerne über ein neues fenster rechts unten passieren, dass immer da ist und wenn kein zug fokussiert bzw. angewählt ist, eine minimap von den gekauften feldern und dem gleisnetz zeigt *(Zug zeigen, aus dem Verkehr nehmen, Bahnsteig festlegen)*
+- [x] FEATURE: Gegen Zahlen von einem Betrag sollen Züge auch manuell gelöscht werden können.
+- [x] FEATURE: Zeig mir bei Hovern über ein bahnhofsgebäude die wichtigsten stats für diesen bahnhof. also wie viel gäste, wie viel lokale, welche kosten, welcher umsatz usw...
+- [x] FEATURE: ich hätte gerne sowas wie ein nachrichtenpostfach oder E-Mail Folder, wo ich die ganzen nachrichten nachlesen kann, kann auch gerne als notification irgendwie in game auftauchen und man muss sie anklicken, um sie als gelesen zu markieren. Bei großen Events soll es aber nach wie vor in den Bildschirm springen, wie bisher
+
+## AP5 – Spieler & Optik *(mittel)*
+- [x] FEATURE: ich möchte einen Spielernamen und einen Avatar angeben können. Mach da gerne eine Auswahl, um jedes Geschlecht und Hautfarbe gut zu repräsentieren, gerne auch jüngere und ältere Personen. Die Anrede in den Briefen/Nachrichten soll immer persönlich und/oder genderneutral sein "Betriebsleiter Profil". Soll auch änderbar sein. soll beim Starten auch ausgewählt oder angelegt werden können (ohne authentifizierung oder PW, läuft ja eh nur lokal)
+- [x] FEATURE: optisches Update: ich hätte gerne in längeren Zügen auch Gepäckwägen und Speisewägen, die sich optisch ein wenig abheben
+- [ ] FEATURE: Wir brauchen noch einen fetzigeren Namen für unser Spiel
+- [ ] FEATURE: unterschiedliche Demoanimationen für den Titelscreen von Zügen die ur schnell durch die Wüste fahren, Busy Hauptbahnhöfen etc. mach da so 4-5 unterschiedliche, die abwechselnd mit dem letzten Spiel angezeigt (wie bisher) werden
+
+## AP6 – Große Features *(später)*
+- [ ] FEATURE: Mach mir gerne einen Editor, wo ich Eisenbahnunternehmen hinzufgen und bearbeiten kann. Die bestehenden soll man als Vorlage verwenden können, aber nicht löschen können. Die selbst erstellten schon. Lass mich beim Spiel starten auch auswählen, welche Unternehmen teilhaben sollen. Man soll beim unternehmen den Vertreter mit Avatar, die Zugkategorien, ein Wappen und die Farben auswählen können. Auch gerne die Antriebe (Diesel, Dampf, Elektrisch)
+- [ ] FEATURE: Füge bitte auch die eine oder andere Bahn pro Karte an, die vl in einem Bogen zu meiner verläuft, an die ich mich anbinden kann und so noch ein besseres verkehrsangebot leisten kann. Vielleciht könnten so privatbahnen und anschluss an andere Bahnen generell noch ein 4. Forschungsstrang sein, damit man das nicht einfach nach lust und Laune 20x machen kann.
+- [ ] FEATURE: Baue schon vorhandene Straßen in die karten, wo auch Fahrzeuge, je nach Theme, herum fahren, an die ich dann auch irgendwo meine Eisenbahnkreuzungen und Busterminals anschließen kann
+- [ ] FEATURE: ich hätte gerne auch tunnel, unterführungen und größere brücken für die gleise, baue auch in die Alpenregion ganz am Ende noch die Möglichkeit ein auf einen berg rauf zu fahren (in der Wüste auch gerne). dafür brauch ich vl auch ein bodenbearbeitungswerkzeug. damit soll es zB auch möglich sein kreuzungsfrei abzuzweigen. vl kanns ne größere 2. bahn geben zum anschließen. Veilleicht wollen wir das spielfeld doppelt so breit machen wie bisher
+- [ ] FEATURE: in einem Theme hätt ich gerne eine Großstadt, wo es viele andere Bahnen gibt und wo wir uns unter hochbahnen und über straßenbahnen und verkehr hinwegbauen müssen. 
+- [x] DEV FEATURE: Bau den Demo Bahnhof bitte so aus, dass alle Funktionen mal ausprobiert werden *(Straße, Läden, Deko, Waschanlage, Abstellgleis, Instandhalter, mehr Verträge)*
+- [ ] FEATURE: Englische Version
+
+## AP7 – Release 
+- [ ] RELEASE: Lokaler Build für Win und Macos, damit man es einfach starten kann. Eventuell mit Electron oder vgl? Kann gern ein eigener Branch sein *(eigener Branch, zuletzt)*
+- [ ] RELEASE: Bau mir eine witzige Landing Page für das Spiel
+- [ ] RELEASE: überlege dir eine Toolchain und Möglichkeiten, wie wir das Spiel ins Netz bekommen

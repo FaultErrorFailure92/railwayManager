@@ -91,6 +91,7 @@ export interface TrainSave extends Omit<Train, 'op' | 'route' | 'start' | 'reser
 }
 
 export interface SimSave {
+  platformPref?: Record<string, string>;
   time: number;
   level: number;
   nextId: number;
@@ -113,6 +114,11 @@ const ROLL_V = 2.2;
 const SORT_SLOT = 30 * 60;
 const SORT_MIN = 4;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+
+/** Sonderwagen je Unternehmen (Sprites gibt es nur für diese) */
+const CAR_EXTRAS: Record<string, ('bag' | 'dine')[]> = {
+  wx: ['bag', 'dine'], nj: ['bag', 'dine'], hs: ['dine'], dm: ['dine'], fx: ['dine'], rx: ['bag'], ro: ['bag'], lb: ['bag'],
+};
 
 export class Simulation {
   time = START_TIME;
@@ -183,6 +189,8 @@ export class Simulation {
   vandalUntil = 0;
   /** bis dahin mehr Fahrgäste (Volksfest) */
   festUntil = 0;
+  /** fester Bahnsteig je Unternehmen und Richtung (Schlüssel `op:dir`, Wert = Bahnsteig-ID) */
+  platformPref: Record<string, string> = {};
   /** Forschung „Pfiff-Akademie“: kürzere Haltezeiten */
   dwellFactor = 1;
   /** Bahnhofs-Bewertung: Faktor auf die Fahrgastzahl */
@@ -206,6 +214,13 @@ export class Simulation {
       }
     }
     const cars = base.map((c) => (c === 'wagon' ? `wagon${Math.floor(Math.random() * 3)}` : c));
+    // lange Reisezüge: Gepäckwagen hinter der Lok, Speisewagen in der Mitte
+    const extras = CAR_EXTRAS[op.id];
+    if (extras && cars.filter((c) => c === 'coach').length >= 4) {
+      if (extras.includes('bag') && cars[1] === 'coach') cars[1] = 'bag';
+      const coaches = cars.map((c, i) => (c === 'coach' ? i : -1)).filter((i) => i >= 0);
+      if (extras.includes('dine') && coaches.length >= 3) cars[coaches[Math.floor(coaches.length / 2)]] = 'dine';
+    }
     const contract = this.contractActive(op.id) || !!op.special;
     const length = cars.length * CAR_LEN;
     const back: Dir = dir === 'E' ? 'W' : 'E';
@@ -229,7 +244,7 @@ export class Simulation {
     const stopLoss = ind ? op.dwell + 2 * (op.vmax / (2 * ACC) + op.vmax / (2 * DEC)) + 600 + 60
       : stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (op.turnback ? 60 : 0) : 0;
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
-    const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80;
+    const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80 + cars.filter((c) => c === 'dine').length * 30;
     const paxScale = base.length / op.cars.length;
     const fest = (at < this.festUntil ? 1.6 : 1) * this.paxFactor;
     const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale * fest));
@@ -346,13 +361,19 @@ export class Simulation {
       let cur: Sec = { blocks: new Set(), anyOf: [] };
       const push = () => { if (cur.blocks.size || cur.anyOf.length) out.push(cur); cur = { blocks: new Set(), anyOf: [] }; };
       let loops = 0, inLoop = false;
+      // dieselbe Kreuzungsstelle/derselbe Bahnhof zählt nur einmal (z. B. nach dem Wenden wieder durch dieselben Gleise)
+      const seenLoops = new Set<number>();
       outer: for (const leg of legs) {
         for (const e of leg) {
           const twin = e.block >= 0 ? this.loopTwinBlock(e.block) : -1;
           if (twin >= 0) {
             if (!inLoop) {
               inLoop = true;
-              if (++loops === 2) { cur.anyOf.push([e.block, twin]); cur.last = true; push(); break outer; }
+              const lk = Math.min(e.block, twin);
+              if (!seenLoops.has(lk)) {
+                seenLoops.add(lk);
+                if (++loops === 2) { cur.anyOf.push([e.block, twin]); cur.last = true; push(); break outer; }
+              }
             }
             if (!cur.anyOf.some((g) => g[0] === e.block)) cur.anyOf.push([e.block, twin]);
           } else {
@@ -586,10 +607,18 @@ export class Simulation {
   private candidatesRaw(t: Train, from: string, job: Job, estimate: boolean): Edge[][] {
     const el = this.electric(t);
     switch (job.k) {
-      case 'stop':
-        return this.net.pathsTo(from, (e) => !!e.stopRun && e.stopRun.accessible && e.stopRun.len * TILE >= t.length, el);
+      case 'stop': {
+        const ok = (e: Edge) => !!e.stopRun && e.stopRun.accessible && e.stopRun.len * TILE >= t.length;
+        // vom Spieler festgelegter Bahnsteig, wenn erreichbar; sonst automatisch
+        const pref = this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
+        if (pref) {
+          const c = this.net.pathsTo(from, (e) => ok(e) && e.stopRun!.id === pref, el);
+          if (c.length) return c;
+        }
+        return this.net.pathsTo(from, ok, el);
+      }
       case 'park': {
-        let c = this.net.pathsTo(from, (e) => !!e.parkRun && e.parkRun.len * TILE >= t.length && (estimate || this.blockFree(e.block, t.id)), el);
+        let c = this.net.pathsTo(from, (e) => !!e.parkRun && e.parkRun.len * TILE >= t.length + 8 && this.blockFree(e.block, t.id) && !this.parkTargeted(e.block, t.id), el);
         if (job.wash) { const w = c.filter((p) => p.some((e) => e.wash)); if (w.length) c = w; }
         return c;
       }
@@ -719,12 +748,13 @@ export class Simulation {
       this.note(`nostop:${t.op.id}`, `${t.number}: kein erreichbarer Bahnsteig (Zugang? Länge? Oberleitung?)`);
       this.planNext(t);
     } else if (job.k === 'park') {
-      // kein Abstellplatz: bleibt am Bahnsteig stehen
-      t.state = 'parked';
-      t.parkedAt = this.time;
-      t.parkKind = undefined;
-      t.note = 'kein Abstellgleis frei';
-      this.note(`nopark:${t.op.id}`, `${t.number} findet kein Abstellgleis und blockiert den Bahnsteig`);
+      // kein Abstellplatz frei: Wendezeit ausfallen lassen, gleich wieder einsteigen lassen und abfahren
+      // (eine lange Pause am Bahnsteig blockiert sonst das Gleis und führt zu Stau)
+      t.jobs.shift();
+      const next = t.jobs[0];
+      if (next?.k === 'stop') next.alight = true;
+      this.note(`nopark:${t.op.id}`, `${t.number} findet kein freies Abstellgleis – wendet sofort`);
+      this.planNext(t);
     } else if (job.k === 'hump') {
       t.jobs = [{ k: 'exit' }];
       this.note('nohump', `${t.number}: kein Abrollberg erreichbar – fährt durch`);
@@ -840,6 +870,13 @@ export class Simulation {
     return v;
   }
 
+  /** Abstellgleis ist schon Ziel eines anderen Zuges (fährt hin oder will nach dem Halt hin) */
+  private parkTargeted(block: number, id: number) {
+    return this.trains.some((x) => x.id !== id && (
+      (x.jobs[0]?.k === 'park' && x.route[x.route.length - 1]?.block === block)
+      || (x.jobs[1]?.k === 'park' && (x.ahead ?? [])[(x.ahead ?? []).length - 1]?.block === block)));
+  }
+
   private loopEdges = new Map<string, boolean>();
   /** Kante liegt ganz in einer Kreuzungsstelle des Netzbetreibers */
   private isLoopEdge(e: Edge) {
@@ -853,6 +890,13 @@ export class Simulation {
   }
 
   /** worauf ein stehender Zug wartet (für die Zugkarte) */
+  /** Zug kommt seit Längerem nicht weiter (für „!“ über dem Zug) */
+  stuck(t: Train) {
+    if (t.state !== 'running') return false;
+    if (t.note && /kein Weg|kein erreichbarer/.test(t.note)) return true;
+    return !!t.waiting && t.waitSince !== undefined && this.time - t.waitSince > 240;
+  }
+
   waitReason(t: Train): string | null {
     if (t.state !== 'running' || !t.waiting || t.committed + 1 >= t.route.length) return null;
     const idx = this.section(t.route, t.committed + 1);
@@ -1301,7 +1345,7 @@ export class Simulation {
 
   save(): SimSave {
     return {
-      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep], vandalUntil: this.vandalUntil, festUntil: this.festUntil,
+      time: this.time, level: this.level, nextId: this.nextId, sortDep: [...this.sortDep], vandalUntil: this.vandalUntil, festUntil: this.festUntil, platformPref: { ...this.platformPref },
       nextSpawn: { ...this.nextSpawn }, counter: { ...this.counter }, nextDir: { ...this.nextDir },
       queue: this.queue.map((t) => this.saveTrain(t)),
       trains: this.trains.map((t) => this.saveTrain(t)),
@@ -1313,6 +1357,7 @@ export class Simulation {
     if (s.sortDep) this.sortDep = s.sortDep;
     this.vandalUntil = s.vandalUntil ?? 0;
     this.festUntil = s.festUntil ?? 0;
+    this.platformPref = s.platformPref ?? {};
     Object.assign(this.nextSpawn, s.nextSpawn);
     Object.assign(this.counter, s.counter);
     Object.assign(this.nextDir, s.nextDir);

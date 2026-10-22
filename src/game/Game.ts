@@ -43,6 +43,8 @@ export interface DayStat { day: number; income: number; expense: number; handled
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
 
+export interface InboxEntry { id: number; time: number; kind: 'letter' | 'news' | 'decision'; title: string; from: string; html: string; read: boolean }
+
 export interface BuildPlan {
   ok: boolean;
   cost: number;
@@ -50,6 +52,12 @@ export interface BuildPlan {
   cells: { x: number; y: number }[];
   /** automatischer Gleisbau: gesetzte Gleisteile (für die Vorschau) */
   pieces?: PiecePlace[];
+  /** Hinweis zur Aktion (z. B. Zug wird entfernt) */
+  note?: string;
+  /** Züge, die beim Abreißen aus dem Verkehr genommen werden */
+  trains?: number[];
+  /** Flächen-Abriss: diese Felder einzeln abreißen */
+  removeAt?: XY[];
 }
 
 export interface PiecePlace { key: string; x: number; y: number }
@@ -89,7 +97,7 @@ export interface GameSave {
   company: string;
   cells: number[];
   pieces: { id: number; key: string; x: number; y: number }[];
-  buildings: { id: number; key: string; x: number; y: number; decor: boolean; name?: string }[];
+  buildings: { id: number; key: string; x: number; y: number; decor: boolean; name?: string; rot?: boolean }[];
   owned: boolean[];
   mainRows: number[];
   money: number;
@@ -111,6 +119,8 @@ export interface GameSave {
   mapId?: string;
   board?: BoardState;
   crew?: number;
+  inbox?: InboxEntry[];
+  player?: Game['player'];
   offers?: Game['offers'];
   news?: Game['news'];
 }
@@ -125,7 +135,7 @@ export const fmtTime = (t: number) => {
 const CLEARING = new Set<ToolId>(['platform', 'switch', 'curve', 'diag', 'building']);
 
 /** Störtrupp-Kosten */
-const REPAIR_COST = 300;
+export const REPAIR_COST = 300;
 
 /** Stau: so lange (Spielsekunden) bleibt Zeit zum Lösen */
 const DEADLOCK_LIMIT = 3600;
@@ -194,6 +204,21 @@ export class Game {
   achievements: string[] = [];
   /** Briefe vom Vorstand */
   board: BoardState = newBoard();
+  /** Spieler: Name, Anrede, Avatar */
+  player: { name: string; title: '' | 'Frau' | 'Herr'; avatar: number } = { name: '', title: '', avatar: 0 };
+  /** Anrede für Briefe */
+  salutation(formal = 'Sehr geehrte Betriebsleitung') {
+    const n = this.player.name.trim();
+    if (!n) return `${formal},`;
+    return this.player.title === 'Frau' ? `Sehr geehrte Frau ${n},` : this.player.title === 'Herr' ? `Sehr geehrter Herr ${n},` : `Guten Tag ${n},`;
+  }
+  /** Postfach: Briefe, Zeitung, Anfragen */
+  inbox: InboxEntry[] = [];
+  /** Gebäude gedreht bauen (Taste Q) */
+  buildRot = false;
+  /** drehbar: quadratische Gebäude */
+  static canRotate(key: string) { const d = BUILDINGS[key]; return !!d && d.w === d.h && !d.onTrack; }
+
   /** eigene Instandhalter (Forschung „Instandhaltungsteam“) */
   crew = 0;
   static readonly CREW_WAGE = 250;
@@ -220,7 +245,7 @@ export class Game {
         save.cells.forEach((b, k) => Object.assign(g.cells[k], unpackCell(b, save.sortDest?.[k] ?? null)));
         save.links?.forEach((l) => g.addLink(l.kind, l.x, l.y0, l.y1, l.id));
         save.pieces.forEach((p) => g.addPiece(p.key, p.x, p.y, p.id));
-        save.buildings.forEach((b) => { g.addBuilding(b.key, b.x, b.y, b.decor, b.id).name = b.name; });
+        save.buildings.forEach((b) => { Object.assign(g.addBuilding(b.key, b.x, b.y, b.decor, b.id), { name: b.name, rot: b.rot }); });
         save.owned.forEach((o, i) => (g.owned[i] = o));
         g.mainRows = save.mainRows;
         g.markFixedLoops();
@@ -257,6 +282,8 @@ export class Game {
     if (save?.goals) this.goals = save.goals;
     if (save?.board) this.board = save.board;
     if (save?.crew) this.crew = save.crew;
+    if (save?.inbox) this.inbox = save.inbox;
+    if (save?.player) this.player = save.player;
     this.faults.forEach((f) => this.sim.faultCells.add(f.k));
     this.applyWeather();
     this.clampTakts();
@@ -319,7 +346,7 @@ export class Game {
       satisfaction: this.satisfaction, missionIdx: this.missionIdx,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id, board: this.board, crew: this.crew,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id, board: this.board, crew: this.crew, inbox: this.inbox, player: this.player,
     };
   }
 
@@ -919,12 +946,12 @@ export class Game {
       this.stats.wasDebt = true;
       this.addLog(`Kasse leer – automatischer Kredit, ${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag`, 'bad');
       if (this.company) this.uiEvents.push({ type: 'letter', mood: 'bad', from: BANK(), title: 'Ihr Konto ist im Minus',
-        text: `<p>Sehr geehrte Damen und Herren der <b>${this.company}</b>,</p><p>Ihr Geschäftskonto ist soeben ins Minus gerutscht. Damit Ihre Züge weiterfahren, gewähren wir Ihnen automatisch einen Kredit – zu <b>${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag</b>.</p><p>Bitte beachten Sie: Bei <b>${(-Game.DEBT_LIMIT).toLocaleString('de-AT')}&nbsp;€ Schulden</b> müssen wir die Kreditlinie leider kündigen.</p>` });
+        text: `<p>${this.salutation(`Sehr geehrte Damen und Herren der ${this.company}`)}</p><p>Ihr Geschäftskonto ist soeben ins Minus gerutscht. Damit Ihre Züge weiterfahren, gewähren wir Ihnen automatisch einen Kredit – zu <b>${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag</b>.</p><p>Bitte beachten Sie: Bei <b>${(-Game.DEBT_LIMIT).toLocaleString('de-AT')}&nbsp;€ Schulden</b> müssen wir die Kreditlinie leider kündigen.</p>` });
     } else if (this.money >= 0 && this.inDebt) {
       this.inDebt = false;
       this.addLog('Kredit zurückgezahlt!', 'good');
       this.uiEvents.push({ type: 'letter', mood: 'good', from: BANK(), title: 'Kredit getilgt',
-        text: '<p>Sehr geehrte Damen und Herren,</p><p>wir freuen uns, Ihnen mitzuteilen, dass Ihr Kredit vollständig zurückgezahlt ist. Es war uns ein Vergnügen. Beehren Sie uns bald wieder – aber nicht zu bald.</p>' });
+        text: `<p>${this.salutation('Sehr geehrte Damen und Herren')}</p><p>wir freuen uns, Ihnen mitzuteilen, dass Ihr Kredit vollständig zurückgezahlt ist. Es war uns ein Vergnügen. Beehren Sie uns bald wieder – aber nicht zu bald.</p>` });
     }
     if (this.money <= Game.DEBT_LIMIT) {
       this.gameOver = true;
@@ -1185,6 +1212,8 @@ export class Game {
     const day = Math.floor(this.sim.time / 86400);
     if (this.news.lastDay < 0) this.news.lastDay = day;
     if (day !== this.news.lastDay) { this.news.lastDay = day; this.daily(); }
+    // Auftrag „Wendezüge“: Ausschreibung wiederholen, falls noch kein Partner gewählt
+    if (this.mission?.title === 'Wendezüge' && !this.offers.open) this.requestTurnback();
     this.checkNews();
     this.updateRating();
     if (!this.goals.length && this.stations().length) this.goals = newGoals(this, undefined);
@@ -1247,11 +1276,12 @@ export class Game {
 
   expandLine() {
     if (this.grid.mainRows.includes(SECOND_ROW)) return;
-    this.grid.expandLine();
+    const blocked = this.grid.expandLine(this.researched('wire')) ?? 0;
     if (this.researched('wire')) this.grid.electrifyLine();
     this.rebuild();
     this.loopsPending = true;
-    this.addLog('Netzbetreiber baut das 2. Streckengleis', 'info');
+    this.addLog('Netzbetreiber baut das 2. Streckengleis – auch durch deinen Bahnhof, wo Platz ist', 'info');
+    if (blocked) this.addLog(`Auf ${blocked} Feldern deines Geländes steht etwas im Weg (Bahnsteig/Gebäude): dort das 2. Gleis selbst verlegen oder per Weichen umfahren`, 'bad');
   }
 
   /** Ausweichstellen abbauen, sobald dort kein Zug mehr steht (nach dem zweigleisigen Ausbau) */
@@ -1371,10 +1401,36 @@ export class Game {
    * variant: Signalrichtung ('E'/'W'), Gleisteil- oder Gebäude-Schlüssel
    * cells: Felder (Bahnsteig/Gleis), Signalfeld, oder Ankerzellen der Teile
    */
+  /** Abriss über eine Fläche: je Feld das oberste Element, jedes Objekt nur einmal */
+  private planRemoveMany(cells: XY[]): BuildPlan {
+    const g = this.grid;
+    const seen = new Set<string>();
+    let cost = 0;
+    const shown: XY[] = [], trains = new Set<number>(), parts: XY[] = [];
+    for (const c of cells) {
+      const p = this.plan('remove', [c]);
+      if (!p.ok) continue;
+      const cc = g.get(c.x, c.y)!;
+      const id = cc.signal || cc.signalW ? `s${c.x},${c.y}` : cc.building !== null ? `b${cc.building}` : g.linkAt(c.x, c.y) ? `l${g.linkAt(c.x, c.y)!.id}`
+        : cc.platform || cc.road || cc.siding || cc.sortDest !== null || cc.shunt ? `c${c.x},${c.y}` : cc.piece !== null ? `p${cc.piece}` : `c${c.x},${c.y}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      cost += p.cost;
+      shown.push(...p.cells);
+      parts.push(c);
+      p.trains?.forEach((t) => trains.add(t));
+    }
+    if (!parts.length) return { ok: false, cost: 0, reason: 'Nichts zum Abreißen', cells };
+    const tr = [...trains];
+    return { ok: cost <= this.money, reason: 'Zu wenig Geld', cost, cells: shown, removeAt: parts, ...this.trainNote(tr),
+      note: `${parts.length} Teile${tr.length ? ` · ${tr.length} Zug/Züge fallen aus` : ''}` };
+  }
+
   plan(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const g = this.grid;
     const fail = (reason: string, c = cells): BuildPlan => ({ ok: false, cost: 0, reason, cells: c });
     if (!this.unlocked.has(tool)) return fail('Noch nicht freigeschaltet');
+    if (tool === 'remove' && cells.length > 1) return this.planRemoveMany(cells);
     if (!cells.length) return fail('');
     const need = tool === 'facility' ? FACILITY_RESEARCH[variant] : undefined;
     if (need && !this.researched(need)) return fail(`Erst erforschen: ${RESEARCH_BY_ID[need].name}`);
@@ -1402,6 +1458,9 @@ export class Game {
       for (const a of list) {
         const def = PIECES[a.key];
         if (!def) return 'Unbekanntes Gleisteil';
+        // Weiche über eine passende Kurve: die Kurve wird zur Weiche ausgebaut
+        const up = this.curveUnder(a);
+        if (up) c -= PIECES[up.key].cost * REFUND;
         if (def.key.startsWith('cross_') && !this.researched('crossing')) return 'Kreuzt ein Gleis – erst Gleiskreuzungen erforschen';
         for (const q of g.footprint(a.key, a.x, a.y)) {
           if (!g.inside(q.x, q.y)) return 'Außerhalb der Karte';
@@ -1411,7 +1470,7 @@ export class Game {
           if (rough([q])) return rough([q])!;
           if (cell.platform) return 'Bahnsteig im Weg';
           if (solid(cell)) return 'Gebäude im Weg';
-          if (cell.piece !== null) return 'Überschneidet anderes Gleisteil';
+          if (cell.piece !== null && cell.piece !== up?.id) return 'Überschneidet anderes Gleisteil';
           if (cell.signal || cell.signalW) return 'Signal im Weg';
           if (this.reserved(q.x, q.y)) return 'Gleis ist gerade befahren';
           const through = def.through.includes(q.y - a.y);
@@ -1454,6 +1513,11 @@ export class Game {
         if (rough(straight)) return fail(rough(straight)!, straight);
         if (straight.some((c) => g.get(c.x, c.y)!.platform || g.get(c.x, c.y)!.piece !== null)) return fail('Feld ist belegt', straight);
         if (straight.some((c) => solid(g.get(c.x, c.y)))) return fail('Gebäude im Weg', straight);
+        // nicht seitlich an die Weichen einer Kreuzungsstelle des Netzbetreibers anschließen (dort endet das Gleis)
+        const loopSwitch = (x: number, y: number) => { const pc = g.get(x, y)?.piece; return pc != null && g.fixedPieces.has(pc) && PIECES[g.pieces.get(pc)!.key].group === 'switch'; };
+        if (straight.some((c) => !g.get(c.x, c.y)!.track && (loopSwitch(c.x - 1, c.y) || loopSwitch(c.x + 1, c.y)))) {
+          return fail('Hier endet die Kreuzungsstelle des Netzbetreibers – nicht anschließen', straight);
+        }
         cost = straight.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track + bridgeCost(straight);
         const fp: XY[] = [...straight];
         const pc = checkPieces(pieces, fp);
@@ -1574,9 +1638,9 @@ export class Game {
           const b = g.buildings.get(c.building)!;
           const def = BUILDINGS[b.key];
           if (def.fixed) return fail(`${def.label} kann nicht entfernt werden`);
-          if (def.onTrack && g.buildingCells(b).some((k) => this.sim.owner[k] !== 0)) return fail('Gleis ist gerade befahren');
+          const tr = def.onTrack ? this.trainsOn(g.buildingCells(b)) : [];
           return { ok: this.money >= (b.decor ? def.demolish : 0), cost: b.decor ? def.demolish : -def.cost * REFUND,
-            reason: 'Zu wenig Geld', cells: g.buildingCells(b).map((k) => g.xy(k)) };
+            reason: 'Zu wenig Geld', cells: g.buildingCells(b).map((k) => g.xy(k)), ...this.trainNote(tr) };
         }
         if (link) {
           const cs: XY[] = [];
@@ -1590,14 +1654,11 @@ export class Game {
           const p = g.pieces.get(c.piece)!;
           const pc = g.pieceCells(p);
           if (g.fixedPieces.has(p.id)) return fail('Weiche gehört dem Netzbetreiber');
-          if (pc.some((k) => this.sim.owner[k] !== 0)) return fail('Gleisteil ist gerade befahren');
-          return { ok: true, cost: -PIECES[p.key].cost * REFUND, cells: pc.map((k) => g.xy(k)) };
+          return { ok: true, cost: -PIECES[p.key].cost * REFUND, cells: pc.map((k) => g.xy(k)), ...this.trainNote(this.trainsOn(pc)) };
         }
         if (c.track) {
           if (c.fixed) return fail('Streckengleis kann nicht abgerissen werden');
-          if (this.reserved(cells[0].x, cells[0].y)) return fail('Gleis ist gerade befahren');
-          cost = -COST.track * REFUND;
-          break;
+          return { ok: true, cost: -COST.track * REFUND, cells: [cells[0]], ...this.trainNote(this.trainsOn([g.key(cells[0].x, cells[0].y)])) };
         }
         return fail('Nichts zum Abreißen');
       }
@@ -1607,6 +1668,41 @@ export class Game {
     if (CLEARING.has(tool)) cost += this.clearCost(shown);
     if (cost > this.money) return { ok: false, cost, reason: 'Zu wenig Geld', cells: shown };
     return { ok: true, cost, cells: shown };
+  }
+
+  /** Bahnsteiggleise mit Zugang, nummeriert von Nord nach Süd, West nach Ost */
+  platformRuns() { return this.net.runs.filter((r) => r.accessible).sort((a, b) => a.row - b.row || a.x0 - b.x0); }
+
+  /** Zug gegen Gebühr aus dem Verkehr nehmen (auch angekündigte) */
+  removeTrain(id: number) {
+    if (this.sim.trains.some((t) => t.id === id)) { this.sim.cancelTrain(id); return true; }
+    const q = this.sim.queue.find((t) => t.id === id);
+    if (!q) return false;
+    this.sim.queue = this.sim.queue.filter((t) => t !== q);
+    this.money -= CANCEL_COST;
+    this.satisfaction[q.op.id] = Math.max(0, this.satisfaction[q.op.id] - 10);
+    this.addLog(`${q.number} gestrichen (−${CANCEL_COST} €)`, 'bad');
+    return true;
+  }
+
+  /** Kurve an derselben Stelle, die genau der Abzweigung dieser Weiche entspricht */
+  private curveUnder(a: PiecePlace) {
+    const CURVE_OF: Record<string, string> = { branch_divDown: 'curve_divDown', branch_divUp: 'curve_divUp', branch_mergeAbove: 'curve_mergeAbove', branch_mergeBelow: 'curve_mergeBelow' };
+    const want = CURVE_OF[a.key];
+    if (!want) return undefined;
+    const id = this.grid.get(a.x, a.y)?.piece;
+    const p = id != null ? this.grid.pieces.get(id) : undefined;
+    return p && p.key === want && p.x === a.x && p.y === a.y && !this.grid.fixedPieces.has(p.id) ? p : undefined;
+  }
+
+  /** Züge, die diese Felder belegen oder reserviert haben */
+  private trainsOn(keys: number[]) {
+    return [...new Set(keys.map((k) => this.sim.owner[k]).filter((o) => o !== 0))];
+  }
+
+  private trainNote(ids: number[]) {
+    if (!ids.length) return {};
+    return { trains: ids, note: `${ids.length === 1 ? '1 Zug wird' : `${ids.length} Züge werden`} aus dem Verkehr genommen (je −${CANCEL_COST} €)` };
   }
 
   /** Bäume/Büsche, die beim Bauen weg müssen */
@@ -1628,6 +1724,10 @@ export class Game {
   build(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const p = this.plan(tool, cells, variant);
     if (!p.ok) return p;
+    if (tool === 'remove' && p.removeAt) {
+      for (const c of p.removeAt) this.build('remove', [c]);
+      return p;
+    }
     this.questUsed.add(`${this.missionIdx}:${tool}`);
     const g = this.grid;
     if (CLEARING.has(tool) || tool === 'track') this.natureIn(p.cells).forEach((id) => g.removeBuilding(id));
@@ -1655,10 +1755,15 @@ export class Game {
       case 'switch':
       case 'curve':
       case 'diag':
-        cells.forEach((a) => g.addPiece(variant, a.x, a.y));
+        cells.forEach((a) => {
+          const up = this.curveUnder({ key: variant, x: a.x, y: a.y });
+          if (up) g.removePiece(up.id);
+          g.addPiece(variant, a.x, a.y);
+        });
         break;
       case 'building': {
         const b = g.addBuilding(variant, cells[0].x, cells[0].y);
+        if (this.buildRot && Game.canRotate(variant)) b.rot = true;
         if (variant === 'bld_station') {
           b.name = this.suggestStationName();
           this.uiEvents.push({ type: 'station', id: b.id });
@@ -1678,6 +1783,8 @@ export class Game {
         else g.addBuilding(variant, cells[0].x, cells[0].y);
         break;
       case 'remove': {
+        // Züge auf dem abgerissenen Gleis fallen aus
+        p.trains?.forEach((id) => this.sim.cancelTrain(id));
         const c = g.get(cells[0].x, cells[0].y)!;
         const link = g.linkAt(cells[0].x, cells[0].y);
         if (c.signal) { c.signal = false; if (!c.signalW) c.shuntSig = false; }

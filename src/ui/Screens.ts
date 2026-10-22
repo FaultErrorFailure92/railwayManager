@@ -39,8 +39,10 @@ export function researchTabsHtml(g: Game, tree: ResearchTree, quest?: string) {
 
 export function researchHtml(g: Game, tree: ResearchTree, quest?: string) {
   const list = treeOf(tree);
-  const cols = Math.max(...list.map((r) => r.col)) + 1;
-  const rows = Math.max(...list.map((r) => r.row)) + 1;
+  // alle Bäume gleich groß
+  const all = TREES.flatMap((t) => treeOf(t.id));
+  const cols = Math.max(...all.map((r) => r.col)) + 1;
+  const rows = Math.max(...all.map((r) => r.row)) + 1;
   const W = cols * CARD_W + (cols - 1) * GAP_X, H = rows * CARD_H + (rows - 1) * GAP_Y;
   const pos = (id: ResearchId) => {
     const r = RESEARCH_BY_ID[id];

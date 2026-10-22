@@ -242,7 +242,7 @@ export class Network {
       const bk = c.building !== null ? g.buildings.get(c.building)?.key : undefined;
       if (bk === 'bld_hump') return 'hump';
       if (bk === 'bld_remise' || bk === 'bld_workshop') return `park${c.building}`;
-      return c.siding ? 'siding' : 'n';
+      return c.siding ? 'siding' : c.shunt ? 'shunt' : 'n';
     };
     for (const [pk, cells] of this.portCells) {
       if (pk.startsWith('S:')) {

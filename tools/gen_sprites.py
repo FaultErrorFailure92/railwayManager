@@ -293,6 +293,27 @@ def car(body, roof, kind, accent=None, orient=0):
         if abs(nrm[0] - nrm[1]) < 0.05:
             f = 0.9
         d.polygon(S(pts), fill=shade(body, f))
+        if kind_f == "side" and kind == "bag":
+            # Gepäckwagen: zwei Schiebetüren, kleine hohe Fenster
+            v = sgn * hw
+            for uc in (-hl / 2, hl / 2):
+                d.polygon(S([P(uc - 1.6, v, z_floor + 0.5), P(uc + 1.6, v, z_floor + 0.5), P(uc + 1.6, v, 8.8), P(uc - 1.6, v, 8.8)]), fill=shade(body, 0.72))
+                d.line(S([P(uc, v, z_floor + 0.5), P(uc, v, 8.8)]), fill=shade(body, 0.55))
+            for uw in (-hl + 1.2, hl - 2.4):
+                d.polygon(S([P(uw, v, 7.2), P(uw + 1.2, v, 7.2), P(uw + 1.2, v, 8.6), P(uw, v, 8.6)]), fill=(40, 56, 80, 255))
+            if accent:
+                d.polygon(S([P(-hl, v, 3), P(hl, v, 3), P(hl, v, 4.5), P(-hl, v, 4.5)]), fill=accent)
+        if kind_f == "side" and kind == "dine":
+            # Speisewagen: breites Fensterband mit warmem Licht, Tischlampen
+            v = sgn * hw
+            d.polygon(S([P(-hl + 1.2, v, 5.6), P(hl - 1.2, v, 5.6), P(hl - 1.2, v, 8.8), P(-hl + 1.2, v, 8.8)]), fill=(60, 52, 40, 255))
+            u = -hl + 1.6
+            while u + 2.6 <= hl - 1.4:
+                d.polygon(S([P(u, v, 6), P(u + 2.6, v, 6), P(u + 2.6, v, 8.5), P(u, v, 8.5)]), fill=(250, 214, 140, 255))
+                d.polygon(S([P(u + 1.1, v, 6), P(u + 1.5, v, 6), P(u + 1.5, v, 7), P(u + 1.1, v, 7)]), fill=(200, 60, 50, 255))
+                u += 3.0
+            d.polygon(S([P(-hl, v, 3), P(hl, v, 3), P(hl, v, 4.5), P(-hl, v, 4.5)]), fill=(170, 30, 40, 255))
+            d.polygon(S([P(-hl, v, 4.5), P(hl, v, 4.5), P(hl, v, 5.0), P(-hl, v, 5.0)]), fill=(230, 190, 80, 255))
         if kind_f == "side" and kind in ("loco", "coach", "emu", "cab", "pcar"):
             v = sgn * hw
             band = (30, 40, 56, 255) if kind in ("loco", "pcar") else (40, 56, 80, 255)
@@ -420,6 +441,11 @@ SCHEMES = {
     "dm": {"steam": ((34, 34, 38), (52, 52, 58), None),
            "coach": ((122, 42, 36), (70, 60, 56), (214, 176, 80, 255))},
 }
+# Gepäck- und Speisewagen für lange Personenzüge (Farben wie die Reisezugwagen)
+for sch in ("wx", "nj", "rx", "hs", "dm", "ro", "lb", "fx"):
+    cb, cr, ca = SCHEMES[sch]["coach"]
+    SCHEMES[sch]["bag"] = (tuple(int(v * 0.9) for v in cb), cr, ca)
+    SCHEMES[sch]["dine"] = (cb, cr, ca)
 for sch, kinds in SCHEMES.items():
     for kname, (body, roof, accent) in kinds.items():
         kind = "wagon" if kname.startswith("wagon") else kname

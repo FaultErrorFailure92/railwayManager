@@ -406,6 +406,48 @@
    "w": 25,
    "h": 22
   },
+  "car_ro_bag_0": {
+   "file": "car_ro_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ro_bag_1": {
+   "file": "car_ro_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ro_bag_2": {
+   "file": "car_ro_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ro_dine_0": {
+   "file": "car_ro_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ro_dine_1": {
+   "file": "car_ro_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ro_dine_2": {
+   "file": "car_ro_dine_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_wx_loco_0": {
    "file": "car_wx_loco_0.png",
    "ox": -13,
@@ -443,6 +485,48 @@
   },
   "car_wx_coach_2": {
    "file": "car_wx_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_wx_bag_0": {
+   "file": "car_wx_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_wx_bag_1": {
+   "file": "car_wx_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_wx_bag_2": {
+   "file": "car_wx_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_wx_dine_0": {
+   "file": "car_wx_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_wx_dine_1": {
+   "file": "car_wx_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_wx_dine_2": {
+   "file": "car_wx_dine_2.png",
    "ox": -12,
    "oy": -16,
    "w": 25,
@@ -721,6 +805,48 @@
    "w": 25,
    "h": 22
   },
+  "car_rx_bag_0": {
+   "file": "car_rx_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_rx_bag_1": {
+   "file": "car_rx_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_rx_bag_2": {
+   "file": "car_rx_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_rx_dine_0": {
+   "file": "car_rx_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_rx_dine_1": {
+   "file": "car_rx_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_rx_dine_2": {
+   "file": "car_rx_dine_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_nj_loco_0": {
    "file": "car_nj_loco_0.png",
    "ox": -13,
@@ -758,6 +884,48 @@
   },
   "car_nj_coach_2": {
    "file": "car_nj_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_nj_bag_0": {
+   "file": "car_nj_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_nj_bag_1": {
+   "file": "car_nj_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_nj_bag_2": {
+   "file": "car_nj_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_nj_dine_0": {
+   "file": "car_nj_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_nj_dine_1": {
+   "file": "car_nj_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_nj_dine_2": {
+   "file": "car_nj_dine_2.png",
    "ox": -12,
    "oy": -16,
    "w": 25,
@@ -952,6 +1120,48 @@
    "w": 25,
    "h": 22
   },
+  "car_lb_bag_0": {
+   "file": "car_lb_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_lb_bag_1": {
+   "file": "car_lb_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_lb_bag_2": {
+   "file": "car_lb_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_lb_dine_0": {
+   "file": "car_lb_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_lb_dine_1": {
+   "file": "car_lb_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_lb_dine_2": {
+   "file": "car_lb_dine_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_hv_loco_0": {
    "file": "car_hv_loco_0.png",
    "ox": -13,
@@ -1078,6 +1288,48 @@
    "w": 25,
    "h": 22
   },
+  "car_hs_bag_0": {
+   "file": "car_hs_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hs_bag_1": {
+   "file": "car_hs_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hs_bag_2": {
+   "file": "car_hs_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_hs_dine_0": {
+   "file": "car_hs_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_hs_dine_1": {
+   "file": "car_hs_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_hs_dine_2": {
+   "file": "car_hs_dine_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_fx_loco_0": {
    "file": "car_fx_loco_0.png",
    "ox": -13,
@@ -1115,6 +1367,48 @@
   },
   "car_fx_coach_2": {
    "file": "car_fx_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_fx_bag_0": {
+   "file": "car_fx_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_fx_bag_1": {
+   "file": "car_fx_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_fx_bag_2": {
+   "file": "car_fx_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_fx_dine_0": {
+   "file": "car_fx_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_fx_dine_1": {
+   "file": "car_fx_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_fx_dine_2": {
+   "file": "car_fx_dine_2.png",
    "ox": -12,
    "oy": -16,
    "w": 25,
@@ -1325,6 +1619,48 @@
   },
   "car_dm_coach_2": {
    "file": "car_dm_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_dm_bag_0": {
+   "file": "car_dm_bag_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_dm_bag_1": {
+   "file": "car_dm_bag_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_dm_bag_2": {
+   "file": "car_dm_bag_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_dm_dine_0": {
+   "file": "car_dm_dine_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_dm_dine_1": {
+   "file": "car_dm_dine_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_dm_dine_2": {
+   "file": "car_dm_dine_2.png",
    "ox": -12,
    "oy": -16,
    "w": 25,

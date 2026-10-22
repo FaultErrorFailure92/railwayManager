@@ -8,6 +8,8 @@ export interface MapDef {
   name: string;
   /** Lokalzeitung */
   paper: string;
+  /** Endpunkte der Strecke: [West, Ost] */
+  ends: [string, string];
   theme: string;
   info: string;
   difficulty: 'leicht' | 'mittel' | 'schwer';
@@ -50,7 +52,7 @@ const MINE = (x: number, y: number, row: number, name = 'Bergwerk Erzleiten'): I
 
 export const MAPS: MapDef[] = [
   {
-    id: 'donau', paper: 'Donau-Kurier', name: 'Donautal', theme: 'Klassisch', difficulty: 'leicht', startMoney: 4000, tint: 0xffffff,
+    id: 'donau', ends: ['Linz', 'Wien'], paper: 'Donau-Kurier', name: 'Donautal', theme: 'Klassisch', difficulty: 'leicht', startMoney: 4000, tint: 0xffffff,
     info: 'Sanfte Hügel an der Donau, Berge im Nordwesten, ein Sägewerk und ein Bergwerk. Der ideale Einstieg.',
     terrainSeed: 987654, landscapeSeed: 1234567, rockLevel: 0.45,
     rocks: [{ x0: 0, x1: 70, y0: 0, y1: 16, edge: 'N' }, { x0: 186, x1: 256, y0: 46, y1: 64, edge: 'S' }],
@@ -63,7 +65,7 @@ export const MAPS: MapDef[] = [
     inquiries: ['wx', 'cd', 'sb', 'tt', 'rx', 'nj', 'ro', 'lb', 'tx', 'hv', 'dm', 'cs', 'hs'],
   },
   {
-    id: 'alpen', paper: 'Der Bergbote', name: 'Alpenbahn', theme: 'Gebirge', difficulty: 'schwer', startMoney: 5000, tint: 0xe4f0ea,
+    id: 'alpen', ends: ['Bludenz', 'Innsbruck'], paper: 'Der Bergbote', name: 'Alpenbahn', theme: 'Gebirge', difficulty: 'schwer', startMoney: 5000, tint: 0xe4f0ea,
     info: 'Ein enges Tal zwischen hohen Gipfeln: wenig Platz, viel Schnee, Holz und Erz aus den Bergen. Weichenheizung lohnt sich!',
     terrainSeed: 424242, landscapeSeed: 777001, rockLevel: 0.32,
     rocks: [{ x0: 0, x1: 256, y0: 0, y1: 20, edge: 'N' }, { x0: 0, x1: 256, y0: 42, y1: 64, edge: 'S' }],
@@ -78,7 +80,7 @@ export const MAPS: MapDef[] = [
     stationNames: ['Bergheim', 'Schneealm', 'Lärchwald', 'Gipfelblick', 'Klammbrück', 'Hohenfeld', 'Steinach', 'Sonnalpe'],
   },
   {
-    id: 'ebene', paper: 'Marchfelder Rundschau', name: 'Pannonische Ebene', theme: 'Flachland', difficulty: 'leicht', startMoney: 4000, tint: 0xfff2cc,
+    id: 'ebene', ends: ['Wien', 'Bratislava'], paper: 'Marchfelder Rundschau', name: 'Pannonische Ebene', theme: 'Flachland', difficulty: 'leicht', startMoney: 4000, tint: 0xfff2cc,
     info: 'Weites, flaches Land voller Felder und Dörfer, kaum Schnee. Viel Güterverkehr und viele Pendler.',
     terrainSeed: 13579, landscapeSeed: 24680, rockLevel: 9,
     rocks: [],
@@ -93,7 +95,7 @@ export const MAPS: MapDef[] = [
     stationNames: ['Weinsdorf', 'Marchfeld', 'Kornfeld', 'Rübenau', 'Sonnenebene', 'Pappelhof', 'Seewinkel', 'Steppenrand'],
   },
   {
-    id: 'revier', paper: 'Revier-Anzeiger', name: 'Industrierevier', theme: 'Industrie', difficulty: 'mittel', startMoney: 6000, tint: 0xe8e6de,
+    id: 'revier', ends: ['Kohlstadt', 'Hüttenburg'], paper: 'Revier-Anzeiger', name: 'Industrierevier', theme: 'Industrie', difficulty: 'mittel', startMoney: 6000, tint: 0xe8e6de,
     info: 'Halden, Gruben und Schlote: Bergwerk und Sägewerk liegen nahe am Startgebiet, Güterzüge dominieren. Schnell zu Geld – wenn der Verkehr fließt.',
     terrainSeed: 31337, landscapeSeed: 90210, rockLevel: 0.5,
     rocks: [{ x0: 20, x1: 110, y0: 40, y1: 64, edge: 'S' }, { x0: 150, x1: 240, y0: 0, y1: 18, edge: 'N' }],
@@ -108,7 +110,7 @@ export const MAPS: MapDef[] = [
     stationNames: ['Zechenhausen', 'Kohlberg', 'Glückauf', 'Hüttendorf', 'Schachtweg', 'Eisenstadt Nord', 'Hochofen', 'Haldenblick'],
   },
   {
-    id: 'wueste', paper: 'Oasen-Bote', name: 'Wüstenbahn', theme: 'Wüste', difficulty: 'mittel', startMoney: 5000, tint: 0xffffff, ground: 'sand',
+    id: 'wueste', ends: ['Sandheim', 'Dattelburg'], paper: 'Oasen-Bote', name: 'Wüstenbahn', theme: 'Wüste', difficulty: 'mittel', startMoney: 5000, tint: 0xffffff, ground: 'sand',
     info: 'Sand, Kakteen und Palmen-Oasen, fast nie Regen. Eine Salzmine im Süden und viel Fernverkehr quer durch die Dünen.',
     terrainSeed: 55501, landscapeSeed: 66602, rockLevel: 0.48,
     rocks: [{ x0: 0, x1: 90, y0: 0, y1: 14, edge: 'N' }, { x0: 170, x1: 256, y0: 0, y1: 12, edge: 'N' }, { x0: 0, x1: 60, y0: 50, y1: 64, edge: 'S' }],
@@ -124,7 +126,7 @@ export const MAPS: MapDef[] = [
     stationNames: ['Oase Nord', 'Sandhausen', 'Dünenfeld', 'Kamelbrunn', 'Palmental', 'Sonnenstein', 'Staubweiler', 'Fata Morgana'],
   },
   {
-    id: 'schnee', paper: 'Nordlicht-Zeitung', name: 'Schneeland', theme: 'Winter', difficulty: 'schwer', startMoney: 5500, tint: 0xffffff, ground: 'snow',
+    id: 'schnee', ends: ['Eisberg', 'Frostfurt'], paper: 'Nordlicht-Zeitung', name: 'Schneeland', theme: 'Winter', difficulty: 'schwer', startMoney: 5500, tint: 0xffffff, ground: 'snow',
     info: 'Tief verschneite Wälder, zugefrorene Seen und fast täglich Neuschnee. Ohne Weichenheizung kriechen die Züge. Holz und Erz gibt es reichlich.',
     terrainSeed: 70707, landscapeSeed: 80808, rockLevel: 0.42,
     rocks: [{ x0: 0, x1: 120, y0: 0, y1: 15, edge: 'N' }, { x0: 140, x1: 256, y0: 48, y1: 64, edge: 'S' }],

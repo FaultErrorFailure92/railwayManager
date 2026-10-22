@@ -6,6 +6,7 @@ import { RESEARCH } from '../game/Research';
 export function buildDemo(g: Game) {
   const log: string[] = [];
   g.company = 'Demobahn AG';
+  g.player = { name: 'Demo', title: '', avatar: 3 };
   g.skipTutorial();
   g.money = 200000;
   g.research.points += 20;
@@ -34,11 +35,30 @@ export function buildDemo(g: Game) {
   for (const [x, y, d] of [[56, 15, 'E'], [56, 16, 'E'], [40, 15, 'W'], [40, 16, 'W'], [33, 15, 'E'], [62, 15, 'W']] as const) B(`Signal ${x}/${y}`, 'signal', [{ x, y }], d);
   B('Kiosk', 'building', [{ x: 51, y: 14 }], 'bld_kiosk');
   B('Café', 'building', [{ x: 44, y: 18 }], 'bld_cafe');
+  // Straße mit Parkplatz und Busterminal
+  B('Straße', 'road', row(38, 56, 11));
+  B('Parkplatz', 'building', [{ x: 39, y: 9 }], 'bld_parking');
+  B('Bus', 'building', [{ x: 51, y: 9 }], 'bld_bus');
+  // Läden, Komfort, Deko
+  for (const [n, x, y, k] of [
+    ['Gasthaus', 41, 18, 'bld_inn'], ['WC', 48, 18, 'bld_wc'], ['Souvenir', 50, 14, 'bld_souvenir'], ['Schließfächer', 51, 17, 'bld_lockers'],
+    ['Automat', 43, 14, 'bld_vending'], ['Bank', 49, 17, 'bld_bench'], ['Wartehalle', 46, 17, 'bld_shelter'], ['Uhr', 48, 14, 'bld_clock'],
+    ['Laterne', 44, 17, 'bld_lamp'], ['Laterne', 52, 14, 'bld_lamp'], ['Plakat', 54, 13, 'bld_billboard'], ['Brunnen', 43, 12, 'bld_fountain'],
+    ['Denkmal', 55, 12, 'bld_statue'], ['Wandbild', 56, 13, 'bld_mural'], ['Christbaum', 42, 12, 'bld_xmas'], ['Blumen', 49, 12, 'bld_flowers'],
+    ['Straßenlaterne', 57, 11, 'bld_streetlamp'],
+  ] as [string, number, number, string][]) B(n, 'building', [{ x, y }], k);
+  // Abstellgleis mit Waschanlage im Verschubbereich, östlich hinter dem Gleiswechsel
+  B('Stumpfgleis', 'track', row(62, 72, 16));
+  B('Fahrdraht Stumpf', 'wire', row(62, 72, 16));
+  B('Verschub', 'facility', row(62, 65, 16), 'mark_shunt');
+  B('Waschanlage', 'facility', [{ x: 63, y: 16 }], 'bld_wash');
+  B('Abstellgleis', 'facility', row(66, 72, 16), 'mark_siding');
+  g.setCrew(2);
   // Bahnhof gleich taufen, kein Namensdialog
   for (const b of g.grid.buildings.values()) if (b.key === 'bld_station') g.stationName(b.id, 'Demohausen');
   g.uiEvents.splice(0, g.uiEvents.length, ...g.uiEvents.filter((e) => e.type !== 'station'));
   g.sim.setLevel(4);
-  for (const id of ['ro', 'wx', 'cd', 'sb'] as OperatorId[]) {
+  for (const id of ['ro', 'wx', 'cd', 'sb', 'lb', 'tx'] as OperatorId[]) {
     const c = g.contracts[id];
     c.status = 'active';
     c.takt = 60;
@@ -46,6 +66,9 @@ export function buildDemo(g: Game) {
   }
   g.offers.open = null;
   g.offers.done.push('regio', 'freight');
+  // Bau- und Startgeld nicht als Tagesumsatz zählen
+  g.history.length = 0;
+  g.news.dayMoney = g.money;
   g.addLog('Demobahnhof geladen', 'info');
   if (log.length) console.warn('[Demo]', log.join(' | '));
   return log;

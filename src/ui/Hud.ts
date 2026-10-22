@@ -1,5 +1,5 @@
 import { COST, STATION_UPGRADE } from '../config';
-import { Game, fmtTime } from '../game/Game';
+import { CANCEL_COST, Game, fmtTime, REPAIR_COST } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
 import { ACHIEVEMENTS } from '../game/Achievements';
 import { goalProgress } from '../game/Goals';
@@ -13,7 +13,7 @@ import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
 import { author, newsPhoto, paperName } from './press';
 import { BOARD } from '../game/Board';
-import { portrait } from './portrait';
+import { avatar, AVATARS, portrait } from './portrait';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
@@ -48,7 +48,31 @@ const TOOLS: ToolDef[] = [
   { id: 'road', label: 'Straße', key: '0', icon: 'tool_road', cost: COST.road, help: 'Ziehen · verbindet Empfangsgebäude mit Parkplatz und Busterminal' },
   { id: 'building', label: 'Gebäude', key: 'B', help: 'Klicken zum Bauen · R = nächstes Gebäude' },
   { id: 'facility', label: 'Anlagen', key: 'N', help: 'Auf Gleise setzen bzw. Gleise markieren · R = nächste' },
-  { id: 'remove', label: 'Abriss', key: 'X', icon: 'tool_shovel', help: 'Klick: Signal → Gebäude → Zugang → Bahnsteig → Markierung → Gleis' },
+  { id: 'remove', label: 'Abriss', key: 'X', icon: 'tool_shovel', help: 'Klicken oder Fläche aufziehen · je Feld das oberste Teil: Signal → Gebäude → Zugang → Bahnsteig → Markierung → Gleis' },
+];
+
+/** Baumenü: Gruppen (Leiste unten) mit Einträgen (Reihen darüber) */
+interface MenuItem { tool: ToolId; variant?: string; icon: string; label: string; cost?: number; info?: string }
+interface MenuGroup { id: string; label: string; key: string; alt?: string; icon: string; help: string; items: MenuItem[] }
+
+const vItems = (tool: ToolId, filter: (key: string) => boolean = () => true): MenuItem[] =>
+  (VARIANTS[tool] ?? []).filter((v) => filter(v.key)).map((v) => ({ tool, variant: v.key, icon: v.icon, label: v.label, cost: v.cost, info: v.info }));
+const tItem = (id: ToolId): MenuItem => { const t = TOOLS.find((x) => x.id === id)!; return { tool: id, icon: t.icon ?? 'track', label: t.label, cost: t.cost, info: t.help }; };
+
+const MENU: MenuGroup[] = [
+  { id: 'select', label: 'Ansehen', key: '1', icon: 'tool_cursor', help: TOOLS[0].help, items: [tItem('select')] },
+  { id: 'land', label: 'Land kaufen', key: '2', icon: 'tool_flag', help: 'Gelbe Parzelle anklicken', items: [tItem('land')] },
+  { id: 'platform', label: 'Bahnsteig & Zugänge', key: '3', icon: 'platform', help: 'Bahnsteige neben dem Gleis ziehen · Unterführung/Brücke von Bahnsteig zu Bahnsteig',
+    items: [tItem('platform'), ...vItems('access')] },
+  { id: 'tracks', label: 'Gleisbau', key: '4', icon: 'track', help: 'Gleise ziehen (schräg = Diagonale), Kurven und Weichen klicken',
+    items: [tItem('track'), ...vItems('curve'), ...vItems('switch')] },
+  { id: 'ops', label: 'Bahnbetrieb', key: '5', icon: 'signal_E', help: 'Signale, Oberleitung, Verschubbereiche und Gleismarkierungen',
+    items: [...vItems('signal'), tItem('wire'), ...vItems('facility', (k) => k.startsWith('mark_'))] },
+  { id: 'facility', label: 'Unterstützungsanlagen', key: '6', icon: 'bld_remise', help: 'Remise, Werkstatt, Waschanlage und Abrollberg auf Gleise setzen',
+    items: vItems('facility', (k) => !k.startsWith('mark_')) },
+  { id: 'road', label: 'Straße & Bahnübergang', key: '7', icon: 'tool_road', help: 'Straßen ziehen · verbindet Empfangsgebäude mit Parkplatz und Busterminal', items: [tItem('road')] },
+  { id: 'building', label: 'Gebäude', key: '8', alt: 'B', icon: 'bld_station', help: 'Klicken zum Bauen · R = nächstes Gebäude · Q = drehen', items: vItems('building') },
+  { id: 'remove', label: 'Abriss', key: '9', alt: 'X', icon: 'tool_shovel', help: TOOLS.find((t) => t.id === 'remove')!.help, items: [tItem('remove')] },
 ];
 
 const STATE_TEXT: Record<string, string> = {
@@ -118,9 +142,19 @@ export class Hud {
       const t = ids.map((i) => this.g.sim.trains.find((x) => x.id === i)).filter(Boolean).sort((a, b) => b!.plannedSpawn - a!.plannedSpawn)[0];
       if (t) this.g.sim.cancelTrain(t.id);
     };
-    $('btn-menu').onclick = () => this.openMenu();
+    $('btn-menu').onclick = () => this.openPause();
+    $('p-continue').onclick = () => this.closePause();
+    $('p-close').onclick = () => this.closePause();
+    $('p-save').onclick = () => { $('btn-save').click(); $('p-save').textContent = 'Gespeichert ✓'; };
+    $('p-main').onclick = () => { this.closePause(); this.openMenu(); };
     $('company').onclick = () => this.askName();
     $('name-ok').onclick = () => this.confirmName();
+    $('pl-avatars').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-av]') as HTMLElement | null;
+      if (!b) return;
+      this.plAvatar = Number(b.dataset.av);
+      $('pl-avatars').querySelectorAll('.pl-av').forEach((x) => x.classList.toggle('on', x === b));
+    });
     ($('name-input') as HTMLInputElement).addEventListener('keydown', (e) => { if (e.key === 'Enter') this.confirmName(); });
     document.querySelectorAll('[data-fold]').forEach((h) => {
       h.addEventListener('click', () => $((h as HTMLElement).dataset.fold!).classList.toggle('closed'));
@@ -134,14 +168,50 @@ export class Hud {
       this.listHover = li ? { id: Number(li.dataset.id), el: li } : null;
     });
     list.addEventListener('mouseleave', () => { this.listHover = null; });
+    // Klick in der Zugliste: kleines Menü (zeigen / aus dem Verkehr nehmen)
     list.addEventListener('click', (e) => {
       const li = (e.target as HTMLElement).closest('li[data-id]') as HTMLElement | null;
-      if (li) this.scene()?.focusTrain(Number(li.dataset.id));
+      if (li) this.openTrainMenu(Number(li.dataset.id), li);
+    });
+    $('train-menu').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-tm]') as HTMLElement | null;
+      if (!b) return;
+      const id = Number($('train-menu').dataset.id);
+      if (b.dataset.tm === 'focus') this.scene()?.focusTrain(id);
+      if (b.dataset.tm === 'plat') {
+        const sim = this.g.sim;
+        const t = sim.trains.find((x) => x.id === id) ?? sim.queue.find((x) => x.id === id);
+        if (t) {
+          const k = `${t.op.id}:${t.dir}`;
+          if (b.dataset.run) sim.platformPref[k] = b.dataset.run; else delete sim.platformPref[k];
+          this.g.version++;
+        }
+        $('train-menu').querySelectorAll('[data-tm="plat"]').forEach((x) => x.classList.toggle('on', x === b));
+        return;
+      }
+      if (b.dataset.tm === 'remove') {
+        if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Wirklich? Nochmal klicken'; return; }
+        this.g.removeTrain(id);
+      }
+      $('train-menu').classList.add('hidden');
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (!(e.target as HTMLElement).closest('#train-menu, #trains')) $('train-menu').classList.add('hidden');
     });
 
     // Hauptmenü
     $('m-continue').onclick = () => this.closeMenu();
     $('m-new').onclick = () => this.newGame();
+    $('btn-mail').onclick = () => this.openInbox();
+    $('ib-close').onclick = () => $('inbox').classList.add('hidden');
+    $('ib-list').addEventListener('click', (e) => {
+      const r = (e.target as HTMLElement).closest('[data-mail]') as HTMLElement | null;
+      if (r) { $('inbox').classList.add('hidden'); this.openMail(Number(r.dataset.mail)); }
+    });
+    $('toasts').addEventListener('click', (e) => {
+      const r = (e.target as HTMLElement).closest('[data-mail]') as HTMLElement | null;
+      if (r) this.openMail(Number(r.dataset.mail));
+    });
     $('ng-yes').onclick = () => this.saveDialog();
     $('ng-no').onclick = () => { $('ng-ask').classList.add('hidden'); this.openMapPick(); };
     $('ng-cancel').onclick = () => $('ng-ask').classList.add('hidden');
@@ -254,20 +324,30 @@ export class Hud {
       }
       if (!this.ui.menu && e.key.toLowerCase() === 'f') { this.openScreen('research'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'v') { this.openScreen('contracts'); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'p') { if ($('inbox').classList.contains('hidden')) this.openInbox(); else $('inbox').classList.add('hidden'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 't') { this.openScreen('timetable'); return; }
       if (e.key === 'Escape' && !$('bpanel').classList.contains('hidden')) { this.closePanel(); return; }
       if (e.key === 'Escape') {
+        if (!$('pause').classList.contains('hidden')) { this.closePause(); return; }
+        if (!$('inbox').classList.contains('hidden')) { $('inbox').classList.add('hidden'); return; }
         if (this.ui.menu) { if (this.hadSave || this.g.company) this.closeMenu(); }
         else if (this.ui.tool !== 'select') this.ui.tool = 'select';
-        else this.openMenu();
+        else this.openPause();
         return;
       }
       if (this.ui.menu) return;
       if (e.code === 'Space') { e.preventDefault(); this.setSpeed(this.g.paused ? this.g.speed : 0); }
       if (e.key === '+' || e.key === '.') this.stepSpeed(1);
       if (e.key === '-' || e.key === ',') this.stepSpeed(-1);
-      const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
-      if (t) this.pick(t.id);
+      // Ziffer kurz nach einer Gruppe = Eintrag in dieser Gruppe (z. B. 8 dann 1 = Bahnhof)
+      const k = e.key.toLowerCase();
+      if (/^[0-9]$/.test(k) && performance.now() < this.groupKeyUntil) {
+        const grp = MENU.find((m) => m.id === this.group);
+        const idx = k === '0' ? 9 : Number(k) - 1;
+        if (grp && grp.items.length > 1 && grp.items[idx]) { this.pickItem(grp.items[idx]); this.groupKeyUntil = 0; return; }
+      }
+      const grp = MENU.find((m) => m.key === k || m.alt?.toLowerCase() === k);
+      if (grp) { this.pickGroup(grp); this.groupKeyUntil = performance.now() + 2000; }
     });
 
     if (freshStart) {
@@ -275,6 +355,16 @@ export class Hud {
       $('menu').classList.add('hidden');
       this.askName();
     } else this.openMenu();
+    this.setupTooltips();
+    $('fault-pop').addEventListener('mouseenter', () => { this.faultHold = true; });
+    $('fault-pop').addEventListener('mouseleave', () => { this.faultHold = false; this.faultUntil = performance.now() + 400; });
+    $('fault-pop').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-repair]') as HTMLElement | null;
+      if (!b) return;
+      const [x, y] = b.dataset.repair!.split(',').map(Number);
+      this.g.repairFault(x, y);
+      this.faultKey = '';
+    });
     this.showChangelog();
     this.update();
     setInterval(() => this.update(), 120);
@@ -313,8 +403,44 @@ export class Hud {
     const running = this.hadSave || !!this.g.company;
     $('m-continue').style.display = running ? '' : 'none';
     $('m-new').textContent = running ? 'Neues Spiel' : 'Spiel starten';
-    $('m-sub').textContent = running ? `${this.g.company || ''} · ${currentMap().name}` : '';
+    $('m-sub').textContent = '';
+    void running;
     $('menu').classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ Pause-Fenster mit Kurzbilanz
+  private pausedBeforePause = false;
+  private openPause() {
+    if (!this.g.company) { this.openMenu(); return; }
+    const g = this.g;
+    if ($('pause').classList.contains('hidden')) this.pausedBeforePause = g.paused;
+    g.paused = true;
+    const day = Math.floor(g.sim.time / 86400) + 1;
+    const prev = g.history.find((h) => h.day === day - 2);
+    const contracts = Object.values(g.contracts).filter((c) => c.status === 'active').length;
+    const row = (l: string, v: string, cls = '') => `<span>${l}</span><span class="${cls}">${v}</span>`;
+    $('p-body').innerHTML = `<div class="fin">
+      <span class="h">${g.company} · ${currentMap().name}</span>
+      ${row('Spielzeit', `Tag ${day}, ${fmtTime(g.sim.time)} Uhr`)}
+      ${row('Kasse', `${eur(g.money)} €`, g.money < 0 ? 'no' : 'ok')}
+      ${prev ? row('Bilanz gestern', `${prev.income - prev.expense >= 0 ? '+' : '−'}${eur(Math.abs(prev.income - prev.expense))} €`, prev.income - prev.expense >= 0 ? 'ok' : 'no') : ''}
+      ${row('Bewertung', '★'.repeat(g.rating.stars) + '☆'.repeat(5 - g.rating.stars), 'gold')}
+      ${row('Pünktlichkeit', g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–')}
+      ${row('Züge abgefertigt', g.stats.handled.toLocaleString('de-AT'))}
+      ${row('Fahrgäste gesamt', g.stats.passengers.toLocaleString('de-AT'))}
+      ${row('Bahnhöfe', String(g.stations().length))}
+      ${row('Verträge', String(contracts))}
+      ${row('Forschungen', String(g.research.done.length))}
+      ${row('Erfolge', `${g.achievements.length}/${ACHIEVEMENTS.length}`)}
+      ${row('Auftrag', g.mission ? `${g.missionIdx + 1}/${MISSIONS.length}: ${g.mission.title}` : 'alle erledigt')}
+    </div>`;
+    $('p-save').textContent = 'Speichern';
+    $('pause').classList.remove('hidden');
+  }
+
+  private closePause() {
+    $('pause').classList.add('hidden');
+    this.g.paused = this.pausedBeforePause;
   }
 
   private closeMenu() {
@@ -410,6 +536,13 @@ export class Hud {
     this.naming = { kind: 'company' };
     this.openNameDialog('Deine Bahngesellschaft', 'Wie soll dein Unternehmen heißen?', this.g.company, 'z.B. Donaubahn AG');
     $('name-ok').textContent = this.g.company ? 'Passt!' : "Los geht's!";
+    // Spieler: Name, Anrede, Avatar
+    const pl = this.g.player;
+    ($('pl-name') as HTMLInputElement).value = pl.name;
+    ($('pl-title') as HTMLSelectElement).value = pl.title;
+    this.plAvatar = pl.avatar;
+    $('pl-avatars').innerHTML = AVATARS.map((_, i) => `<button class="pl-av${i === pl.avatar ? ' on' : ''}" data-av="${i}">${avatar(i, 40)}</button>`).join('');
+    $('pl-box').classList.remove('hidden');
     // neues Spiel: Tutorial an- oder abwählen
     $('tut-row').classList.toggle('hidden', !!this.g.company || this.g.missionIdx > 0);
   }
@@ -419,6 +552,7 @@ export class Hud {
     if (!b) return;
     this.naming = { kind: 'station', id };
     this.openNameDialog('Neuer Bahnhof', 'Wie soll dieser Bahnhof heißen?', b.name ?? '', 'z.B. Donaufeld');
+    $('pl-box').classList.add('hidden');
     $('name-ok').textContent = 'Taufen!';
     $('tut-row').classList.add('hidden');
   }
@@ -429,6 +563,8 @@ export class Hud {
     if (this.naming.kind === 'company') {
       if (first && !$('tut-row').classList.contains('hidden') && !($('tut-check') as HTMLInputElement).checked) this.g.skipTutorial();
       this.g.company = v || 'Meine Bahn AG';
+      this.g.player = { name: ($('pl-name') as HTMLInputElement).value.trim(), title: ($('pl-title') as HTMLSelectElement).value as '' | 'Frau' | 'Herr', avatar: this.plAvatar };
+      this.companyKey = '';
       if (first) this.g.welcome();
     }
     else this.g.stationName(this.naming.id, v || this.g.suggestStationName());
@@ -459,8 +595,10 @@ export class Hud {
       if (q && !this.g.researched(q.id)) this.rsTree = q.tree;
     }
     if (this.screen === name) { this.closeScreen(); return; }
-    if (!this.screen) { this.pausedBeforeScreen = this.g.paused; this.g.paused = true; }
+    // Fahrplan, Verträge, Forschung: Zeit läuft weiter; nur die Statistik hält an
+    if (!this.screen) this.pausedBeforeScreen = this.g.paused;
     else $(this.screen).classList.add('hidden');
+    this.g.paused = name === 'stats' ? true : this.pausedBeforeScreen;
     this.screen = name;
     this.ui.tool = 'select';
     $(name).classList.remove('hidden');
@@ -609,48 +747,105 @@ export class Hud {
     if (!this.g.unlocked.has(id)) return;
     this.ui.tool = id;
     this.fresh.delete(id);
+    this.syncGroup();
   }
 
   private toolIcon(t: ToolDef) {
     return VARIANTS[t.id] ? variantOf(this.ui, t.id)!.icon : t.icon!;
   }
 
+  // ------------------------------------------------------------ Baumenü (Gruppen + Einträge)
+  private group = 'select';
+  private groupKeyUntil = 0;
+  /** zuletzt gewählter Eintrag je Gruppe */
+  private lastItem: Record<string, number> = {};
+  private hoverItem: MenuItem | null = null;
+
+  /** Forschung, die ein Eintrag braucht */
+  private needOf(it: MenuItem): ResearchId | undefined {
+    const k = it.variant ?? '';
+    if (it.tool === 'facility') return FACILITY_RESEARCH[k];
+    if (it.tool === 'switch') return k.endsWith('_fast') ? 'fastSwitch' : k.startsWith('xover') ? 'double' : undefined;
+    if (it.tool === 'signal' && k.startsWith('S')) return 'shunt';
+    if (it.tool === 'building') return BUILDING_RESEARCH[k] as ResearchId | undefined;
+    return undefined;
+  }
+
+  private itemLocked(it: MenuItem) {
+    const need = this.needOf(it);
+    return !this.g.unlocked.has(it.tool) || (!!need && !this.g.researched(need));
+  }
+
+  private itemOn(it: MenuItem) {
+    return this.ui.tool === it.tool && (!it.variant || variantOf(this.ui, it.tool)?.key === it.variant);
+  }
+
+  private pickItem(it: MenuItem) {
+    if (!this.g.unlocked.has(it.tool)) return;
+    this.ui.tool = it.tool;
+    if (it.variant) {
+      const idx = VARIANTS[it.tool]?.findIndex((v) => v.key === it.variant) ?? -1;
+      if (idx >= 0) this.ui.variant[it.tool] = idx;
+    }
+    this.fresh.delete(it.tool);
+    const grp = MENU.find((m) => m.items.includes(it));
+    if (grp) { this.group = grp.id; this.lastItem[grp.id] = grp.items.indexOf(it); }
+  }
+
+  private pickGroup(grp: MenuGroup) {
+    this.group = grp.id;
+    const last = grp.items[this.lastItem[grp.id] ?? -1];
+    const it = last && !this.itemLocked(last) ? last : grp.items.find((x) => !this.itemLocked(x)) ?? grp.items.find((x) => this.g.unlocked.has(x.tool));
+    if (it) this.pickItem(it);
+  }
+
+  /** Gruppe passend zum aktuellen Werkzeug (z. B. nach Esc oder „Zeig mir wo“) */
+  private syncGroup() {
+    const cur = MENU.find((m) => m.id === this.group);
+    if (cur?.items.some((it) => this.itemOn(it))) return;
+    const g2 = MENU.find((m) => m.items.some((it) => this.itemOn(it))) ?? MENU.find((m) => m.items.some((it) => it.tool === this.ui.tool));
+    if (g2) this.group = g2.id;
+  }
+
   private buildHotbar() {
     const bar = $('hotbar');
-    for (const t of TOOLS) {
+    for (const grp of MENU) {
       const b = document.createElement('button');
       b.className = 'slot';
-      b.dataset.tool = t.id;
-      b.innerHTML = `<img alt="" /><span class="key">${t.key}</span>${t.cost ? `<span class="cost">${t.cost}</span>` : ''}`;
-      b.onclick = () => this.pick(t.id);
+      b.dataset.group = grp.id;
+      b.innerHTML = `<img alt="" src="${ICON(grp.icon)}" /><span class="key">${grp.key}</span>${grp.items.length > 1 ? '<span class="more">▴</span>' : ''}`;
+      b.onclick = () => this.pickGroup(grp);
       b.onmouseenter = () => (b.dataset.hover = '1');
       b.onmouseleave = () => delete b.dataset.hover;
       bar.appendChild(b);
     }
   }
 
+  /** Einträge der aktiven Gruppe in Reihen (Nummern = Kurztasten) */
   private renderVariants() {
-    const v = VARIANTS[this.ui.tool];
-    const sel = this.ui.variant[this.ui.tool] ?? 0;
+    this.syncGroup();
+    const grp = MENU.find((m) => m.id === this.group)!;
     const mt = this.g.missionTool();
-    const questVariant = mt?.tool === this.ui.tool ? mt.variant : undefined;
-    const key = `${this.ui.tool}|${sel}|${questVariant}|${this.g.research.done.length}`;
+    const key = `${grp.id}|${this.ui.tool}|${this.ui.variant[this.ui.tool] ?? 0}|${mt?.tool}${mt?.variant}|${this.g.research.done.length}|${[...this.g.unlocked].length}`;
     if (key === this.lastVariantsKey) return;
     this.lastVariantsKey = key;
     const box = $('variants');
     box.innerHTML = '';
-    if (!v || v.length < 2) return;
-    v.forEach((item, i) => {
+    this.hoverItem = null;
+    if (grp.items.length < 2) return;
+    box.style.setProperty('--cols', String(Math.min(grp.items.length, grp.items.length > 20 ? 11 : 10)));
+    grp.items.forEach((it, i) => {
       const b = document.createElement('button');
-      const need = this.ui.tool === 'facility' ? FACILITY_RESEARCH[item.key]
-        : this.ui.tool === 'switch' ? (item.key.endsWith('_fast') ? 'fastSwitch' : item.key.startsWith('xover') ? 'double' : undefined)
-        : this.ui.tool === 'signal' && item.key.startsWith('S') ? 'shunt'
-        : this.ui.tool === 'building' ? BUILDING_RESEARCH[item.key] as ResearchId | undefined : undefined;
-      const lockedV = !!need && !this.g.researched(need);
-      b.className = `slot${i === sel ? ' on' : ''}${item.key === questVariant && i !== sel ? ' quest' : ''}${lockedV ? ' locked' : ''}`;
-      b.title = lockedV ? `${item.label} – erst erforschen: ${RESEARCH_BY_ID[need as ResearchId].name}` : item.label;
-      b.innerHTML = `<img src="${ICON(item.icon)}" alt="" />${item.cost ? `<span class="cost">${item.cost}</span>` : ''}`;
-      b.onclick = () => { this.ui.variant[this.ui.tool] = i; };
+      const locked = this.itemLocked(it);
+      const on = this.itemOn(it);
+      const quest = !!mt && mt.tool === it.tool && (!mt.variant || mt.variant === it.variant) && !on;
+      b.className = `slot${on ? ' on' : ''}${quest ? ' quest' : ''}${locked ? ' locked' : ''}`;
+      const need = this.needOf(it);
+      b.dataset.tt = locked ? `${it.label} – ${need && !this.g.researched(need) ? `erst erforschen: ${RESEARCH_BY_ID[need].name}` : 'kommt mit einem späteren Auftrag'}` : `${it.label}${it.info && it.info !== 'Deko' ? `\n${it.info}` : ''}`;
+      b.innerHTML = `<img src="${ICON(it.icon)}" alt="" />${i < 10 ? `<span class="key">${(i + 1) % 10}</span>` : ''}${it.cost ? `<span class="cost">${it.cost}</span>` : ''}`;
+      b.onclick = () => { if (!locked || this.g.unlocked.has(it.tool)) this.pickItem(it); };
+      b.onmouseenter = () => { this.hoverItem = it; };
+      b.onmouseleave = () => { this.hoverItem = null; };
       box.appendChild(b);
     });
   }
@@ -705,6 +900,39 @@ export class Hud {
     return t.departure ? 'fährt sortiert ab' : 'fährt aus';
   }
 
+  private openTrainMenu(id: number, li: HTMLElement) {
+    const sim = this.g.sim;
+    const t = sim.trains.find((x) => x.id === id) ?? sim.queue.find((x) => x.id === id);
+    if (!t) return;
+    const m = $('train-menu');
+    m.dataset.id = String(id);
+    const shown = t.state !== 'queued';
+    // Bahnsteig festlegen: gilt für alle Züge dieses Unternehmens in dieser Richtung
+    const runs = this.g.platformRuns();
+    const key = `${t.op.id}:${t.dir}`;
+    const cur = sim.platformPref[key];
+    const plat = t.op.needsStop && runs.length > 1 ? `<div class="tm-plat"><small>Bahnsteig für ${t.op.short} ${t.dir === 'E' ? '→' : '←'} (alle Züge):</small><div>
+      <button class="btn${!cur ? ' on' : ''}" data-tm="plat" data-run="">Auto</button>${runs.map((r, i) => `<button class="btn${cur === r.id ? ' on' : ''}" data-tm="plat" data-run="${r.id}" data-tt="${r.len} Felder lang">Gleis ${i + 1}</button>`).join('')}</div></div>` : '';
+    m.innerHTML = `<b>${t.number}</b>
+      ${shown ? '<button class="btn" data-tm="focus">Zug zeigen</button>' : `<small>angekündigt für ${fmtTime(t.plannedSpawn)}</small>`}${plat}
+      <button class="btn warn" data-tm="remove">Aus dem Verkehr nehmen (−${eur(CANCEL_COST)} €)</button>
+      <small>Das Unternehmen ist darüber nicht erfreut.</small>`;
+    m.classList.remove('hidden');
+    const r = li.getBoundingClientRect();
+    m.style.left = `${Math.max(8, r.left - m.offsetWidth - 12)}px`;
+    m.style.top = `${Math.min(window.innerHeight - m.offsetHeight - 8, r.top)}px`;
+    if (shown) this.scene()?.focusTrain(id);
+  }
+
+  /** was hilft, wenn ein Zug nicht weiterkommt */
+  private fixHint(why: string) {
+    if (/Störung/.test(why)) return 'Störung anklicken und den Störtrupp schicken – oder Instandhalter erforschen.';
+    if (/kein Weg/.test(why)) return 'Der Zug findet keine Verbindung zur Strecke: Gleise und Weichen prüfen.';
+    if (/Bahnsteig/.test(why)) return 'Kein passender Bahnsteig: Länge, Zugang zum Empfangsgebäude und Oberleitung prüfen.';
+    if (/Gleis belegt/.test(why)) return 'Der Abschnitt ist belegt. Zusätzliche Signale, ein zweites Gleis oder ein Ausweichgleis verkürzen die Wartezeit. Notfalls: Zug in der Zugliste anklicken und aus dem Verkehr nehmen.';
+    return 'Ein Gegenzug hat Vorrang. Mehr Signale und Kreuzungsmöglichkeiten helfen.';
+  }
+
   private bar(v: number, color: string) {
     return `<div class="bar"><div style="width:${Math.round(Math.max(0, Math.min(100, v)))}%;background:${color}"></div></div>`;
   }
@@ -726,8 +954,9 @@ export class Hud {
     if (t.op.kind !== 'sort' && t.state !== 'rolling' && t.state !== 'stored') {
       rows.push(`<div class="tc-row"><span>Fahrplan</span><span class="${delay > 3 ? 'no' : 'ok'}">${delay > 0 ? `+${delay} min` : 'pünktlich'}</span></div>`);
     }
-    const why = this.g.sim.waitReason(t);
+    const why = this.g.sim.waitReason(t) ?? (t.note && /kein/.test(t.note) ? t.note : null);
     if (why) rows.push(`<div class="tc-row"><span>Wartet</span><span class="no">${why}</span></div>`);
+    if (this.g.sim.stuck(t) && why) rows.push(`<div class="tc-help">! ${this.fixHint(why)}</div>`);
     if (isPax) rows.push(`<div class="tc-row"><span>Auslastung</span>${this.bar(load, load > 85 ? '#d9534f' : '#6cc04a')}<span>${t.passengers}/${t.capacity}</span></div>`);
     rows.push(`<div class="tc-row"><span>Antrieb</span><span>${t.op.traction === 'electric' ? '⚡ elektrisch' : '⛽ Diesel'}</span></div>`);
     rows.push(`<div class="tc-row"><span>Schmutz</span>${this.bar(t.dirt, '#9a7a4a')}<span>${Math.round(t.dirt)}</span></div>`);
@@ -750,7 +979,7 @@ export class Hud {
       t = find(this.ui.hoverTrain);
       x = this.ui.mouse.x + 18; y = this.ui.mouse.y + 18;
     }
-    if (!t) { box.classList.add('hidden'); return; }
+    if (!t || !$('train-menu').classList.contains('hidden')) { box.classList.add('hidden'); return; }
     box.innerHTML = this.card(t);
     box.classList.remove('hidden');
     const w = box.offsetWidth, h = box.offsetHeight;
@@ -767,6 +996,14 @@ export class Hud {
     const now = performance.now();
 
     $('company-name').textContent = g.company || '…';
+    // Avatar in der Titelleiste
+    const avk = `${g.player.avatar}|${g.player.name}|${g.company}`;
+    if (avk !== this.companyKey) {
+      this.companyKey = avk;
+      const img = $('company').querySelector('img, svg');
+      if (img) img.outerHTML = g.company ? avatar(g.player.avatar, 22) : '<img src="assets/gen/ui/train.png" alt="" />';
+      $('company').dataset.tt = g.player.name ? `${g.player.title ? g.player.title + ' ' : ''}${g.player.name} · ${g.company} – klicken zum Ändern` : 'Namen ändern';
+    }
     $('clock').textContent = fmtTime(sim.time);
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
@@ -788,12 +1025,9 @@ export class Hud {
     }
     if (g.version !== this.maintVersion || now > this.maintAt) {
       this.maintVersion = g.version; this.maintAt = now + 5000;
-      const m = g.maintenance();
-      const zins = g.interest;
-      const dc = (m.total - m.Personal) * (m.vandal ? 2 : 1) + m.Personal + zins;
-      $('daycost').textContent = dc ? `−${eur(dc)}/Tag` : '0/Tag';
-      const bal = g.news.lastBalance;
-      ($('money').parentElement as HTMLElement).title = `Kasse · Instandhaltung pro Tag: ${eur(m.total)} € (Gleise ${eur(m.Gleise)}, Bahnsteige ${eur(m.Bahnsteige)}, Gebäude ${eur(m.Gebäude)}${m.Personal ? `, Personal ${eur(m.Personal)}` : ''})${m.vandal ? ' – heute doppelt (Vandalismus)' : ''}${Number.isFinite(bal) ? ` · gestern: ${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €` : ''}`;
+      // erwarteter Umsatz heute: hochgerechnet, am Morgen noch der von gestern
+      const exp = this.expectedIncome();
+      $('daycost').textContent = `≈ +${eur(exp)} €/Tag`;
     }
     $('punct').textContent = g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–';
     $('pax').textContent = g.stats.passengers.toLocaleString('de-AT');
@@ -820,46 +1054,61 @@ export class Hud {
     });
     $('ct-warn').textContent = warn ? '!' : '';
     this.renderScreen();
-    $('btn-save').textContent = now < this.savedFlash ? 'Gespeichert ✓' : 'Speichern';
+    $('btn-save').classList.toggle('saved', now < this.savedFlash);
+    this.updateFaultPop(now);
+    this.updateStationPop();
+    const unread = this.g.inbox.filter((e) => !e.read).length;
+    $('mail-count').textContent = String(unread);
+    $('mail-count').classList.toggle('hidden', !unread);
 
     // Baumenü
     const mt = g.missionTool();
-    let hovered: ToolDef | undefined;
+    let hoveredGroup: MenuGroup | undefined;
+    this.syncGroup();
     $('hotbar').querySelectorAll('.slot').forEach((el) => {
       const b = el as HTMLElement;
-      const t = TOOLS.find((x) => x.id === b.dataset.tool)!;
+      const grp = MENU.find((m) => m.id === b.dataset.group)!;
       const img = b.querySelector('img')!;
-      const src = ICON(this.toolIcon(t));
+      // Symbol = gewählter Eintrag der Gruppe
+      const shown = grp.items[this.lastItem[grp.id] ?? 0] ?? grp.items[0];
+      const src = ICON(grp.items.length > 1 ? shown.icon : grp.icon);
       if (!img.src.endsWith(src)) img.src = src;
-      const locked = !g.unlocked.has(t.id);
+      const locked = !grp.items.some((it) => g.unlocked.has(it.tool));
       b.classList.toggle('locked', locked);
-      b.classList.toggle('on', this.ui.tool === t.id);
-      const isQuest = !!mt && mt.tool === t.id && this.ui.tool !== t.id && !locked && !g.questUsed.has(`${g.missionIdx}:${t.id}`);
+      b.classList.toggle('on', this.group === grp.id);
+      const isQuest = !!mt && grp.items.some((it) => it.tool === mt.tool) && this.ui.tool !== mt.tool && !locked && !g.questUsed.has(`${g.missionIdx}:${mt.tool}`);
       b.classList.toggle('quest', isQuest);
-      const badge = isQuest ? '!' : this.fresh.has(t.id) ? 'NEU' : '';
+      const badge = isQuest ? '!' : grp.items.some((it) => this.fresh.has(it.tool)) ? 'NEU' : '';
       let el2 = b.querySelector('.badge') as HTMLElement | null;
       if (badge && !el2) { el2 = document.createElement('span'); b.appendChild(el2); }
       if (el2) {
         if (!badge) el2.remove();
         else { el2.textContent = badge; el2.className = `badge${badge === 'NEU' ? ' new' : ''}`; }
       }
-      if (b.dataset.hover) hovered = t;
+      if (b.dataset.hover) hoveredGroup = grp;
     });
     this.renderVariants();
 
-    // Tooltip: Werkzeug + Variante + Kosten/Grund
-    const t = hovered ?? TOOLS.find((x) => x.id === this.ui.tool)!;
-    const v = variantOf(this.ui, t.id);
-    const locked = !g.unlocked.has(t.id);
-    let html = `<b>${t.label}</b>${v ? ` · ${v.label}` : ''}`;
-    if (v?.info && v.info !== 'Deko') html += ` <small>(${v.info})</small>`;
+    // Hinweiszeile: Gruppe · Eintrag · Kosten/Grund
     const viaResearch: Partial<Record<ToolId, string>> = { wire: RESEARCH_BY_ID.wire.name, access: RESEARCH_BY_ID.access.name, facility: RESEARCH_BY_ID.siding.name, road: RESEARCH_BY_ID.road.name };
-    if (locked) html += ` <span class="no">· ${viaResearch[t.id] ? `erst erforschen: „${viaResearch[t.id]}“` : 'kommt mit einem späteren Auftrag'}</span>`;
-    else if (!hovered && this.ui.message) {
-      const bad = !/€$/.test(this.ui.message);
-      html += ` · <span class="${bad ? 'no' : 'ok'}">${this.ui.message}</span>`;
-    } else html += ` <small>· ${t.help}</small>`;
-    if (t.id === 'select' && !hovered) html = '';
+    let html = '';
+    if (hoveredGroup) {
+      const locked = !hoveredGroup.items.some((it) => g.unlocked.has(it.tool));
+      const via = hoveredGroup.items.map((it) => viaResearch[it.tool]).find(Boolean);
+      html = `<b>${hoveredGroup.label}</b> <small>· Taste ${hoveredGroup.key}${hoveredGroup.alt ? `/${hoveredGroup.alt}` : ''}${hoveredGroup.items.length > 1 ? ', dann Ziffer für den Eintrag' : ''}</small>`
+        + (locked ? ` <span class="no">· ${via ? `erst erforschen: „${via}“` : 'kommt mit einem späteren Auftrag'}</span>` : ` <small>· ${hoveredGroup.help}</small>`);
+    } else if (this.ui.tool !== 'select') {
+      const grp = MENU.find((m) => m.id === this.group)!;
+      const hv = this.hoverItem && grp.items.includes(this.hoverItem) ? this.hoverItem : null;
+      const it = hv ?? grp.items.find((x) => this.itemOn(x));
+      html = `<b>${grp.label}</b>${it && grp.items.length > 1 ? ` · ${it.label}` : ''}`;
+      if (it?.info && it.info !== 'Deko' && grp.items.length > 1) html += ` <small>(${it.info})</small>`;
+      if (grp.id === 'building' && it && Game.canRotate(it.variant ?? '')) html += ` <small>· ${this.g.buildRot ? 'gedreht' : 'normal'} (Q = drehen)</small>`;
+      if (!hv && this.ui.message) {
+        const bad = !/€$/.test(this.ui.message);
+        html += ` · <span class="${bad ? 'no' : 'ok'}">${this.ui.message}</span>`;
+      } else if (grp.items.length < 2) html += ` <small>· ${grp.help}</small>`;
+    }
     $('tooltip').innerHTML = html;
 
     // Auftrag
@@ -965,7 +1214,9 @@ export class Hud {
       }
       if (ev.type === 'decision') {
         const day = Math.floor(g.sim.time / 86400) + 1;
-        this.showEvent(`${this.paper(day, 'Anfrage', ev.title, ev.text, ev.tag)}
+        const paper = this.paper(day, 'Anfrage', ev.title, ev.text, ev.tag);
+        this.mail('decision', ev.title, paperName(), paper, false, true);
+        this.showEvent(`${paper}
           <div class="dc-btns"><button class="btn big" data-decide="1">${ev.yes}</button><button class="btn" data-decide="0">${ev.no}</button></div>`, false);
         continue;
       }
@@ -973,10 +1224,12 @@ export class Hud {
       if (ev.type === 'letter') {
         const day = Math.floor(g.sim.time / 86400) + 1;
         const from = ev.from ?? BOARD(g.company || 'Bahngesellschaft');
-        this.showEvent(`<div class="letter ${ev.mood}${ev.from ? ' ext' : ''}"><div class="lt-head"><b>${from.org}</b><span>${ev.from ? from.role : 'Der Vorstand'} · Tag ${day}</span></div>
-          <div class="lt-title">${ev.title}</div><div class="lt-text">${/^<p>Sehr/.test(ev.text) ? '' : '<p>Sehr geehrte Betriebsleitung,</p>'}${ev.text}</div>
+        const html = `<div class="letter ${ev.mood}${ev.from ? ' ext' : ''}"><div class="lt-head"><b>${from.org}</b><span>${ev.from ? from.role : 'Der Vorstand'} · Tag ${day}</span></div>
+          <div class="lt-title">${ev.title}</div><div class="lt-text">${/^<p>(Sehr|Guten)/.test(ev.text) ? '' : `<p>${g.salutation()}</p>`}${ev.text}</div>
           ${ev.bonus ? `<div class="lt-bonus"><img src="assets/gen/ui/coin.png" alt="" />+${eur(ev.bonus)} €</div>` : ''}
-          <div class="lt-sign">${portrait(from.seed, 40)}<div><i>${ev.mood === 'bad' ? 'Mit ernsten Grüßen' : 'Mit freundlichen Grüßen'}</i><b>${from.name}</b><small>${from.role}</small></div></div></div>`, false);
+          <div class="lt-sign">${portrait(from.seed, 40)}<div><i>${ev.mood === 'bad' ? 'Mit ernsten Grüßen' : 'Mit freundlichen Grüßen'}</i><b>${from.name}</b><small>${from.role}</small></div></div></div>`;
+        // Begrüßung gleich öffnen, alles andere landet im Postfach
+        this.mail('letter', ev.title, `${from.name}, ${from.org}`, html, ev.title === 'Willkommen an Bord!');
         continue;
       }
       if (ev.type === 'achievement') {
@@ -988,7 +1241,7 @@ export class Hud {
       }
       if (ev.type === 'news') {
         const day = Math.floor(g.sim.time / 86400) + 1;
-        this.showEvent(this.paper(day, 'Lokales', ev.title, ev.text, ev.tag), false);
+        this.mail('news', ev.title, paperName(), this.paper(day, 'Lokales', ev.title, ev.text, ev.tag));
         continue;
       }
       if (ev.type === 'contract') {
@@ -1011,6 +1264,157 @@ export class Hud {
         ${next ? `<div class="ev-next"><span>Nächster Auftrag</span><b>${next.title}</b><small>${next.short}</small></div>`
           : '<div class="ev-next"><b>Alle Aufträge erledigt!</b><small>Freies Spiel – bau weiter, so groß du willst</small></div>'}`);
     }
+  }
+
+  // ------------------------------------------------------------ Störung: Fenster beim Hovern
+  private faultHold = false;
+  private faultUntil = 0;
+  private faultAt: { x: number; y: number } | null = null;
+  private faultKey = '';
+
+  private updateFaultPop(now: number) {
+    const sc = this.scene();
+    const pop = $('fault-pop');
+    const h = sc?.hovered;
+    const f = h && this.ui.tool === 'select' ? this.g.faultAt(h.x, h.y) : undefined;
+    if (f && h) { this.faultAt = { x: h.x, y: h.y }; this.faultUntil = now + 900; }
+    const at = this.faultAt;
+    const cur = at ? this.g.faultAt(at.x, at.y) : undefined;
+    if (!sc || !at || !cur || (!this.faultHold && now > this.faultUntil)) { pop.classList.add('hidden'); this.faultAt = null; return; }
+    const kind = cur.kind === 'switch' ? 'Weiche' : 'Signal';
+    const mins = Math.round((this.g.sim.time - cur.since) / 60);
+    const left = cur.repairAt ? Math.max(0, Math.ceil((cur.repairAt - this.g.sim.time) / 60)) : 0;
+    const key = `${at.x},${at.y}|${!!cur.repairAt}|${left}|${mins}|${this.g.money >= REPAIR_COST}`;
+    if (key !== this.faultKey) {
+      this.faultKey = key;
+      pop.innerHTML = `<b>Störung: ${kind} defekt</b><small>seit ${mins} min · Züge kommen hier nicht vorbei</small>
+        ${cur.repairAt ? `<span class="ok">Störtrupp ist unterwegs – fertig in ${left} min</span>`
+          : `<button class="btn" data-repair="${at.x},${at.y}"${this.g.money < REPAIR_COST ? ' disabled' : ''}>Störtrupp schicken (${eur(REPAIR_COST)} €)</button>
+             <small>${this.g.crew ? 'Deine Instandhalter rücken gleich selbst aus' : 'ohne Trupp nach ein paar Stunden von selbst behoben – aber die Unternehmen ärgern sich'}</small>`}`;
+    }
+    const p = sc.cellToScreen(at.x, at.y);
+    pop.style.left = `${Math.round(Math.min(window.innerWidth - pop.offsetWidth - 6, p.x + 18))}px`;
+    pop.style.top = `${Math.round(Math.max(60, p.y - pop.offsetHeight - 14))}px`;
+    pop.classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ Bahnhof: Kurzinfo beim Hovern
+  private stKey = '';
+  private plAvatar = 0;
+  private companyKey = '';
+  private updateStationPop() {
+    const pop = $('st-pop');
+    const h = this.scene()?.hovered;
+    const id = h && this.ui.tool === 'select' && !this.ui.menu && !this.screen ? this.g.grid.get(h.x, h.y)?.building : null;
+    const b = id != null ? this.g.grid.buildings.get(id) : undefined;
+    if (!b || !isStation(b.key) || this.ui.hoverTrain !== null) { pop.classList.add('hidden'); return; }
+    const g = this.g, t = g.today(), prev = g.history.find((x) => x.day === t.day - 1);
+    const shops = [...g.grid.buildings.values()].filter((x) => !x.decor && (SHOPS[x.key] || x.key === 'bld_billboard'));
+    const plats = g.net.runs.filter((r) => r.accessible).length;
+    const m = g.maintenance();
+    const key = `${b.id}|${b.name}|${t.pax}|${t.income}|${t.shop}|${shops.length}|${plats}|${g.rating.stars}|${Math.round(m.total)}`;
+    if (key !== this.stKey) {
+      this.stKey = key;
+      const row = (l: string, v: string, cls = '') => `<span>${l}</span><span class="${cls}">${v}</span>`;
+      pop.innerHTML = `<div class="fin"><span class="h">${b.name ?? 'Bahnhof'} · ${BUILDINGS[b.key].label}</span>
+        ${row('Bewertung', '★'.repeat(g.rating.stars) + '☆'.repeat(5 - g.rating.stars), 'gold')}
+        ${row('Einnahmen-Bonus', `+${Math.round(g.stationBonus(b.id) * 100)} %`, 'ok')}
+        ${row('Bahnsteiggleise', String(plats))}
+        ${row('Fahrgäste heute', t.pax.toLocaleString('de-AT'))}${prev ? row('Fahrgäste gestern', prev.pax.toLocaleString('de-AT')) : ''}
+        ${row('Läden & Werbung', `${shops.length} · heute +${eur(t.shop ?? 0)} €`, 'ok')}
+        ${row('Umsatz heute', `+${eur(t.income)} €`, 'ok')}
+        ${row('Fixkosten pro Tag', `−${eur(m.total)} €`, 'no')}
+        <span class="h"><small>Klicken: umbenennen und ausbauen</small></span></div>`;
+    }
+    pop.classList.remove('hidden');
+    const x = Math.min(window.innerWidth - pop.offsetWidth - 8, this.ui.mouse.x + 18), y = Math.min(window.innerHeight - pop.offsetHeight - 8, this.ui.mouse.y + 18);
+    pop.style.left = `${x}px`; pop.style.top = `${y}px`;
+  }
+
+  /** erwarteter Umsatz des Tages */
+  private expectedIncome() {
+    const g = this.g;
+    const t = g.today(), frac = (g.sim.time % 86400) / 86400;
+    const prev = g.history.find((h) => h.day === t.day - 1);
+    if (frac < 0.25 || !t.income) return prev?.income ?? t.income;
+    // Betriebszeit ca. 5–24 Uhr: Hochrechnung auf den restlichen Tag
+    const run = Math.max(0.1, Math.min(1, (frac - 5 / 24) / (19 / 24)));
+    return Math.round(t.income / run);
+  }
+
+  /** Tooltip: Einnahmen und Ausgaben */
+  private financeHtml() {
+    const g = this.g, t = g.today(), m = g.maintenance(), zins = g.interest;
+    const prev = g.history.find((h) => h.day === t.day - 1);
+    const fix = (m.total - m.Personal) * (m.vandal ? 2 : 1) + m.Personal + zins;
+    const row = (l: string, v: number) => `<span>${l}</span><span class="${v > 0 ? 'ok' : v < 0 ? 'no' : ''}">${v > 0 ? '+' : v < 0 ? '−' : ''}${eur(Math.abs(v))} €</span>`;
+    return `<div class="fin"><span class="h">Heute bisher</span>${row('Einnahmen', t.income)}${row('Ausgaben', -t.expense)}${t.shop ? row('davon Läden & Werbung', t.shop) : ''}
+      <span class="h">Erwartet heute</span>${row('Umsatz', this.expectedIncome())}${row('Fixkosten um Mitternacht', -fix)}${row('Ergebnis (geschätzt)', this.expectedIncome() - t.expense - fix)}
+      <span class="h">Fixkosten pro Tag</span>${row('Gleise', -m.Gleise)}${row('Bahnsteige', -m.Bahnsteige)}${row('Gebäude', -m.Gebäude)}${m.Personal ? row('Personal', -m.Personal) : ''}${zins ? row('Kreditzinsen', -zins) : ''}
+      ${m.vandal ? '<span class="h no">Heute doppelt (Vandalismus)</span>' : ''}
+      ${prev ? `<span class="h">Gestern</span>${row('Bilanz', prev.income - prev.expense)}` : ''}</div>`;
+  }
+
+  /** eigene Tooltips im Spiel-Look statt der Browser-Tooltips */
+  private setupTooltips() {
+    const tt = $('tt');
+    let cur: HTMLElement | null = null;
+    const place = (e: MouseEvent) => {
+      const x = Math.min(window.innerWidth - tt.offsetWidth - 6, e.clientX + 14);
+      const y = e.clientY + 18 + tt.offsetHeight > window.innerHeight ? e.clientY - tt.offsetHeight - 10 : e.clientY + 18;
+      tt.style.left = `${Math.max(4, x)}px`; tt.style.top = `${Math.max(4, y)}px`;
+    };
+    document.addEventListener('mouseover', (e) => {
+      const el = (e.target as HTMLElement).closest?.('[title],[data-tt],#money-wrap,#daycost-wrap') as HTMLElement | null;
+      if (el?.title) { el.dataset.tt = el.title; el.removeAttribute('title'); }
+      cur = el;
+      if (!el) { tt.style.display = 'none'; return; }
+      const fin = el.id === 'money-wrap' || el.id === 'daycost-wrap';
+      if (!fin && !el.dataset.tt) { tt.style.display = 'none'; return; }
+      tt.innerHTML = fin ? this.financeHtml() : el.dataset.tt!.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      tt.style.display = 'block';
+      place(e);
+    });
+    document.addEventListener('mousemove', (e) => { if (cur && tt.style.display === 'block') place(e); });
+    document.addEventListener('mousedown', () => { tt.style.display = 'none'; });
+  }
+
+  // ------------------------------------------------------------ Postfach
+  /** Nachricht ablegen; Hinweis unten rechts zum Anklicken (oder gleich öffnen) */
+  private mail(kind: 'letter' | 'news' | 'decision', title: string, from: string, html: string, open = false, read = false) {
+    const g = this.g;
+    const id = (g.inbox[0]?.id ?? 0) + 1;
+    const e = { id, time: g.sim.time, kind, title, from, html, read: read || open };
+    g.inbox.unshift(e);
+    if (g.inbox.length > 40) g.inbox.length = 40;
+    if (open) { this.showEvent(html, false); return; }
+    if (read) return;
+    Sound.coin();
+    const t = document.createElement('button');
+    t.className = 'toast panel';
+    t.dataset.mail = String(id);
+    t.innerHTML = `<span class="ib-ico">${kind === 'news' ? '📰' : '✉'}</span><span><b>${kind === 'news' ? 'Zeitung' : 'Neuer Brief'}</b><small>${title}</small></span>`;
+    $('toasts').prepend(t);
+    while ($('toasts').children.length > 4) $('toasts').lastElementChild!.remove();
+    setTimeout(() => t.remove(), 25000);
+  }
+
+  private openMail(id: number) {
+    const e = this.g.inbox.find((x) => x.id === id);
+    if (!e) return;
+    e.read = true;
+    $('toasts').querySelectorAll(`[data-mail="${id}"]`).forEach((x) => x.remove());
+    this.showEvent(e.html, false);
+  }
+
+  private openInbox() {
+    const g = this.g;
+    const day = (t: number) => Math.floor(t / 86400) + 1;
+    $('ib-list').innerHTML = g.inbox.length ? g.inbox.map((e) => `<button class="ib-row${e.read ? '' : ' unread'}" data-mail="${e.id}">
+      <span class="ib-ico">${e.kind === 'news' ? '📰' : e.kind === 'decision' ? '❓' : '✉'}</span>
+      <span class="ib-t"><b>${e.title}</b><small>${e.from}</small></span><span class="ib-d">Tag ${day(e.time)} · ${fmtTime(e.time)}</span></button>`).join('')
+      : '<div class="slots-empty">Noch keine Post. Briefe vom Vorstand, der Bank und Zeitungsmeldungen landen hier.</div>';
+    $('inbox').classList.remove('hidden');
   }
 
   /** Zeitungsseite mit Kopf, Redakteur und Foto */

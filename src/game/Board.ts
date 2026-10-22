@@ -17,8 +17,8 @@ export function welcomeLetter(g: Game): Letter {
   const m = currentMap();
   return {
     mood: 'info', title: 'Willkommen an Bord!',
-    text: `<p>Sehr geehrte Betriebsleitung der <b>${g.company}</b>,</p>
-<p>der Vorstand freut sich, Ihnen die Strecke im <b>${m.name}</b> anvertrauen zu dürfen. Sie erhalten ein Startkapital von <b>${eur(m.startMoney)}&nbsp;€</b> – bitte gehen Sie sorgsam damit um, die Bank ist nicht für ihre Geduld bekannt.</p>
+    text: `<p>${g.salutation(`Sehr geehrte Betriebsleitung der ${g.company}`)}</p>
+<p>der Vorstand der <b>${g.company}</b> freut sich, Ihnen die Strecke im <b>${m.name}</b> anvertrauen zu dürfen. Sie erhalten ein Startkapital von <b>${eur(m.startMoney)}&nbsp;€</b> – bitte gehen Sie sorgsam damit um, die Bank ist nicht für ihre Geduld bekannt.</p>
 <p>Unsere Erwartungen sind einfach: pünktliche Züge, zufriedene Fahrgäste und schwarze Zahlen. Bauen Sie zuerst einen Bahnsteig samt Bahnhof, dann kommen die ersten Züge von ganz allein.</p>
 <p>Ich werde Ihnen hin und wieder schreiben. Hoffentlich meistens Erfreuliches.</p>`,
   };

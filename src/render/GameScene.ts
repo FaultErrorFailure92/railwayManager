@@ -76,7 +76,7 @@ const D_GROUND = -100000;
 const D_TRACK = -50000;
 const D_OVERLAY = 90000;
 const D_UI = 100000;
-const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility', 'road'];
+const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility', 'road', 'remove'];
 /** Gebäude mit Infofenster beim Anklicken */
 const PANEL_BUILDING = (k?: string) => !!k && (isStation(k) || !!SHOPS[k]);
 /** Nebel: ab so vielen Feldern Abstand zur eigenen Fläche, voll nach weiteren … */
@@ -89,7 +89,7 @@ export class GameScene extends Phaser.Scene {
   private staticObjs: (Phaser.GameObjects.Image | Phaser.GameObjects.Text)[] = [];
   private downAt: XY | null = null;
   private animals!: Animals;
-  private buildingImgs = new Map<number, { key: string; x: number; y: number; img: Phaser.GameObjects.Image }>();
+  private buildingImgs = new Map<number, { key: string; x: number; y: number; rot?: boolean; img: Phaser.GameObjects.Image }>();
   private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W'; sh?: boolean }[] = [];
   private trainSprites = new Map<number, Phaser.GameObjects.Image[]>();
   private lastTrainPos = new Map<number, XY>();
@@ -197,6 +197,13 @@ export class GameScene extends Phaser.Scene {
     return this.add.image(p.x + s.ox, p.y + s.oy, name).setOrigin(0).setDepth(depth);
   }
 
+  /** gedrehtes Gebäude: an der oberen Ecke gespiegelt (x und y tauschen) */
+  private mirror(img: Phaser.GameObjects.Image, name: string, wx: number, wy: number) {
+    const s = SPRITES[name];
+    const p = toScreen(wx, wy);
+    img.setFlipX(true).setX(p.x - s.ox - s.w);
+  }
+
   private diamond(gfx: Phaser.GameObjects.Graphics, x0: number, y0: number, x1: number, y1: number, fill = true, stroke = false) {
     const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([wx, wy]) => {
       const p = toScreen(wx * TILE, wy * TILE);
@@ -226,6 +233,14 @@ export class GameScene extends Phaser.Scene {
     }
     // Gleis: schräg gezogen = Diagonale (mit automatischer Kreuzung)
     if (t === 'track' && this.dragStart && h.y !== this.dragStart.y) return { cells: [this.dragStart, h], variant };
+    // Abriss: Rechteck aufziehen
+    if (t === 'remove' && this.dragStart) {
+      const x0 = Math.min(this.dragStart.x, h.x), x1 = Math.max(this.dragStart.x, h.x);
+      const y0 = Math.min(this.dragStart.y, h.y), y1 = Math.max(this.dragStart.y, h.y);
+      const out: XY[] = [];
+      for (let y = y0; y <= y1 && out.length < 600; y++) for (let x = x0; x <= x1; x++) if (this.g.grid.inside(x, y)) out.push({ x, y });
+      return { cells: out, variant };
+    }
     const line = t === 'platform' || t === 'track' || t === 'wire' || t === 'road' || t === 'access' || (t === 'facility' && variant.startsWith('mark_'));
     if (line && this.dragStart) {
       return { cells: this.g.lineCells(t, this.dragStart.x, this.dragStart.y, h.x, h.y), variant };
@@ -241,6 +256,11 @@ export class GameScene extends Phaser.Scene {
       if (VARIANTS[this.ui.tool]) this.ui.variant[this.ui.tool] = ((this.ui.variant[this.ui.tool] ?? 0) + 1) % VARIANTS[this.ui.tool]!.length;
     });
     this.input.keyboard!.on('keydown-ESC', () => { this.dragStart = null; });
+    // Q: Gebäude drehen
+    this.input.keyboard!.on('keydown-Q', () => {
+      if (typing() || this.ui.menu || this.ui.tool !== 'building') return;
+      this.g.buildRot = !this.g.buildRot;
+    });
 
     this.input.on('gameout', () => { this.ui.hoverTrain = null; this.hoverCell = null; });
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
@@ -320,6 +340,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Kamera zum Zug */
+  /** Feld unter der Maus (für Hover-Fenster) */
+  get hovered() { return this.hoverCell; }
+
+  /** Bildschirmposition (CSS-Pixel) der Mitte eines Felds */
+  cellToScreen(x: number, y: number) {
+    const cam = this.cameras.main;
+    const p = toScreen((x + 0.5) * TILE, (y + 0.5) * TILE);
+    return { x: (p.x - cam.worldView.x) * cam.zoom, y: (p.y - cam.worldView.y) * cam.zoom };
+  }
+
   focusTrain(id: number) {
     const img = this.trainSprites.get(id)?.find((i) => i.visible);
     if (img) this.cameras.main.pan(img.x + img.width / 2, img.y + img.height / 2, 400, 'Sine.easeInOut');
@@ -403,7 +433,7 @@ export class GameScene extends Phaser.Scene {
     // Gebäude & Natur: Bilder bleiben erhalten, solange sich nichts ändert (tausende Bäume)
     for (const [id, c] of this.buildingImgs) {
       const b = g.buildings.get(id);
-      if (!b || b.key !== c.key || b.x !== c.x || b.y !== c.y) { c.img.destroy(); this.buildingImgs.delete(id); }
+      if (!b || b.key !== c.key || b.x !== c.x || b.y !== c.y || !!b.rot !== !!c.rot) { c.img.destroy(); this.buildingImgs.delete(id); }
     }
     for (const b of g.buildings.values()) {
       const d = BUILDINGS[b.key];
@@ -411,7 +441,9 @@ export class GameScene extends Phaser.Scene {
         const fx = b.x + d.w - 1, fy = b.y + d.h - 1;
         let depth = toScreen(fx * TILE + 8, fy * TILE + 8).y + (d.onPlatform ? 0.32 : 0.3);
         if (b.key === 'bld_hump') depth = D_TRACK + b.x + b.y + 0.7;
-        this.buildingImgs.set(b.id, { key: b.key, x: b.x, y: b.y, img: this.place(b.key, b.x * TILE, b.y * TILE, depth) });
+        const img = this.place(b.key, b.x * TILE, b.y * TILE, depth);
+        if (b.rot) this.mirror(img, b.key, b.x * TILE, b.y * TILE);
+        this.buildingImgs.set(b.id, { key: b.key, x: b.x, y: b.y, rot: b.rot, img });
       }
       if (b.name) {
         const c = toScreen((b.x + d.w / 2) * TILE, (b.y + d.h / 2) * TILE);
@@ -421,6 +453,15 @@ export class GameScene extends Phaser.Scene {
         this.staticObjs.push(label);
       }
     }
+    // Gleisnummern am Bahnsteig (für „Bahnsteig festlegen“)
+    const runs = this.g.platformRuns();
+    if (runs.length > 1) runs.forEach((r, i) => {
+      const c = toScreen((r.x0 + 0.5) * TILE, (r.row + 0.5) * TILE);
+      const lbl = this.add.text(c.x, c.y - 4, String(i + 1), {
+        fontFamily: FONT, fontSize: '10px', color: '#ffffff', backgroundColor: '#2c5f8add', padding: { x: 3, y: 0 },
+      }).setOrigin(0.5, 1).setResolution(4).setDepth(D_OVERLAY + 1);
+      this.staticObjs.push(lbl);
+    });
     this.rebuildExtras();
   }
 
@@ -611,7 +652,8 @@ export class GameScene extends Phaser.Scene {
         if (prev === 'dwell' && t.state === 'running') Sound.whistle();
       }
       this.lastState.set(t.id, t.state);
-      if (sim.delayNow(t) >= 3) put('late_icon', head.x, head.y - 14);
+      if (sim.stuck(t)) put('warn', head.x, head.y - 16, Math.floor(this.time0 / 300) % 2 ? 1 : 0.5);
+      else if (sim.delayNow(t) >= 3) put('late_icon', head.x, head.y - 14);
     }
     if (this.lastState.size > 200) for (const id of [...this.lastState.keys()]) if (!sim.trains.some((t) => t.id === id)) this.lastState.delete(id);
     const blink = Math.floor(this.time0 / 400) % 2 === 0;
@@ -693,11 +735,59 @@ export class GameScene extends Phaser.Scene {
     this.hintArrow.setVisible(true).setPosition(p.x, p.y - 6 - Math.abs(Math.sin(this.time0 / 180)) * 6);
   }
 
+  /** Hilfsfelder je Werkzeug: wo kann man bauen (gecacht je Version) */
+  private helpKey = '';
+  private helpCells: { ok: XY[]; bad: XY[] } = { ok: [], bad: [] };
+
+  private toolHelp(tool: string) {
+    const key = `${tool}|${this.g.version}`;
+    if (key === this.helpKey) return this.helpCells;
+    this.helpKey = key;
+    const g = this.g.grid;
+    const ok: XY[] = [], bad: XY[] = [];
+    if (tool === 'access') {
+      // Bahnsteige (Anfang/Ende einer Unterführung)
+      g.cells.forEach((c, k) => { if (c.platform) ok.push(g.xy(k)); });
+    } else if (tool === 'wire') {
+      // eigene Gleise ohne Oberleitung
+      g.cells.forEach((c, k) => { const p = g.xy(k); if ((c.track || c.piece !== null) && !c.wire && g.isOwned(p.x, p.y)) ok.push(p); });
+      // Oberleitung ohne Verbindung zur Strecke: „hängt offen“
+      const seen = new Set<number>();
+      g.cells.forEach((c, k) => {
+        if (!c.wire || seen.has(k)) return;
+        const comp: number[] = [k];
+        seen.add(k);
+        let live = false;
+        for (let i = 0; i < comp.length; i++) {
+          const p = g.xy(comp[i]);
+          if (g.get(p.x, p.y)!.fixed) live = true;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const n = g.get(p.x + dx, p.y + dy);
+            if (!n || !n.wire) continue;
+            const nk = g.key(p.x + dx, p.y + dy);
+            if (!seen.has(nk)) { seen.add(nk); comp.push(nk); }
+          }
+        }
+        if (!live) comp.forEach((q) => bad.push(g.xy(q)));
+      });
+    }
+    this.helpCells = { ok, bad };
+    return this.helpCells;
+  }
+
   private drawGhost() {
     const gfx = this.ghost;
     gfx.clear();
     this.ghostImgs.forEach((i) => i.setVisible(false));
     const tool = this.ui.tool;
+    if (tool === 'access' || tool === 'wire') {
+      const h = this.toolHelp(tool);
+      const z = this.cameras.main.zoom;
+      gfx.lineStyle(1 / z, 0x8fd0ff, 0.55).fillStyle(0x8fd0ff, 0.12);
+      for (const c of h.ok) this.diamond(gfx, c.x, c.y, c.x + 1, c.y + 1, true, true);
+      gfx.lineStyle(2 / z, 0xff4b4b, 0.9).fillStyle(0xff4b4b, 0.25);
+      for (const c of h.bad) this.diamond(gfx, c.x, c.y, c.x + 1, c.y + 1, true, true);
+    }
     if (tool === 'select' || !this.hoverCell) return;
     const a = this.currentAction();
     if (!a.cells.length) { this.ui.message = ''; return; }
@@ -714,7 +804,7 @@ export class GameScene extends Phaser.Scene {
       }
       const s = SPRITES[name];
       const p = toScreen(wx, wy);
-      img.setTexture(name).setPosition(p.x + s.ox, p.y + s.oy).setVisible(true);
+      img.setTexture(name).setFlipX(false).setPosition(p.x + s.ox, p.y + s.oy).setVisible(true);
     };
     if (tool === 'switch' || tool === 'curve' || tool === 'diag') {
       a.cells.forEach((c, i) => ghostImg(i, `piece_${a.variant}`, c.x * TILE, c.y * TILE));
@@ -722,7 +812,12 @@ export class GameScene extends Phaser.Scene {
     if (tool === 'track' && plan.pieces) {
       plan.pieces.forEach((p, i) => ghostImg(i, `piece_${p.key}`, p.x * TILE, p.y * TILE));
     }
-    if (tool === 'building' || (tool === 'facility' && !a.variant.startsWith('mark_'))) ghostImg(0, a.variant, a.cells[0].x * TILE, a.cells[0].y * TILE);
+    if (tool === 'building' || (tool === 'facility' && !a.variant.startsWith('mark_'))) {
+      ghostImg(0, a.variant, a.cells[0].x * TILE, a.cells[0].y * TILE);
+      const gi = this.ghostImgs[0];
+      gi.setFlipX(false);
+      if (tool === 'building' && this.g.buildRot && Game.canRotate(a.variant)) this.mirror(gi, a.variant, a.cells[0].x * TILE, a.cells[0].y * TILE);
+    }
     if (tool === 'signal') {
       const c = a.cells[0];
       const [wx, wy] = a.variant === 'W' ? [c.x * TILE + 2, c.y * TILE + 1] : [(c.x + 1) * TILE - 2, c.y * TILE + 15];
@@ -740,7 +835,7 @@ export class GameScene extends Phaser.Scene {
         gfx.lineStyle(2.5 / z, 0xffd23c, alpha).beginPath().moveTo(l.x, l.y).lineTo(tip.x, tip.y).lineTo(r.x, r.y).strokePath();
       }
     }
-    this.ui.message = plan.ok ? `${plan.cost < 0 ? '+' : plan.cost > 0 ? '−' : ''}${Math.abs(plan.cost).toLocaleString('de-AT')} €` : plan.reason ?? '';
+    this.ui.message = plan.ok ? `${plan.note ? `${plan.note} · ` : ''}${plan.cost < 0 ? '+' : plan.cost > 0 ? '−' : ''}${Math.abs(plan.cost).toLocaleString('de-AT')} €` : plan.reason ?? '';
   }
 
   /** schwebende Beträge (Bauen, Züge, Kiosk) */

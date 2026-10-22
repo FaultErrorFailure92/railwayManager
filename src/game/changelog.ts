@@ -5,6 +5,54 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.21', date: '22.10.2026', title: 'Fahrdienstleiter 2.0',
+    items: [
+      { kind: 'fix', icon: 'signal_E', text: 'Deadlocks mit Abstellgleis hinter dem Gleiswechsel behoben – der Fahrdienstleiter plant Wendezüge und belegte Abstellgleise richtig ein' },
+      { kind: 'fix', icon: 'mark_siding', text: 'Wendezüge ohne freies Abstellgleis blockieren nicht mehr stundenlang den Bahnsteig, sondern wenden sofort' },
+      { kind: 'besser', icon: 'mark_shunt', text: 'Verschubbereiche sind eigene Gleisabschnitte' },
+      { kind: 'neu', icon: 'platform', text: 'Bahnsteig festlegen: Zug in der Zugliste anklicken → Gleis wählen (gilt für das Unternehmen und die Richtung); Gleisnummern am Bahnsteig' },
+      { kind: 'neu', icon: 'piece_branch_divDown', text: 'Weichen über passende Kurven setzen – die Kurve wird zur Weiche ausgebaut' },
+      { kind: 'besser', icon: 'piece_xover_up', text: 'An die Kreuzungsstellen des Netzbetreibers kann nicht mehr seitlich angeschlossen werden' },
+    ],
+  },
+  {
+    version: '0.20', date: '22.10.2026', title: 'Wer leitet die Bahn?',
+    items: [
+      { kind: 'neu', icon: 'bld_station', text: 'Spielername, Anrede und Avatar beim neuen Spiel – die Briefe sprechen dich jetzt persönlich an' },
+      { kind: 'neu', icon: 'bld_cafe', text: 'Lange Reisezüge mit Gepäckwagen und Speisewagen' },
+      { kind: 'neu', icon: 'bld_clock', text: 'Pause-Fenster (Esc) mit Kurzbilanz, Speichern und Weg zum Hauptmenü' },
+      { kind: 'fix', icon: 'track', text: 'Zweigleisiger Ausbau: das 2. Streckengleis wird auch durch deinen Bahnhof gelegt, wo Platz ist – Auftrag mit Hinweis auf die Gleiswechsel' },
+    ],
+  },
+  {
+    version: '0.19', date: '22.10.2026', title: 'Neues Baumenü und Postfach',
+    items: [
+      { kind: 'neu', icon: 'track', text: 'Baumenü in Gruppen: Bahnsteig & Zugänge, Gleisbau, Bahnbetrieb, Unterstützungsanlagen, Straße, Gebäude – Einträge in mehreren Reihen' },
+      { kind: 'neu', icon: 'bld_station', text: 'Kurztasten: Gruppe 1–9, danach Ziffer für den Eintrag (z. B. 8 dann 1 = Empfangsgebäude)' },
+      { kind: 'neu', icon: 'bld_cafe', text: 'Quadratische Gebäude mit Q drehen' },
+      { kind: 'neu', icon: 'tool_shovel', text: 'Abriss: Fläche aufziehen statt jedes Teil einzeln anklicken' },
+      { kind: 'neu', icon: 'bld_station2', text: 'Postfach (P): Briefe und Zeitung landen dort, neue Post erscheint unten rechts zum Anklicken' },
+      { kind: 'neu', icon: 'signal_E', text: '„!“ über Zügen, die nicht weiterkommen – mit Grund und Tipp in der Zugkarte' },
+      { kind: 'neu', icon: 'bld_bus', text: 'Zugliste: Zug anklicken → zeigen oder gegen Gebühr aus dem Verkehr nehmen' },
+      { kind: 'besser', icon: 'bld_station3', text: 'Bahnhof beim Hovern: Fahrgäste, Läden, Umsatz, Kosten' },
+    ],
+  },
+  {
+    version: '0.18', date: '22.10.2026', title: 'Aufgeräumt',
+    items: [
+      { kind: 'fix', icon: 'signal_E', text: 'Auftrag 2 erkennt Signale auf dem Streckengleis' },
+      { kind: 'fix', icon: 'track', text: 'Auftrag 5 (Wendezüge) zeigt kein falsches Gleis mehr – Wendezüge wenden direkt am Bahnsteig' },
+      { kind: 'fix', icon: 'tool_shovel', text: 'Gleis unter einem Zug abreißen: der Zug wird aus dem Verkehr genommen (−500 €)' },
+      { kind: 'fix', icon: 'mark_siding', text: 'Abgestellte Züge ragen nicht mehr aus zu kurzen Abstellgleisen in die Weichen' },
+      { kind: 'besser', icon: 'bld_station', text: 'Titelleiste neu: Bereiche getrennt, Knöpfe als Symbole, erwarteter Tagesumsatz mit Einnahmen/Ausgaben beim Hovern' },
+      { kind: 'besser', icon: 'bld_lamp', text: 'Tooltips im Spiel-Look' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Fahrplan, Verträge und Forschung halten die Zeit nicht mehr an; Fahrplan zeigt die Endstädte' },
+      { kind: 'besser', icon: 'signal_W', text: 'Störung: beim Hovern kleines Fenster mit „Störtrupp schicken“' },
+      { kind: 'besser', icon: 'tool_wire', text: 'Oberleitung und Unterführung: mögliche Felder werden hervorgehoben, offene Oberleitung rot' },
+      { kind: 'besser', icon: 'ri_estw', text: 'Forschung: Bäume gleich groß, Reiter links' },
+    ],
+  },
+  {
     version: '0.17', date: '22.10.2026', title: 'Drei Forschungsbäume',
     items: [
       { kind: 'neu', icon: 'signal_E', text: 'Forschung in drei Bäumen: Stellwerk, Verschönerungsverein, Kaufmännische Abteilung – je Baum eine Forschung gleichzeitig' },

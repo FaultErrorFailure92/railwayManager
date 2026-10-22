@@ -63,6 +63,8 @@ export interface Building {
   decor: boolean;
   /** Bahnhofsname (Empfangsgebäude) */
   name?: string;
+  /** gespiegelt/gedreht (nur quadratische Gebäude) */
+  rot?: boolean;
 }
 
 type XY = { x: number; y: number };
@@ -249,15 +251,25 @@ export class Grid {
 
   // ------------------------------------------------------------ Streckenausbau
   /** Netzbetreiber baut das 2. Streckengleis außerhalb deiner Fläche */
-  expandLine() {
+  expandLine(wire = false) {
     if (this.mainRows.includes(SECOND_ROW)) return;
+    let blocked = 0;
     for (let x = 0; x < this.w; x++) {
       const c = this.get(x, SECOND_ROW)!;
-      if (this.isOwned(x, SECOND_ROW)) continue;
+      if (this.isOwned(x, SECOND_ROW)) {
+        // auf eigenem Gelände: freie Felder gleich mitverlegen (gehört dann dir), Bahnsteige/Gebäude bleiben
+        if (c.track || c.piece !== null) continue;
+        if (c.platform || (c.building !== null && !this.buildings.get(c.building)?.decor)) { blocked++; continue; }
+        if (c.building !== null) this.removeBuilding(c.building);
+        c.track = true;
+        c.wire = wire;
+        continue;
+      }
       if (c.building !== null) this.removeBuilding(c.building);
       Object.assign(c, { track: true, fixed: true, platform: false });
     }
     this.mainRows.push(SECOND_ROW);
+    return blocked;
   }
 
   // ------------------------------------------------------------ Gleisteile

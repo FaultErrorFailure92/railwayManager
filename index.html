@@ -37,21 +37,29 @@
       <button class="btn" data-speed="8" title="Maximal">×8</button>
     </div>
     <div class="sep"></div>
-    <div class="stat" title="Kasse"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span><span class="loan hidden" id="loan" title="Automatischer Kredit – täglich Zinsen, bei −50 000 € ist Schluss">KREDIT</span></div>
-    <div class="stat stars" id="stars-wrap" title="Bahnhofs-Bewertung"><span id="stars">★★★☆☆</span></div>
-    <div class="stat daycost" title="Laufende Kosten pro Tag (Instandhaltung + Zinsen)"><span id="daycost">−0 €/Tag</span></div>
-    <div class="stat" title="Pünktlichkeit"><img src="assets/gen/ui/check.png" alt="" /><span id="punct">–</span></div>
-    <div class="stat" title="Fahrgäste gesamt"><img src="assets/gen/ui/person.png" alt="" /><span id="pax">0</span></div>
-    <div class="stat" title="Stimmung am Bahnsteig"><img src="assets/gen/ui/smile.png" alt="" /><span id="mood">–</span></div>
-    <div class="sep"></div>
-    <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
-    <button class="btn small tb" id="btn-timetable" title="Fahrplan (T)"><img src="assets/gen/ui/clock.png" alt="" />Fahrplan</button>
-    <button class="btn small tb" id="btn-stats" title="Statistik und Erfolge"><img src="assets/gen/ui/check.png" alt="" />Stats</button>
-    <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" />Verträge<span class="tb-warn" id="ct-warn"></span></button>
+    <div class="tb-group">
+      <div class="stat money" id="money-wrap"><img src="assets/gen/ui/coin.png" alt="" /><span id="money">0</span><span class="loan hidden" id="loan">KREDIT</span></div>
+      <div class="stat daycost" id="daycost-wrap"><span id="daycost">≈ +0 €/Tag</span></div>
+    </div>
+    <div class="tb-group">
+      <div class="stat stars" id="stars-wrap" title="Bahnhofs-Bewertung"><span id="stars">★★★☆☆</span></div>
+      <div class="stat w-punct" title="Pünktlichkeit"><img src="assets/gen/ui/check.png" alt="" /><span id="punct">–</span></div>
+      <div class="stat w-pax" title="Fahrgäste gesamt"><img src="assets/gen/ui/person.png" alt="" /><span id="pax">0</span></div>
+      <div class="stat w-mood" title="Stimmung am Bahnsteig"><img src="assets/gen/ui/smile.png" alt="" /><span id="mood">–</span></div>
+    </div>
     <div class="grow"></div>
-    <button class="btn small" id="btn-sound" title="Geräusche an/aus">Ton an</button>
-    <button class="btn small" id="btn-save" title="Speichern (F5 / Strg+S)">Speichern</button>
-    <button class="btn small" id="btn-menu" title="Hauptmenü (Esc)">Menü</button>
+    <div class="tb-group btns">
+      <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
+      <button class="btn small tb" id="btn-timetable" title="Fahrplan (T)"><img src="assets/gen/ui/clock.png" alt="" /></button>
+      <button class="btn small tb" id="btn-stats" title="Statistik und Erfolge"><img src="assets/gen/ui/check.png" alt="" /></button>
+      <button class="btn small tb" id="btn-mail" title="Postfach (P)"><svg viewBox="0 0 12 12" width="20" height="20" shape-rendering="crispEdges" fill="currentColor"><path d="M1 3h10v7H1zM2 4v1l4 3 4-3V4L6 7z" fill-rule="evenodd"/></svg><span class="tb-count hidden" id="mail-count">0</span></button>
+      <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" /><span class="tb-warn" id="ct-warn"></span></button>
+    </div>
+    <div class="tb-group btns">
+      <button class="btn small tb" id="btn-sound" title="Geräusche an/aus">Ton an</button>
+      <button class="btn small tb" id="btn-save" title="Speichern (F5 / Strg+S)"><svg viewBox="0 0 12 12" width="20" height="20" shape-rendering="crispEdges" fill="currentColor"><path d="M1 1h8l2 2v8H1zM3 2v3h5V2zM3 7v3h6V7z"/></svg></button>
+      <button class="btn small tb" id="btn-menu" title="Hauptmenü (Esc)"><svg viewBox="0 0 12 12" width="20" height="20" shape-rendering="crispEdges" fill="currentColor"><path d="M1 2h10v2H1zM1 5h10v2H1zM1 8h10v2H1z"/></svg></button>
+    </div>
   </header>
 
   <aside id="right">
@@ -100,8 +108,7 @@
         <button class="btn" data-close="research">✕</button>
       </div>
       <div class="sc-hint">Forschungspunkte gibt es für pünktliche Züge und erledigte Aufträge. In jedem Baum kann eine Forschung gleichzeitig laufen.</div>
-      <div class="rs-tabs" id="rs-tabs"></div>
-      <div id="rs-tree"></div>
+      <div class="rs-body"><div class="rs-tabs" id="rs-tabs"></div><div id="rs-tree"></div></div>
     </div>
   </div>
 
@@ -171,6 +178,22 @@
   </div>
   <div id="traincard" class="panel hidden"></div>
 
+  <div id="pause" class="hidden">
+    <div class="panel dialog pause-box">
+      <div class="cl-head"><h2>PAUSE</h2><button class="btn" id="p-close">✕</button></div>
+      <div id="p-body"></div>
+      <div class="dc-btns"><button class="btn big" id="p-continue">Weiterspielen</button><button class="btn" id="p-save">Speichern</button><button class="btn" id="p-main">Hauptmenü</button></div>
+    </div>
+  </div>
+
+  <div id="inbox" class="hidden">
+    <div class="panel cl-box ib-box">
+      <div class="cl-head"><h2>POSTFACH</h2><button class="btn" id="ib-close">✕</button></div>
+      <div class="ib-list" id="ib-list"></div>
+    </div>
+  </div>
+  <div id="toasts"></div>
+
   <div id="changelog" class="hidden">
     <div class="panel cl-box">
       <div class="cl-head"><h2>WAS IST NEU?</h2><button class="btn" id="cl-close">✕</button></div>
@@ -223,7 +246,9 @@
       <div class="panel m-help hidden" id="m-helpbox">
         <div><b>Maus ziehen</b> Karte verschieben</div>
         <div><b>Mausrad</b> Zoom</div>
-        <div><b>1–0, B, N, X</b> Werkzeuge</div>
+        <div><b>1–9</b> Baumenüs, danach Ziffer = Eintrag</div>
+        <div><b>Q</b> Gebäude drehen</div>
+        <div><b>Abriss</b> Fläche aufziehen</div>
         <div><b>T</b> Fahrplan</div>
         <div><b>R</b> Variante / Richtung</div>
         <div><b>Rechtsklick</b> Abbrechen</div>
@@ -240,6 +265,12 @@
       <h2>Deine Bahngesellschaft</h2>
       <p>Wie soll dein Unternehmen heißen?</p>
       <input id="name-input" maxlength="28" placeholder="z.B. Donaubahn AG" />
+      <div class="pl-box hidden" id="pl-box">
+        <p>Und wer leitet sie?</p>
+        <div class="pl-row"><select id="pl-title"><option value="">–</option><option value="Frau">Frau</option><option value="Herr">Herr</option></select>
+          <input id="pl-name" maxlength="24" placeholder="Dein Name" /></div>
+        <div class="pl-avatars" id="pl-avatars"></div>
+      </div>
       <label class="tut-row hidden" id="tut-row"><input type="checkbox" id="tut-check" checked /> Tutorial: die ersten Aufträge führen dich durchs Spiel</label>
       <button class="btn big" id="name-ok">Los geht's!</button>
     </div>
@@ -247,5 +278,9 @@
 
   <script type="module" src="/src/main.ts"></script>
   <div id="rs-tip" class="panel"></div>
+  <div id="tt"></div>
+  <div id="fault-pop" class="panel hidden"></div>
+  <div id="train-menu" class="panel hidden"></div>
+  <div id="st-pop" class="hidden"></div>
 </body>
 </html>

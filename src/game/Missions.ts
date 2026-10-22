@@ -35,6 +35,12 @@ export interface Check { label: string; done: boolean }
 /** Zähler-Schritt: „3 Züge … (1/3)“ */
 const count = (label: string, n: number, of: number): Check => ({ label: `${label} (${Math.min(n, of)}/${of})`, done: n >= of });
 const ownSwitch = (g: Game) => [...g.grid.pieces.values()].some((p) => !g.grid.fixedPieces.has(p.id) && PIECES[p.key].group === 'switch');
+/** 2. Streckengleis auf eigenem Gelände ohne Lücke */
+const secondDone = (g: Game) => !Array.from({ length: g.grid.w }, (_, x) => x)
+  .some((x) => g.grid.isOwned(x, SECOND_ROW) && !g.grid.get(x, SECOND_ROW)!.track && g.grid.get(x, SECOND_ROW)!.piece === null);
+/** Züge vom 2. Gleis kommen an einen Bahnsteig: zwei eigene Gleiswechsel oder Bahnsteig direkt am 2. Gleis */
+const hasXovers = (g: Game) => [...g.grid.pieces.values()].filter((p) => !g.grid.fixedPieces.has(p.id) && p.key.startsWith('xover')).length >= 2
+  || g.grid.cells.some((c, k) => c.platform && g.grid.xy(k).y === SECOND_ROW + 1);
 const hasBuilding = (g: Game, ...keys: string[]) => [...g.grid.buildings.values()].some((b) => keys.includes(b.key));
 
 /** Spannweite der eigenen Fläche entlang der Strecke */
@@ -96,7 +102,8 @@ export const MISSIONS: Mission[] = [
       return [{ x: x0 + 1, y: MAIN_ROW }, { x: x1 - 1, y: MAIN_ROW }];
     },
     checks: (g, s) => [
-      { label: 'Signal setzen', done: g.grid.cells.some((c, k) => (c.signal || c.signalW) && !c.fixed && g.grid.isOwned(g.grid.xy(k).x, g.grid.xy(k).y)) },
+      // eigenes Signal: auf eigener Fläche, nicht an den Kreuzungsstellen des Netzbetreibers (Streckengleis zählt!)
+      { label: 'Signal setzen', done: g.grid.cells.some((c, k) => { const p = g.grid.xy(k); return (c.signal || c.signalW) && g.grid.isOwned(p.x, p.y) && !g.grid.isLoopCell(p.x, p.y); }) },
       count('Züge in Folge pünktlich', s.streak, 5),
     ],
     unlock: ['switch', 'track', 'curve', 'diag', 'research'],
@@ -134,13 +141,14 @@ export const MISSIONS: Mission[] = [
   },
   {
     title: 'Wendezüge',
-    short: 'Wendezug-Unternehmen wählen, 3 Wendezüge bei dir wenden lassen',
+    short: 'Wendezug-Unternehmen wählen, 3 Wendezüge bei dir wenden lassen (sie wenden direkt am Bahnsteig)',
     reward: 2500,
     progress: (s, b) => {
       const n = s.turnbacks - b.turnbacks;
       return { value: Math.min(1, n / 3), text: `${Math.min(n, 3)}/3` };
     },
-    tool: () => ({ tool: 'track' }),
+    // Wendezüge wenden am Bahnsteig – kein Gleisbau nötig; ohne Vertrag die Ausschreibung erneut zeigen
+    tool: () => null,
     onStart: (g) => g.requestTurnback(),
     checks: (g, s, b) => [
       { label: 'Wendezug-Unternehmen wählen', done: Object.values(OPERATORS).some((o) => o.turnback && g.contracts[o.id].status === 'active') },
@@ -158,11 +166,12 @@ export const MISSIONS: Mission[] = [
       const n = s.secondRuns - b.secondRuns;
       return { value: Math.min(1, n / 5), text: `${Math.min(n, 5)}/5` };
     },
-    tool: research('double', { tool: 'track' }),
+    tool: (g) => !g.researched('double') ? { tool: 'research', variant: 'double' } : !secondDone(g) ? { tool: 'track' }
+      : !hasXovers(g) ? { tool: 'switch', variant: 'xover_up' } : null,
     checks: (g, s, b) => [
       { label: '„Doppelt hält besser“ erforschen', done: g.researched('double') },
-      { label: '2. Streckengleis durchgehend verlegen', done: g.researched('double') && !Array.from({ length: g.grid.w }, (_, x) => x)
-        .some((x) => g.grid.isOwned(x, SECOND_ROW) && !g.grid.get(x, SECOND_ROW)!.track && g.grid.get(x, SECOND_ROW)!.piece === null) },
+      { label: '2. Streckengleis durchgehend verlegen', done: g.researched('double') && secondDone(g) },
+      { label: 'Gleiswechsel an beiden Bahnhofsenden (oder Bahnsteig am 2. Gleis)', done: hasXovers(g) },
       count('Züge auf dem 2. Gleis', s.secondRuns - b.secondRuns, 5),
     ],
     hint: (g) => {
