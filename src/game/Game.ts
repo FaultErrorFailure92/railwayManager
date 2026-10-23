@@ -1,7 +1,7 @@
 import { BANK, BoardState, dailyLetter, newBoard, Sender, welcomeLetter } from './Board';
 import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
 import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
-import { priceMod, acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
+import { PARK_FEE, priceMod, acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState, ResearchTree } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
@@ -12,7 +12,7 @@ import { Goal, goalProgress, newGoals } from './Goals';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
-import { FREE_PLAY, Mission, MISSIONS, ToolId, TUTORIAL_MISSIONS } from './Missions';
+import { FREE_PLAY, Mission, MISSIONS, MISSIONS_VERSION, ToolId, TUTORIAL_MISSIONS } from './Missions';
 
 export interface Stats {
   handled: number;
@@ -121,6 +121,8 @@ export interface GameSave {
   crew?: number;
   inbox?: InboxEntry[];
   player?: Game['player'];
+  missionsV?: number;
+  missionMark?: number;
   offers?: Game['offers'];
   news?: Game['news'];
 }
@@ -214,6 +216,8 @@ export class Game {
   }
   /** Postfach: Briefe, Zeitung, Anfragen */
   inbox: InboxEntry[] = [];
+  /** Auftrag: Zählerstand beim Erreichen einer Bedingung (z. B. Signale gesetzt) */
+  missionMark?: number;
   /** Gebäude gedreht bauen (Taste Q) */
   buildRot = false;
   /** drehbar: quadratische Gebäude */
@@ -253,7 +257,7 @@ export class Game {
       }
       Object.assign(this, {
         company: save.company, money: save.money, stats: { ...newStats(), ...save.stats }, missionBase: { ...newStats(), ...save.missionBase },
-        missionIdx: save.missionIdx, log: save.log,
+        missionIdx: save.missionIdx + ((save.missionsV ?? 1) < 2 && save.missionIdx >= 3 ? 1 : 0), log: save.log,
       });
       Object.assign(this.satisfaction, save.satisfaction);
       save.unlocked.forEach((u) => this.unlocked.add(u));
@@ -272,6 +276,8 @@ export class Game {
     }
     this.sim.contractActive = (id) => this.contracts[id].status === 'active';
     this.sim.taktOf = (id) => (this.contracts[id].status === 'none' ? 0 : this.contracts[id].takt);
+    this.sim.nightLines = (id) => this.contracts[id].lines ?? 1;
+    this.sim.serviceOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].service;
     if (save && !save.offers) this.migrateContracts(save);
     if (save?.offers) Object.assign(this.offers, save.offers);
     if (save?.news) Object.assign(this.news, save.news);
@@ -284,6 +290,7 @@ export class Game {
     if (save?.crew) this.crew = save.crew;
     if (save?.inbox) this.inbox = save.inbox;
     if (save?.player) this.player = save.player;
+    if (save?.missionMark !== undefined) this.missionMark = save.missionMark;
     this.faults.forEach((f) => this.sim.faultCells.add(f.k));
     this.applyWeather();
     this.clampTakts();
@@ -332,7 +339,7 @@ export class Game {
   save(): GameSave {
     const g = this.grid;
     return {
-      v: 5,
+      v: 5, missionsV: MISSIONS_VERSION, missionMark: this.missionMark,
       company: this.company,
       cells: g.cells.map((c) => (+c.track) | (+c.fixed << 1) | (+c.platform << 2) | (+c.signal << 3) | (+c.signalW << 4)
         | (+c.wire << 5) | (+c.siding << 6) | (+c.road << 7) | (+c.shunt << 8) | (+c.shuntSig << 9)),
@@ -544,7 +551,9 @@ export class Game {
       if (ev.type === 'park') {
         this.stats.parks++;
         const where = { siding: 'Abstellgleis', remise: 'Remise', workshop: 'Werkstatt' }[ev.kind];
-        this.addLog(`${t.number} abgestellt (${where})`, 'info');
+        const fee = this.contracts[t.op.id]?.service ? PARK_FEE[ev.kind] : 0;
+        if (fee) { this.money += fee; this.fx.push({ amount: fee, x: 0, y: 0, train: t.id, label: 'Abstellen' }); }
+        this.addLog(`${t.number} abgestellt (${where})${fee ? ` · +${fee} €` : ''}`, 'info');
         continue;
       }
       if (ev.type === 'service') {
@@ -732,6 +741,15 @@ export class Game {
   /** Takt um eine Stufe ändern (dir −1 = öfter, +1 = seltener) */
   stepTakt(op: OperatorId, dir: number) {
     const c = this.contracts[op];
+    // Nachtzug: Linien statt Takt (dir < 0 = mehr)
+    if (OPERATORS[op].kind === 'night') {
+      const n = Math.max(1, Math.min(3, (c.lines ?? 1) + (dir < 0 ? 1 : -1)));
+      if (n === (c.lines ?? 1)) return;
+      this.satisfaction[op] = Math.max(0, Math.min(100, this.satisfaction[op] + (n > (c.lines ?? 1) ? 4 : -6)));
+      c.lines = n;
+      this.sim.retime(op);
+      return;
+    }
     const steps = TAKT_STEPS.filter((m) => m >= this.minTakt);
     const i = steps.indexOf(c.takt);
     const next = steps[Math.max(0, Math.min(steps.length - 1, (i < 0 ? 0 : i) + (dir < 0 ? 1 : -1)))];
@@ -1329,6 +1347,10 @@ export class Game {
     this.uiEvents.push({ type: 'mission', title: m.title, reward: m.reward, unlocked: m.unlock, fp: m.fp });
     this.addLog(`Auftrag „${m.title}“ erledigt`, 'good');
     this.missionIdx++;
+    this.missionMark = undefined;
+    // Ende des Tutorials: Brief vom Vorstand
+    if (this.missionIdx === TUTORIAL_MISSIONS) this.uiEvents.push({ type: 'letter', mood: 'good', title: 'Einschulung abgeschlossen!',
+      text: `<p>${this.salutation()}</p><p>die Einschulung ist geschafft – herzlichen Glückwunsch! Sie haben einen Bahnhof eröffnet, Signale gesetzt, geforscht, Land gekauft, ein zweites Bahnsteiggleis gebaut und Wendezüge abgefertigt.</p><p>Ab jetzt läuft der <b>richtige Betrieb</b>: mehr Züge, größere Aufträge, eigene Entscheidungen. Der Vorstand traut Ihnen das zu. Enttäuschen Sie uns nicht – und vergessen Sie die Pünktlichkeit nicht.</p>` });
     this.stats.streak = 0;
     this.stats.maxDwellSince = 0;
     this.missionBase = structuredClone(this.stats);
@@ -1534,8 +1556,8 @@ export class Game {
         const west = variant.endsWith('W');
         if (west ? c.signalW : c.signal) return fail('Hier steht schon ein Signal');
         const shuntSig = variant.startsWith('S');
-        if (shuntSig && !c.shunt) return fail('Rangiersignale nur im Verschubbereich');
-        if (shuntSig && !this.researched('shunt')) return fail('Verschubbereiche erst erforschen');
+        if (shuntSig && !c.shunt) return fail('Rangiersignale nur im Rangierbereich');
+        if (shuntSig && !this.researched('shunt')) return fail('Rangierbereiche erst erforschen');
         if (c.shuntSig !== shuntSig && (c.signal || c.signalW)) return fail('Hier steht schon ein anderes Signal');
         cost = shuntSig ? COST.shuntSignal : COST.signal;
         break;
@@ -1622,7 +1644,7 @@ export class Game {
           if (!cell.track || cell.piece !== null) return fail('Braucht ein gerades Gleis darunter', fp);
           if (cell.building !== null) return fail('Hier steht schon etwas', fp);
           if (cell.signal || cell.signalW) return fail('Signal im Weg', fp);
-          if (variant === 'bld_wash' && !cell.shunt) return fail('Waschanlage nur im Verschubbereich – Gleis zuerst als Verschubbereich markieren', fp);
+          if (variant === 'bld_wash' && !cell.shunt) return fail('Waschanlage nur im Rangierbereich – Gleis zuerst als Rangierbereich markieren', fp);
           if (this.reserved(c.x, c.y)) return fail('Gleis ist gerade befahren', fp);
         }
         cost = def.cost;
@@ -1672,6 +1694,15 @@ export class Game {
 
   /** Bahnsteiggleise mit Zugang, nummeriert von Nord nach Süd, West nach Ost */
   platformRuns() { return this.net.runs.filter((r) => r.accessible).sort((a, b) => a.row - b.row || a.x0 - b.x0); }
+
+  /** Vertrags-Zusatz „Abstellen & Pflege“ umschalten */
+  toggleService(op: OperatorId) {
+    const c = this.contracts[op];
+    if (c.status !== 'active' || !OPERATORS[op].needsStop || OPERATORS[op].kind === 'freight') return;
+    c.service = !c.service;
+    this.sim.retime(op);
+    this.addLog(`${OPERATORS[op].name}: Abstellen & Pflege ${c.service ? 'vereinbart' : 'gekündigt'}`, 'info');
+  }
 
   /** Zug gegen Gebühr aus dem Verkehr nehmen (auch angekündigte) */
   removeTrain(id: number) {

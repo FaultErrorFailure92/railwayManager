@@ -47,12 +47,16 @@ export function buildDemo(g: Game) {
     ['Denkmal', 55, 12, 'bld_statue'], ['Wandbild', 56, 13, 'bld_mural'], ['Christbaum', 42, 12, 'bld_xmas'], ['Blumen', 49, 12, 'bld_flowers'],
     ['Straßenlaterne', 57, 11, 'bld_streetlamp'],
   ] as [string, number, number, string][]) B(n, 'building', [{ x, y }], k);
-  // Abstellgleis mit Waschanlage im Verschubbereich, östlich hinter dem Gleiswechsel
+  // Abstellgleis mit Waschanlage im Rangierbereich, östlich hinter dem Gleiswechsel
   B('Stumpfgleis', 'track', row(62, 72, 16));
   B('Fahrdraht Stumpf', 'wire', row(62, 72, 16));
-  B('Verschub', 'facility', row(62, 65, 16), 'mark_shunt');
+  B('Rangierbereich', 'facility', row(62, 65, 16), 'mark_shunt');
   B('Waschanlage', 'facility', [{ x: 63, y: 16 }], 'bld_wash');
   B('Abstellgleis', 'facility', row(66, 72, 16), 'mark_siding');
+  // Remise westlich hinter dem Gleiswechsel
+  B('Stumpfgleis West', 'track', row(27, 33, 16));
+  B('Fahrdraht West', 'wire', row(27, 33, 16));
+  B('Remise', 'facility', [{ x: 27, y: 16 }], 'bld_remise');
   g.setCrew(2);
   // Bahnhof gleich taufen, kein Namensdialog
   for (const b of g.grid.buildings.values()) if (b.key === 'bld_station') g.stationName(b.id, 'Demohausen');
@@ -64,6 +68,8 @@ export function buildDemo(g: Game) {
     c.takt = 60;
     g.sim.retime(id);
   }
+  // Abstellen & Pflege für Regional-, S-Bahn und Fernzug
+  for (const id of ['ro', 'sb', 'wx'] as OperatorId[]) g.toggleService(id);
   g.offers.open = null;
   g.offers.done.push('regio', 'freight');
   // Bau- und Startgeld nicht als Tagesumsatz zählen

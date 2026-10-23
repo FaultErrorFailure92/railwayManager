@@ -14,7 +14,14 @@ export interface Contract {
   talkAfter: number;
   /** Anfrage abgelehnt: bis dann keine neue Anfrage */
   declinedUntil?: number;
+  /** Zusatz „Abstellen & Pflege“: Züge enden/wenden hier, werden abgestellt, gereinigt, gewaschen, repariert */
+  service?: boolean;
+  /** Nachtzug: Anzahl Linien (je Nacht ein Zug pro Richtung und Linie) */
+  lines?: number;
 }
+
+/** Abstellgebühr je Abstellung (Zusatz „Abstellen & Pflege“) */
+export const PARK_FEE: Record<'siding' | 'remise' | 'workshop', number> = { siding: 40, remise: 80, workshop: 80 };
 
 /** Durchfahrt ohne Vertrag: nur Trassenentgelt */
 export const TRANSIT_FEE = 40;

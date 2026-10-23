@@ -35,6 +35,19 @@ export interface Check { label: string; done: boolean }
 /** Zähler-Schritt: „3 Züge … (1/3)“ */
 const count = (label: string, n: number, of: number): Check => ({ label: `${label} (${Math.min(n, of)}/${of})`, done: n >= of });
 const ownSwitch = (g: Game) => [...g.grid.pieces.values()].some((p) => !g.grid.fixedPieces.has(p.id) && PIECES[p.key].group === 'switch');
+/** eigene Blocksignale je Richtung (nicht an den Kreuzungsstellen des Netzbetreibers) */
+const blockSignals = (g: Game) => {
+  let e = false, w = false;
+  g.grid.cells.forEach((c, k) => {
+    if (!c.signal && !c.signalW) return;
+    const p = g.grid.xy(k);
+    if (!g.grid.isOwned(p.x, p.y) || g.grid.isLoopCell(p.x, p.y)) return;
+    if (c.signal) e = true;
+    if (c.signalW) w = true;
+  });
+  return { e, w, both: e && w };
+};
+
 /** 2. Streckengleis auf eigenem Gelände ohne Lücke */
 const secondDone = (g: Game) => !Array.from({ length: g.grid.w }, (_, x) => x)
   .some((x) => g.grid.isOwned(x, SECOND_ROW) && !g.grid.get(x, SECOND_ROW)!.track && g.grid.get(x, SECOND_ROW)!.piece === null);
@@ -56,7 +69,10 @@ const research = (id: ResearchId, then: { tool: ToolId; variant?: string } | nul
 const hasStation = (g: Game) => [...g.grid.buildings.values()].some((b) => isStation(b.key));
 
 /** so viele Aufträge am Anfang sind das (abwählbare) Tutorial */
-export const TUTORIAL_MISSIONS = 5;
+export const TUTORIAL_MISSIONS = 6;
+/** Stand der Auftragsliste (für alte Spielstände: eingefügte Aufträge) */
+export const MISSIONS_VERSION = 2;
+const parcels = (g: Game) => g.grid.owned.filter(Boolean).length;
 
 export const MISSIONS: Mission[] = [
   {
@@ -92,20 +108,35 @@ export const MISSIONS: Mission[] = [
   },
   {
     title: 'Blockabstand',
-    short: 'Signale setzen, 5 Züge in Folge pünktlich',
+    short: 'Je ein Signal für beide Fahrtrichtungen hinter den Bahnsteig-Enden setzen, dann 5 Züge in Folge pünktlich',
     reward: 2000,
-    progress: (s) => ({ value: Math.min(1, s.streak / 5), text: `${Math.min(s.streak, 5)}/5` }),
-    tool: () => ({ tool: 'signal' }),
-    hint: (g) => {
-      if (g.grid.cells.some((c) => c.signal || c.signalW)) return [];
-      const { x0, x1 } = ownedSpan(g);
-      return [{ x: x0 + 1, y: MAIN_ROW }, { x: x1 - 1, y: MAIN_ROW }];
+    progress: (s, _b, g) => {
+      if (!blockSignals(g).both) return { value: 0, text: '0/5' };
+      // erst ab dem Signal-Bau zählen
+      g.missionMark ??= s.handled;
+      const n = Math.min(s.streak, s.handled - g.missionMark);
+      return { value: Math.min(1, n / 5), text: `${Math.min(n, 5)}/5` };
     },
-    checks: (g, s) => [
-      // eigenes Signal: auf eigener Fläche, nicht an den Kreuzungsstellen des Netzbetreibers (Streckengleis zählt!)
-      { label: 'Signal setzen', done: g.grid.cells.some((c, k) => { const p = g.grid.xy(k); return (c.signal || c.signalW) && g.grid.isOwned(p.x, p.y) && !g.grid.isLoopCell(p.x, p.y); }) },
-      count('Züge in Folge pünktlich', s.streak, 5),
-    ],
+    tool: (g) => { const b = blockSignals(g); return { tool: 'signal', variant: !b.e ? 'E' : !b.w ? 'W' : undefined }; },
+    hint: (g) => {
+      const b = blockSignals(g);
+      const ps = platforms(g).filter((p) => p.y === MAIN_ROW - 1 || p.y === MAIN_ROW + 1);
+      if (!ps.length) return [];
+      const x0 = Math.min(...ps.map((p) => p.x)), x1 = Math.max(...ps.map((p) => p.x));
+      // → hinter dem östlichen Bahnsteigende, ← hinter dem westlichen
+      if (!b.e) return [{ x: x1 + 2, y: MAIN_ROW }];
+      if (!b.w) return [{ x: x0 - 2, y: MAIN_ROW }];
+      return [];
+    },
+    checks: (g, s) => {
+      const b = blockSignals(g);
+      const n = b.both && g.missionMark !== undefined ? Math.min(s.streak, s.handled - g.missionMark) : 0;
+      return [
+        { label: 'Signal → (Fahrtrichtung Ost) östlich vom Bahnsteig', done: b.e },
+        { label: 'Signal ← (Fahrtrichtung West) westlich vom Bahnsteig', done: b.w },
+        count('Züge danach in Folge pünktlich', n, 5),
+      ];
+    },
     unlock: ['switch', 'track', 'curve', 'diag', 'research'],
     level: 3,
     fp: 5,
@@ -119,6 +150,22 @@ export const MISSIONS: Mission[] = [
     unlock: [],
     level: 3,
     fp: 0,
+  },
+  {
+    title: 'Mehr Platz',
+    short: 'Mit dem Werkzeug „Land kaufen“ eine gelbe Parzelle neben deinem Gelände kaufen',
+    reward: 1500,
+    onStart: (g) => { g.missionMark = parcels(g); },
+    progress: (_s, _b, g) => {
+      g.missionMark ??= parcels(g);
+      const n = Math.max(0, parcels(g) - g.missionMark);
+      return { value: Math.min(1, n), text: `${Math.min(n, 1)}/1` };
+    },
+    tool: () => ({ tool: 'land' }),
+    checks: (g) => [{ label: 'Eine Parzelle Land kaufen', done: g.missionMark !== undefined && parcels(g) > g.missionMark }],
+    unlock: [],
+    level: 3,
+    fp: 2,
   },
   {
     title: 'Zweites Bahnsteiggleis',
@@ -220,7 +267,7 @@ export const MISSIONS: Mission[] = [
     },
     checks: (g, s, b) => [
       { label: '„Schöner Wohnen für Züge“ (Remise) erforschen', done: g.researched('wash') || g.researched('remise') },
-      { label: 'Waschanlage (im Verschubbereich), Remise oder Werkstatt bauen', done: hasBuilding(g, 'bld_wash', 'bld_remise', 'bld_workshop') },
+      { label: 'Waschanlage (im Rangierbereich), Remise oder Werkstatt bauen', done: hasBuilding(g, 'bld_wash', 'bld_remise', 'bld_workshop') },
       count('Züge pflegen', s.services - b.services, 5),
     ],
     unlock: [],

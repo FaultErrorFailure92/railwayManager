@@ -66,7 +66,7 @@ const MENU: MenuGroup[] = [
     items: [tItem('platform'), ...vItems('access')] },
   { id: 'tracks', label: 'Gleisbau', key: '4', icon: 'track', help: 'Gleise ziehen (schräg = Diagonale), Kurven und Weichen klicken',
     items: [tItem('track'), ...vItems('curve'), ...vItems('switch')] },
-  { id: 'ops', label: 'Bahnbetrieb', key: '5', icon: 'signal_E', help: 'Signale, Oberleitung, Verschubbereiche und Gleismarkierungen',
+  { id: 'ops', label: 'Bahnbetrieb', key: '5', icon: 'signal_E', help: 'Signale, Oberleitung, Rangierbereiche und Gleismarkierungen',
     items: [...vItems('signal'), tItem('wire'), ...vItems('facility', (k) => k.startsWith('mark_'))] },
   { id: 'facility', label: 'Unterstützungsanlagen', key: '6', icon: 'bld_remise', help: 'Remise, Werkstatt, Waschanlage und Abrollberg auf Gleise setzen',
     items: vItems('facility', (k) => !k.startsWith('mark_')) },
@@ -297,6 +297,8 @@ export class Hud {
         const step = Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 5 : 1);
         this.g.setPrice(op, cls, this.g.contracts[op].price[cls] + step);
       }
+      const sv = t.closest('[data-svc]') as HTMLElement | null;
+      if (sv) this.g.toggleService(sv.dataset.svc as keyof typeof OPERATORS);
       const cr = t.closest('[data-crew]') as HTMLElement | null;
       if (cr) this.g.setCrew(this.g.crew + Number(cr.dataset.crew));
       const tk = t.closest('[data-takt]') as HTMLElement | null;
@@ -885,7 +887,7 @@ export class Hud {
       const late = sim.time - t.plannedSpawn;
       return late > 0 ? `wartet vor der Einfahrt +${Math.ceil(late / 60)} min` : `Einfahrt ${fmtTime(t.plannedSpawn)}`;
     }
-    if (t.state === 'dwell') return t.op.turnback && !t.turned ? 'hält, wendet hier' : 'hält am Bahnsteig';
+    if (t.state === 'dwell') return this.g.sim.isTurn(t) && !t.turned ? (t.ends ? 'endet hier (Pflege)' : 'hält, wendet hier') : 'hält am Bahnsteig';
     if (t.state === 'parked') {
       const where = t.parkKind === 'remise' ? 'in der Remise' : t.parkKind === 'workshop' ? 'in der Werkstatt' : 'auf dem Abstellgleis';
       return where;
@@ -900,7 +902,7 @@ export class Hud {
     return t.departure ? 'fährt sortiert ab' : 'fährt aus';
   }
 
-  private openTrainMenu(id: number, li: HTMLElement) {
+  private openTrainMenu(id: number, li: HTMLElement | null, at?: { x: number; y: number }) {
     const sim = this.g.sim;
     const t = sim.trains.find((x) => x.id === id) ?? sim.queue.find((x) => x.id === id);
     if (!t) return;
@@ -918,10 +920,15 @@ export class Hud {
       <button class="btn warn" data-tm="remove">Aus dem Verkehr nehmen (−${eur(CANCEL_COST)} €)</button>
       <small>Das Unternehmen ist darüber nicht erfreut.</small>`;
     m.classList.remove('hidden');
-    const r = li.getBoundingClientRect();
-    m.style.left = `${Math.max(8, r.left - m.offsetWidth - 12)}px`;
-    m.style.top = `${Math.min(window.innerHeight - m.offsetHeight - 8, r.top)}px`;
-    if (shown) this.scene()?.focusTrain(id);
+    if (li) {
+      const r = li.getBoundingClientRect();
+      m.style.left = `${Math.max(8, r.left - m.offsetWidth - 12)}px`;
+      m.style.top = `${Math.min(window.innerHeight - m.offsetHeight - 8, r.top)}px`;
+      if (shown) this.scene()?.focusTrain(id);
+    } else if (at) {
+      m.style.left = `${Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, at.x + 14))}px`;
+      m.style.top = `${Math.max(60, Math.min(window.innerHeight - m.offsetHeight - 8, at.y + 14))}px`;
+    }
   }
 
   /** was hilft, wenn ein Zug nicht weiterkommt */
@@ -1005,6 +1012,7 @@ export class Hud {
       $('company').dataset.tt = g.player.name ? `${g.player.title ? g.player.title + ' ' : ''}${g.player.name} · ${g.company} – klicken zum Ändern` : 'Namen ändern';
     }
     $('clock').textContent = fmtTime(sim.time);
+    $('day').textContent = `Tag ${Math.floor(sim.time / 86400) + 1}`;
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
     $('loan').classList.toggle('hidden', g.money >= 0);
@@ -1055,6 +1063,8 @@ export class Hud {
     $('ct-warn').textContent = warn ? '!' : '';
     this.renderScreen();
     $('btn-save').classList.toggle('saved', now < this.savedFlash);
+    // Zug auf der Karte angeklickt: gleiches Menü wie in der Zugliste
+    if (this.ui.trainClick) { const c = this.ui.trainClick; this.ui.trainClick = null; this.openTrainMenu(c.id, null, c); }
     this.updateFaultPop(now);
     this.updateStationPop();
     const unread = this.g.inbox.filter((e) => !e.read).length;
@@ -1157,12 +1167,12 @@ export class Hud {
     for (const tr of sim.trains) {
       if (tr.state === 'rolling' || tr.state === 'stored') { wagons++; continue; }
       const st = this.status(tr);
-      const arrow = tr.op.turnback && !tr.turned ? '↩' : tr.dir;
+      const arrow = this.g.sim.isTurn(tr) && !tr.turned ? '↩' : tr.dir;
       rows.push(this.row(tr.id, tr.op.color, tr.number, arrow, st, tr.waiting && !!tr.note));
     }
     for (const tr of sim.queue.slice(0, Math.max(3, 8 - rows.length))) {
       const late = sim.time - tr.plannedSpawn;
-      rows.push(this.row(tr.id, tr.op.color, tr.number, tr.op.turnback ? '↩' : tr.dir,
+      rows.push(this.row(tr.id, tr.op.color, tr.number, this.g.sim.isTurn(tr) ? '↩' : tr.dir,
         late > 0 ? `wartet +${Math.ceil(late / 60)} min` : fmtTime(tr.plannedSpawn), late > 60));
     }
     if (wagons) rows.push(`<li class="wag"><span class="dot" style="background:#9c4a2c"></span><span class="tnum">${wagons} Wagen</span><span class="tstat">im Rangierbahnhof</span></li>`);

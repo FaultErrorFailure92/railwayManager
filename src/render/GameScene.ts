@@ -35,8 +35,8 @@ export const VARIANTS: Partial<Record<ToolId, Variant[]>> = {
   signal: [
     { key: 'E', label: 'Signal für Fahrtrichtung →', icon: 'signal_E' },
     { key: 'W', label: 'Signal für Fahrtrichtung ←', icon: 'signal_W' },
-    { key: 'SE', label: 'Rangiersignal → (nur im Verschubbereich)', icon: 'shsig_E', cost: COST.shuntSignal },
-    { key: 'SW', label: 'Rangiersignal ← (nur im Verschubbereich)', icon: 'shsig_W', cost: COST.shuntSignal },
+    { key: 'SE', label: 'Rangiersignal → (nur im Rangierbereich)', icon: 'shsig_E', cost: COST.shuntSignal },
+    { key: 'SW', label: 'Rangiersignal ← (nur im Rangierbereich)', icon: 'shsig_W', cost: COST.shuntSignal },
   ],
   switch: PIECES_BY_GROUP('switch').map((d) => ({ key: d.key, label: d.label, icon: `piece_${d.key}`, cost: d.cost })),
   curve: PIECES_BY_GROUP('curve').map((d) => ({ key: d.key, label: d.label, icon: `piece_${d.key}`, cost: d.cost })),
@@ -47,7 +47,7 @@ export const VARIANTS: Partial<Record<ToolId, Variant[]>> = {
     { key: 'bridge', label: 'Fußgängerbrücke', icon: 'access_bridge', cost: COST.bridge, info: 'von Bahnsteig zu Bahnsteig ziehen' },
   ],
   facility: [
-    { key: 'mark_shunt', label: 'Verschubbereich markieren', icon: 'mark_shunt', cost: COST.marker, info: 'Schrittgeschwindigkeit, Rangiersignale erlaubt' },
+    { key: 'mark_shunt', label: 'Rangierbereich markieren', icon: 'mark_shunt', cost: COST.marker, info: 'Schrittgeschwindigkeit, Rangiersignale erlaubt' },
     { key: 'mark_siding', label: 'Abstellgleis markieren', icon: 'mark_siding', cost: COST.marker, info: 'Wendezüge warten hier ihre Wendezeit ab' },
     ...['bld_remise', 'bld_workshop', 'bld_wash', 'bld_hump'].map((k) => ({ key: k, label: BUILDINGS[k].label, icon: k, cost: BUILDINGS[k].cost, info: BUILDINGS[k].effect })),
     ...SORT_DESTS.map((d, i) => ({ key: `mark_sort${i}`, label: `Richtungsgleis ${d.name}`, icon: `mark_sort${i}`, cost: COST.marker, info: 'Wagen dieser Farbe rollen hierher' })),
@@ -65,6 +65,8 @@ export interface UiState {
   mouse: XY;
   /** Hauptmenü offen: Kamera schwenkt langsam */
   menu: boolean;
+  /** Zug auf der Karte angeklickt (Bildschirmposition) */
+  trainClick?: { id: number; x: number; y: number } | null;
 }
 
 export const variantOf = (ui: UiState, tool = ui.tool) => {
@@ -289,6 +291,8 @@ export class GameScene extends Phaser.Scene {
         const d = this.downAt;
         this.downAt = null;
         if (d && Math.hypot(p.x - d.x, p.y - d.y) < 5 && this.ui.tool === 'select') {
+          const tr = this.trainAt(p.x, p.y);
+          if (tr !== null) { this.ui.trainClick = { id: tr, x: p.x, y: p.y }; return; }
           const c = this.cellAt(p.x, p.y);
           if (c && this.g.repairFault(c.x, c.y)) return;
           const id = c ? this.g.grid.get(c.x, c.y)?.building : null;

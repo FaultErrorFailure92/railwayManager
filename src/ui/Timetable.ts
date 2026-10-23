@@ -42,7 +42,7 @@ export class Timetable {
   /** Planlinie eines Zuges */
   private planned(t: Train): [number, number][] {
     const from = t.dir === 'E' ? 0 : MAP_W, to = t.dir === 'E' ? MAP_W : 0;
-    if (!t.op.turnback || t.transit) return [[t.plannedSpawn, from], [t.plannedExit, to]];
+    if (!(t.op.turnback || t.ends) || t.transit) return [[t.plannedSpawn, from], [t.plannedExit, to]];
     // Wendezug: bis zum Bahnhof (Kartenmitte) und zurück
     const st = this.g.stations()[0];
     const sx = st ? st.x + 1.5 : MAP_W / 2;

@@ -597,3 +597,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 .tm-plat > div { display: flex; flex-wrap: wrap; gap: 4px; }
 .tm-plat .btn { font-size: 16px; padding: 2px 8px; }
 .tm-plat .btn.on { box-shadow: 0 0 0 2px var(--gold); color: var(--gold); }
+
+.ct-status { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.ct-svc { font-size: 15px; padding: 2px 6px; opacity: .8; }
+.ct-svc.on { background: #2f5a2a; color: #b8f0a8; opacity: 1; }
+
+.stat.clock .day { font-size: 17px; color: var(--muted); min-width: 52px; }

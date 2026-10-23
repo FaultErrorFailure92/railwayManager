@@ -68,7 +68,7 @@ export interface Edge {
   sortRun?: SortRun;
   atPlatform: boolean;
   diverging: boolean;
-  /** liegt (teilweise) im Verschubbereich */
+  /** liegt (teilweise) im Rangierbereich */
   shunt?: boolean;
   /** Ladegleis eines Privatbahn-Betriebs */
   industry?: string;
@@ -220,7 +220,7 @@ export class Network {
       });
     }
 
-    // --- Ladegleise der Privatbahn-Betriebe, Verschubbereiche
+    // --- Ladegleise der Privatbahn-Betriebe, Rangierbereiche
     for (const e of this.edges.values()) {
       if (e.cells.some((k) => g.cells[k].shunt)) e.shunt = true;
       const id = e.cells.length ? g.industryCells.get(e.cells[0]) : undefined;

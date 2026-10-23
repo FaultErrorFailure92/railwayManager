@@ -1,4 +1,4 @@
-import { acceptChance, cancelRisk, fairPrice, TRANSIT_FEE } from '../game/Contracts';
+import { acceptChance, cancelRisk, fairPrice, PARK_FEE, TRANSIT_FEE } from '../game/Contracts';
 import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
 import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES, treeOf } from '../game/Research';
@@ -129,7 +129,7 @@ export function contractsKey(g: Game) {
   return contractOps(g).map((o) => {
     const c = g.contracts[o.id];
     return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
-  }).join('|') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}`;
+  }).join('|') + Object.values(g.contracts).map((c) => `${+!!c.service}${c.lines ?? 1}`).join('') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}`;
 }
 
 /** Personal: eigene Instandhalter */
@@ -161,7 +161,11 @@ export function contractsHtml(g: Game) {
         <span class="${tone}">${eur(v)} €</span><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="10">+</button>
         <small>fair ${eur(fair)}</small></div>`;
     };
-    const takt = `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1">−</button>
+    const night = o.kind === 'night';
+    const takt = night ? `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1"${(c.lines ?? 1) <= 1 ? ' disabled' : ''}>−</button>
+      <span>${c.lines ?? 1} Linie${(c.lines ?? 1) > 1 ? 'n' : ''}</span><button class="btn" data-takt="${o.id}" data-d="-1"${(c.lines ?? 1) >= 3 ? ' disabled' : ''}>+</button>
+      <small>je Nacht 1 Zug pro Richtung</small></div>`
+      : `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1">−</button>
       <span>${c.takt} min</span><button class="btn" data-takt="${o.id}" data-d="-1"${c.takt <= g.minTakt ? ' disabled' : ''}>+</button>
       <small>${c.takt <= g.minTakt && g.minTakt > 15 ? 'öfter erst mit 2. Gleis' : ''}</small></div>`;
     let status: string;
@@ -176,11 +180,11 @@ export function contractsHtml(g: Game) {
     }
     return `<div class="ct-row${c.status === 'active' ? '' : ' off'}">
       <div class="ct-name"><span class="dot" style="background:${o.color}"></span><div><b>${o.name}</b><small>${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}</small></div></div>
-      <div><small class="ct-lbl">Takt</small>${takt}</div>
+      <div><small class="ct-lbl">${night ? 'Nachtlinien' : 'Takt'}</small>${takt}</div>
       <div><small class="ct-lbl">kurzer Zug</small>${price('short')}</div>
       <div><small class="ct-lbl">langer Zug</small>${price('long')}</div>
       <div class="ct-sat"><small class="ct-lbl">Zufriedenheit</small><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
-      <div class="ct-status">${status}</div>
+      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Abstellen &amp; Pflege</button>` : ''}</div>
     </div>`;
   }).join('');
   return crewHtml(g) + rows;
@@ -200,7 +204,7 @@ export function offerHtml(g: Game) {
       <div class="tc-sub">${TRAFFIC_LABEL[trafficClass(op)]} · ${op.category}</div>
       <div class="tc-cars">${cars}</div>
       <div class="tc-row"><span>Antrieb</span><span>${op.traction === 'electric' ? '⚡ elektrisch' : op.traction === 'steam' ? '♨ Dampf' : '⛽ Diesel'}</span></div>
-      <div class="tc-row"><span>Takt</span><span>alle ${Math.max(g.minTakt, op.takt)} min</span></div>
+      <div class="tc-row"><span>Takt</span><span>${op.kind === 'night' ? 'nachts, 1–3 Linien' : `alle ${Math.max(g.minTakt, op.takt)} min`}</span></div>
       <div class="tc-row"><span>Preis</span><span>${fair('short')} € / ${fair('long')} € lang</span></div>
       <div class="tc-row"><span>Halt</span><span>${op.needsStop ? (op.turnback ? 'endet hier, wendet' : 'hält bei dir') : 'fährt durch'}</span></div>
       <div class="of-space"></div>

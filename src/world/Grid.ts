@@ -31,7 +31,7 @@ export interface Cell {
   sortDest: number | null;
   /** Straße */
   road: boolean;
-  /** Verschubbereich: langsam, Rangiersignale erlaubt */
+  /** Rangierbereich: langsam, Rangiersignale erlaubt */
   shunt: boolean;
   /** Signale auf diesem Feld sind Rangiersignale */
   shuntSig: boolean;

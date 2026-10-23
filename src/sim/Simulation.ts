@@ -7,7 +7,7 @@ import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS } f
 export type Job =
   | { k: 'stop'; board: boolean; alight: boolean }
   | { k: 'exit'; dir?: Dir }
-  | { k: 'park'; until: number; wash?: boolean }
+  | { k: 'park'; until: number; wash?: boolean; need?: ParkKind }
   | { k: 'hump' }
   | { k: 'load'; ind: string };
 
@@ -47,6 +47,8 @@ export interface Train {
   arrDelay?: number;
   /** hat gewendet (Wendezug) */
   turned?: boolean;
+  /** Pflegezug: endet hier (Vertrags-Zusatz „Abstellen & Pflege“), wird abgestellt und fährt zurück */
+  ends?: boolean;
   washed?: boolean;
   parkedAt?: number;
   parkKind?: ParkKind;
@@ -108,7 +110,7 @@ export interface SimSave {
 const SPAWN_HEAD = 152; // Kopf startet 8 Einheiten vor dem Kartenrand
 const PLAN_AHEAD = 90 * 60;
 const SHUNT_V = 1.4;
-/** Höchstgeschwindigkeit im Verschubbereich (≈ 25 km/h) */
+/** Höchstgeschwindigkeit im Rangierbereich (≈ 25 km/h) */
 const SHUNT_AREA_V = (6 * TILE) / 60;
 const ROLL_V = 2.2;
 const SORT_SLOT = 30 * 60;
@@ -138,6 +140,11 @@ export class Simulation {
   contractActive: (id: OperatorId) => boolean = () => true;
   /** Takt in Minuten je Unternehmen (0 = fährt nicht) – kommt aus den Verträgen */
   taktOf: (id: OperatorId) => number = () => 0;
+  /** Vertrags-Zusatz „Abstellen & Pflege“ aktiv? */
+  serviceOf: (id: OperatorId) => boolean = () => false;
+  /** Nachtzug-Linien laut Vertrag (1–3) */
+  nightLines: (id: OperatorId) => number = () => 1;
+  private serviceCount: Record<string, number> = {};
   /** Züge in einem Stau-Kreis (gegenseitig blockiert) */
   deadlock: number[] | null = null;
   /** längster Bahnsteig mit Zugang (Felder) – Züge werden höchstens so lang */
@@ -161,15 +168,33 @@ export class Simulation {
     const keepUntil = this.time + 600;
     this.queue = this.queue.filter((t) => t.op.id !== id || t.plannedSpawn <= keepUntil);
     const takt = this.taktOf(id);
-    if (takt) {
+    if (OPERATORS[id].kind === 'night') this.nextSpawn[id] = Math.floor(this.time / 86400) * 86400;
+    else if (takt) {
       const last = Math.max(-Infinity, ...this.queue.filter((t) => t.op.id === id).map((t) => t.plannedSpawn));
       this.nextSpawn[id] = Math.max(last + takt * 60, this.time + 300);
     }
     this.fillTimetable();
   }
 
+  /** Nachtzüge: kein Takt, sondern Linien zu festen Zeiten; ohne Vertrag fahren zwei Nachtzüge durch */
+  private fillNight(id: OperatorId) {
+    const op = OPERATORS[id];
+    const lines = this.contractActive(id) ? Math.max(1, Math.min(3, this.nightLines(id))) : 0;
+    const dayStart = (t: number) => Math.floor(t / 86400) * 86400;
+    if (this.nextSpawn[id] === undefined || this.nextSpawn[id] < dayStart(this.time)) this.nextSpawn[id] = dayStart(this.time);
+    while (this.nextSpawn[id] + 21 * 3600 < this.time + PLAN_AHEAD) {
+      const d = this.nextSpawn[id];
+      this.nextSpawn[id] += 86400;
+      const slots: [number, Dir][] = lines
+        ? Array.from({ length: lines }, (_, i): [number, Dir][] => [[d + (21.5 + i * 1.3) * 3600, 'E'], [d + (22.2 + i * 1.3) * 3600, 'W']]).flat()
+        : [[d + 23.25 * 3600, 'E'], [d + 24.75 * 3600, 'W']];
+      for (const [at, dir] of slots) if (at > this.time + 600) this.queue.push(this.createTrain(op, at, dir));
+    }
+  }
+
   fillTimetable() {
     for (const id of Object.keys(OPERATORS) as OperatorId[]) {
+      if (OPERATORS[id].kind === 'night') { this.fillNight(id); continue; }
       const takt = this.taktOf(id);
       if (!takt) continue;
       if (this.nextSpawn[id] === undefined || this.nextSpawn[id] < this.time) this.nextSpawn[id] = this.time + 300;
@@ -226,12 +251,17 @@ export class Simulation {
     const back: Dir = dir === 'E' ? 'W' : 'E';
     const vandal = at < this.vandalUntil && op.needsStop;
     // Vandalismus: Wendezüge mit Waschanlage enden und fahren zum Waschen, auch vor der Wendezeit-Stufe
-    const layover = contract && op.turnback && op.layover && (this.level >= LAYOVER_LEVEL || (vandal && this.hasWash())) ? Math.round(rnd(op.layover[0], op.layover[1])) : 0;
+    // Vertrags-Zusatz „Abstellen & Pflege“: Wendezüge stellen immer ab, andere Personenzüge enden jeder zweite hier
+    const service = contract && op.needsStop && op.kind !== 'freight' && !op.special && this.serviceOf(op.id);
+    const ends = service && !op.turnback && (this.serviceCount[op.id] = (this.serviceCount[op.id] ?? 0) + 1) % 2 === 0;
+    const turn = !!op.turnback || ends;
+    const span: [number, number] = op.layover ?? [20, 35];
+    const layover = contract && turn && (service || (op.layover && (this.level >= LAYOVER_LEVEL || (vandal && this.hasWash())))) ? Math.round(rnd(span[0], span[1])) : 0;
     let jobs: Job[];
     if (op.industry && contract) jobs = [{ k: 'load', ind: op.industry }, { k: 'exit', dir: back }];
     else if (op.kind === 'sort') jobs = [{ k: 'hump' }];
     else if (!op.needsStop || !contract) jobs = [{ k: 'exit' }];
-    else if (op.turnback && layover) {
+    else if (turn && layover) {
       jobs = [{ k: 'stop', alight: true, board: false }, { k: 'park', until: 0 }, { k: 'stop', alight: false, board: true }, { k: 'exit', dir: back }];
     } else if (op.turnback) jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit', dir: back }];
     else jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit' }];
@@ -240,9 +270,9 @@ export class Simulation {
     const ind = op.industry && contract ? industryById(op.industry) : undefined;
     // Privatbahn: bis zum Ladegleis (plus Anschlussgleis) und zurück
     const indDist = ind ? 2 * ((dir === 'E' ? ind.x1 : MAP_W - ind.x0) + Math.abs(ind.row - MAIN_ROW) * 2 + 10) * TILE : 0;
-    const dist = ind ? indDist : op.turnback && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
+    const dist = ind ? indDist : turn && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
     const stopLoss = ind ? op.dwell + 2 * (op.vmax / (2 * ACC) + op.vmax / (2 * DEC)) + 600 + 60
-      : stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (op.turnback ? 60 : 0) : 0;
+      : stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (turn ? 60 : 0) : 0;
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
     const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80 + cars.filter((c) => c === 'dine').length * 30;
     const paxScale = base.length / op.cars.length;
@@ -258,6 +288,7 @@ export class Simulation {
       passengers, capacity, reserved: new Set(),
       dirt: Math.round(vandal ? rnd(75, 98) : rnd(5, 85)), wear: Math.round(rnd(0, 85)), layover,
       transit: !contract && op.kind !== 'sort',
+      ends: ends || undefined,
     };
   }
 
@@ -610,16 +641,26 @@ export class Simulation {
       case 'stop': {
         const ok = (e: Edge) => !!e.stopRun && e.stopRun.accessible && e.stopRun.len * TILE >= t.length;
         // vom Spieler festgelegter Bahnsteig, wenn erreichbar; sonst automatisch
+        // Durchgangszüge: nur Bahnsteige, von denen es in Fahrtrichtung weitergeht (kein Stumpfgleis)
+        const through = (c: Edge[][]) => {
+          const nx = t.jobs[t.jobs.indexOf(job) + 1];
+          if (this.isTurn(t) || t.departure || nx?.k !== 'exit' || nx.dir) return c;
+          const f = c.filter((p) => this.net.paths(p[p.length - 1].to, el).length > 0);
+          return f.length ? f : c;
+        };
         const pref = this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
         if (pref) {
-          const c = this.net.pathsTo(from, (e) => ok(e) && e.stopRun!.id === pref, el);
+          const c = through(this.net.pathsTo(from, (e) => ok(e) && e.stopRun!.id === pref, el));
           if (c.length) return c;
         }
-        return this.net.pathsTo(from, ok, el);
+        return through(this.net.pathsTo(from, ok, el));
       }
       case 'park': {
         let c = this.net.pathsTo(from, (e) => !!e.parkRun && e.parkRun.len * TILE >= t.length + 8 && this.blockFree(e.block, t.id) && !this.parkTargeted(e.block, t.id), el);
         if (job.wash) { const w = c.filter((p) => p.some((e) => e.wash)); if (w.length) c = w; }
+        // passende Anlage bevorzugen (Werkstatt/Remise), sonst irgendein Abstellgleis
+        if (job.need) { const w = c.filter((p) => p[p.length - 1].parkRun?.kind === job.need); if (w.length) c = w; }
+        else { const w = c.filter((p) => p[p.length - 1].parkRun?.kind === 'remise'); if (w.length) c = w; }
         return c;
       }
       case 'hump':
@@ -702,7 +743,7 @@ export class Simulation {
     };
     /** notfalls: denselben Weg zurück */
     const back = () => [...t.route, ...path].reverse().map((e) => this.net.twin(e)).filter((e): e is Edge => !!e);
-    if (t.op.turnback && !t.turned && next.k !== 'park') return afterReverse() ?? back();
+    if (this.isTurn(t) && !t.turned && next.k !== 'park') return afterReverse() ?? back();
     const c = this.candidates(t, end.to, next, true);
     if (c[0]) return c[0];
     // muss dort wenden (z.B. im Stumpfgleis)
@@ -726,8 +767,11 @@ export class Simulation {
     return true;
   }
 
+  /** Wendezug oder Pflegezug (endet hier) */
+  isTurn(t: Train) { return !!t.op.turnback || !!t.ends; }
+
   private canReverse(t: Train) {
-    return !!t.op.turnback || !!t.departure;
+    return this.isTurn(t) || !!t.departure;
   }
 
   /** nächste Aufgabe anfahren; steht der Zug, darf er dafür auch wenden */
@@ -847,7 +891,7 @@ export class Simulation {
     const hi = this.edgeIndexAt(t, Math.max(0, t.s - 0.01));
     const head = t.route[hi];
     if (head?.wash || t.departure && t.s < 300) v = Math.min(v, t.op.vmax * 0.35);
-    // Verschubbereich: Schrittgeschwindigkeit (ganzer Zug + Bremsweg davor)
+    // Rangierbereich: Schrittgeschwindigkeit (ganzer Zug + Bremsweg davor)
     if (v > SHUNT_AREA_V) {
       const ti = this.edgeIndexAt(t, Math.max(0, t.s - t.length));
       for (let i = ti; i < t.route.length && i <= hi + 4; i++) {
@@ -1065,6 +1109,8 @@ export class Simulation {
       if (park?.k === 'park') {
         park.until = Math.max(this.time + 300, this.plannedDeparture(t) - 6 * 60);
         park.wash = t.dirt > 50;
+        // wohin zum Abstellen: verschlissen → Werkstatt, schmutzig → Remise
+        park.need = t.wear > 55 ? 'workshop' : t.dirt > 25 ? 'remise' : undefined;
       }
       // Einsteigen erst kurz vor der Abfahrt
       if (job.board && !job.alight) t.dwellLeft = Math.max(t.dwellLeft, this.plannedDeparture(t) - this.time);
@@ -1298,7 +1344,7 @@ export class Simulation {
     t.committed = twins.length - 1;
     this.setRoute(t, twins as Edge[]);
     t.s = L - a;
-    if (t.op.turnback && !t.turned) {
+    if (this.isTurn(t) && !t.turned) {
       t.turned = true;
       this.events.push({ type: 'turn', train: t });
     }

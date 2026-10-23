@@ -5,6 +5,20 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.22', date: '23.10.2026', title: 'Remise, Nachtzüge & Tutorial',
+    items: [
+      { kind: 'fix', icon: 'bld_remise', text: 'Remise, Werkstatt und Abstellgleise werden genutzt: Vertrags-Zusatz „Abstellen & Pflege“ – Züge enden hier, werden abgestellt und gepflegt (Abstellgebühr + Pflege-Preise)' },
+      { kind: 'besser', icon: 'bld_station3', text: 'Nachtzüge fahren nur nachts: 1–3 Linien im Vertrag statt Takt; ohne Vertrag fahren zwei Nachtzüge durch' },
+      { kind: 'fix', icon: 'track', text: 'Durchfahrende Züge fahren nicht mehr in Stumpfgleise' },
+      { kind: 'fix', icon: 'signal_E', text: 'Auftrag „Blockabstand“: zeigt, wo die Signale je Richtung hin sollen, und zählt erst nach dem Setzen' },
+      { kind: 'neu', icon: 'tool_flag', text: 'Neuer Auftrag „Mehr Platz“ (Land kaufen) und Erfolg „Großgrundbesitzer“' },
+      { kind: 'neu', icon: 'bld_station', text: 'Brief vom Vorstand am Ende des Tutorials' },
+      { kind: 'neu', icon: 'bld_bus', text: 'Züge direkt auf der Karte anklicken: gleiches Menü wie in der Zugliste' },
+      { kind: 'besser', icon: 'mark_shunt', text: 'Markieren (Abstell-, Rangier-, Richtungsgleise) kostet nichts mehr; „Verschub“ heißt jetzt überall „Rangieren“' },
+      { kind: 'neu', icon: 'bld_clock', text: 'Titelleiste zeigt, wie viele Tage du schon im Dienst bist' },
+    ],
+  },
+  {
     version: '0.21', date: '22.10.2026', title: 'Fahrdienstleiter 2.0',
     items: [
       { kind: 'fix', icon: 'signal_E', text: 'Deadlocks mit Abstellgleis hinter dem Gleiswechsel behoben – der Fahrdienstleiter plant Wendezüge und belegte Abstellgleise richtig ein' },

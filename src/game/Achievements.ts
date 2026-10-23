@@ -1,3 +1,4 @@
+import { START_PARCELS } from '../config';
 import type { Game } from './Game';
 
 /** Erfolge: einmal pro Spielstand, mit Konfetti */
@@ -25,5 +26,6 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'research10', name: 'Tüftler', info: '10 Forschungen abgeschlossen', icon: 'bld_workshop', check: (g) => g.research.done.length >= 10 },
   { id: 'sorted100', name: 'Rangiermeister', info: '100 Wagen richtig sortiert', icon: 'bld_hump', check: (g) => g.stats.sortedWagons >= 100 },
   { id: 'fixer', name: 'Störungssucher', info: '5 Störungen behoben', icon: 'tool_shovel', check: (g) => g.repairs >= 5 },
+  { id: 'land5', name: 'Großgrundbesitzer', info: '5 Parzellen dazugekauft', icon: 'tool_flag', check: (g) => g.grid.owned.filter(Boolean).length >= (START_PARCELS.x1 - START_PARCELS.x0 + 1) * (START_PARCELS.y1 - START_PARCELS.y0 + 1) + 5 },
   { id: 'special', name: 'Sonderzug-Profi', info: '3 Sonderzüge pünktlich', icon: 'bld_bus', check: (g) => g.specialsOk >= 3 },
 ];
