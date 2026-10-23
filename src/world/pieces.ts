@@ -27,6 +27,8 @@ export interface PieceDef {
   cost: number;
   /** Schnellfahrweiche: abzweigender Strang schnell befahrbar (braucht Forschung) */
   fast?: boolean;
+  /** schräge Weiche (braucht Forschung) */
+  diagSwitch?: boolean;
 }
 
 const P = (name: keyof typeof manifest.paths): Vec[] =>
@@ -56,6 +58,15 @@ const defs: PieceDef[] = [
     paths: [straight(0, 6), straight(1, 6), { from: S(0, 0), to: S(6, 1), pts: P('xover_down_fast'), diverging: true }] },
   { key: 'xover_up_fast', group: 'switch', label: 'Schnellfahr-Gleiswechsel nach hinten (Forschung)', w: 6, h: 2, through: [0, 1], cost: COST.switch * 2, fast: true,
     paths: [straight(0, 6), straight(1, 6), { from: S(0, 1), to: S(6, 0), pts: P('xover_up_fast'), diverging: true }] },
+  // Schräge Weichen: Diagonale über 3 Felder mit geradem Abzweig (Forschung „Schräg ist das neue Gerade“)
+  { key: 'dsw_desc_out', group: 'switch', label: 'Schräge Weiche ↘, gerade raus (Forschung)', w: 3, h: 4, through: [], cost: COST.switch * 1.2, diagSwitch: true,
+    paths: [{ from: D(0, 0), to: D(3, 3), pts: P('dd3'), diverging: false }, { from: D(0, 0), to: S(3, 1), pts: P('c2'), diverging: true }] },
+  { key: 'dsw_desc_in', group: 'switch', label: 'Schräge Weiche ↘, gerade rein (Forschung)', w: 3, h: 4, through: [], cost: COST.switch * 1.2, diagSwitch: true,
+    paths: [{ from: D(0, 0), to: D(3, 3), pts: P('dd3'), diverging: false }, { from: S(0, 2), to: D(3, 3), pts: P('c1s'), diverging: true }] },
+  { key: 'dsw_asc_out', group: 'switch', label: 'Schräge Weiche ↗, gerade raus (Forschung)', w: 3, h: 4, through: [], cost: COST.switch * 1.2, diagSwitch: true,
+    paths: [{ from: A(0, 3), to: A(3, 0), pts: P('da3'), diverging: false }, { from: A(0, 3), to: S(3, 2), pts: P('c4s'), diverging: true }] },
+  { key: 'dsw_asc_in', group: 'switch', label: 'Schräge Weiche ↗, gerade rein (Forschung)', w: 3, h: 4, through: [], cost: COST.switch * 1.2, diagSwitch: true,
+    paths: [{ from: A(0, 3), to: A(3, 0), pts: P('da3'), diverging: false }, { from: S(0, 1), to: A(3, 0), pts: P('c3'), diverging: true }] },
   { key: 'curve_divDown', group: 'curve', label: 'Kurve gerade → vorne', w: 3, h: 2, through: [], cost: COST.curve,
     paths: [{ from: S(0, 0), to: D(3, 1), pts: P('c1'), diverging: false }] },
   { key: 'curve_divUp', group: 'curve', label: 'Kurve gerade → hinten', w: 3, h: 2, through: [], cost: COST.curve,

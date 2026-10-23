@@ -176,6 +176,19 @@ export class Simulation {
     this.fillTimetable();
   }
 
+  /** Fahrplan verschieben: alle noch nicht losgefahrenen Züge des Unternehmens um `sec` Sekunden */
+  shiftTimes(id: OperatorId, sec: number) {
+    const min = this.time + 300;
+    for (const t of this.queue) {
+      if (t.op.id !== id || t.plannedSpawn < min) continue;
+      const d = Math.max(min - t.plannedSpawn, sec);
+      t.plannedSpawn += d;
+      t.plannedExit += d;
+    }
+    if (this.nextSpawn[id] !== undefined) this.nextSpawn[id] = Math.max(min, this.nextSpawn[id] + sec);
+    this.queue.sort((a, b) => a.plannedSpawn - b.plannedSpawn);
+  }
+
   /** Nachtzüge: kein Takt, sondern Linien zu festen Zeiten; ohne Vertrag fahren zwei Nachtzüge durch */
   private fillNight(id: OperatorId) {
     const op = OPERATORS[id];

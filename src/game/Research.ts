@@ -2,7 +2,7 @@ import type { Game } from './Game';
 import type { ToolId } from './Missions';
 
 export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump' | 'shunt' | 'switchHeat' | 'crew' | 'crew2'
-  | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco' | 'dwell' | 'estw'
+  | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco' | 'dwell' | 'estw' | 'diagSwitch'
   | 'bench' | 'light' | 'green' | 'clock' | 'water' | 'monument' | 'art' | 'season' | 'cat'
   | 'kiosk' | 'cafe' | 'wc' | 'inn' | 'ads' | 'lockers' | 'souvenir' | 'haggle' | 'specials';
 
@@ -55,11 +55,12 @@ export const RESEARCH: ResearchDef[] = [
   R('ops', 'dwell', 'Pfiff-Akademie', 'kürzere Haltezeiten', 'Zugbegleiter lernen den perfekten Abfahrtspfiff: Züge stehen 15 % kürzer am Bahnsteig', 'ri_whistle', 1, 1, 3000, 5, 3, ['wire']),
   R('ops', 'shunt', 'Schneckentempo mit System', 'Rangierbereiche, Rangiersignale', 'Gleise als Rangierbereich markieren: nur Schrittgeschwindigkeit, günstige Rangiersignale teilen den Bereich', 'mark_shunt', 1, 2, 2500, 4, 3, ['siding']),
   R('ops', 'switchHeat', 'Föhn für Weichen', 'Weichenheizung', 'Bei Schnee frieren die Weichen nicht ein: Züge fahren fast normal schnell', 'piece_branch_divUp', 1, 3, 3500, 5, 3, ['crossing']),
-  R('ops', 'fastSwitch', 'Kurvenstar', 'Schnellfahrweichen', 'Lange Gleiswechsel (6 Felder), abzweigend mit voller Fahrt – nötig für Hochgeschwindigkeitszüge', 'piece_branch_divDown', 2, 0, 6000, 8, 6, ['double']),
+  R('ops', 'diagSwitch', 'Schräg ist das neue Gerade', 'Schräge Weichen', 'Weichen direkt auf der Diagonale: ein gerades Gleis zweigt ab oder mündet ein', 'piece_dsw_desc_out', 2, 0, 4500, 6, 4, ['double']),
+  R('ops', 'fastSwitch', 'Kurvenstar', 'Schnellfahrweichen', 'Lange Gleiswechsel (6 Felder), abzweigend mit voller Fahrt – nötig für Hochgeschwindigkeitszüge', 'piece_branch_divDown', 3, 0, 6000, 8, 6, ['diagSwitch']),
   R('ops', 'hump', 'Schwerkraft macht\'s', 'Abrollberg, Richtungsgleise', 'Rangierbahnhof: Güterwagen rollen vom Berg in ihre Richtungsgleise', 'bld_hump', 2, 1, 8000, 10, 8, ['double']),
   R('ops', 'railBridge', 'Über sieben Brücken', 'Eisenbahnbrücken', 'Gleise über Flüsse und Seen bauen', 'rail_bridge_icon', 2, 2, 5000, 7, 5, ['double']),
   R('ops', 'crew', 'Die Schrauber-Brigade', 'Instandhalter einstellen', 'Eigene Instandhalter (unter „Verträge“): rücken bei Störungen selbst aus und reparieren schneller', 'tool_shovel', 2, 3, 4000, 6, 4, ['switchHeat']),
-  R('ops', 'estw', 'Elektronisches Stellwerk', 'Störungen halb so lang', 'Computer statt Hebel: Störungen sind doppelt so schnell behoben, auch ohne Trupp', 'ri_estw', 3, 0, 7000, 9, 6, ['fastSwitch']),
+  R('ops', 'estw', 'Elektronisches Stellwerk', 'Störungen halb so lang', 'Computer statt Hebel: Störungen sind doppelt so schnell behoben, auch ohne Trupp', 'ri_estw', 3, 1, 7000, 9, 6, ['hump']),
   R('ops', 'crew2', 'Vorsorgeuntersuchung', 'Vorbeugende Wartung', 'Regelmäßige Inspektionen: Weichen und Signale fallen nur noch halb so oft aus', 'piece_xover_down', 3, 3, 5000, 7, 5, ['crew']),
   // ------------------------------------------------ Verschönerungsverein
   R('deco', 'bench', 'Sitzfleisch', 'Sitzbank, Wartehalle', 'Wartende werden geduldiger', 'bld_bench', 0, 0, 400, 1, 1),

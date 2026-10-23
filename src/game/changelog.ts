@@ -5,6 +5,16 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.23', date: '23.10.2026', title: 'Fahrplan, Titelbild & schräge Weichen',
+    items: [
+      { kind: 'neu', icon: 'bld_clock', text: 'Fahrplan bearbeiten: je Unternehmen Abfahrten um 5 min verschieben und Bahnsteig je Richtung festlegen (Fahrplan-Fenster, rechts)' },
+      { kind: 'neu', icon: 'bld_station3', text: 'Titelbildschirm: abwechselnd Wüstenexpress, Hauptbahnhof, Schneeland, Dampf im Gebirge und dein Spiel' },
+      { kind: 'neu', icon: 'ri_whistle', text: 'Zuggeräusche beim Anfahren und Bremsen – elektrisch, Diesel oder Dampf' },
+      { kind: 'neu', icon: 'tool_cursor', text: 'Pixel-Mauszeiger mit kleiner Lok, Schaffnerhandschuh über Knöpfen' },
+      { kind: 'neu', icon: 'piece_dsw_desc_out', text: 'Schräge Weichen: auf der Diagonale zweigt ein gerades Gleis ab (Forschung „Schräg ist das neue Gerade“, vor den Schnellfahrweichen)' },
+    ],
+  },
+  {
     version: '0.22', date: '23.10.2026', title: 'Remise, Nachtzüge & Tutorial',
     items: [
       { kind: 'fix', icon: 'bld_remise', text: 'Remise, Werkstatt und Abstellgleise werden genutzt: Vertrags-Zusatz „Abstellen & Pflege“ – Züge enden hier, werden abgestellt und gepflegt (Abstellgebühr + Pflege-Preise)' },

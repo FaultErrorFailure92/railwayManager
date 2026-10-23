@@ -11,6 +11,7 @@ import { OPERATORS } from '../sim/Operators';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
+import { TitleShow } from '../render/TitleShow';
 import { author, newsPhoto, paperName } from './press';
 import { BOARD } from '../game/Board';
 import { avatar, AVATARS, portrait } from './portrait';
@@ -263,6 +264,17 @@ export class Hud {
     $('btn-sound').onclick = () => { Sound.toggle(); soundLabel(); };
     $('btn-timetable').onclick = () => this.openScreen('timetable');
     this.timetable = new Timetable(this.g);
+    $('tt-ops').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-shift],[data-plat]') as HTMLElement | null;
+      if (!b) return;
+      if (b.dataset.shift) this.g.shiftTimes(b.dataset.op as keyof typeof OPERATORS, Number(b.dataset.shift));
+      if (b.dataset.plat !== undefined) {
+        const k = b.dataset.key!;
+        if (b.dataset.plat) this.g.sim.platformPref[k] = b.dataset.plat; else delete this.g.sim.platformPref[k];
+        this.g.version++;
+      }
+      this.ttKey = '';
+    });
     $('bpanel').addEventListener('click', (e) => this.onPanelClick(e as MouseEvent));
     document.querySelectorAll('[data-close]').forEach((b) => {
       (b as HTMLElement).onclick = () => this.closeScreen();
@@ -408,6 +420,7 @@ export class Hud {
     $('m-sub').textContent = '';
     void running;
     $('menu').classList.remove('hidden');
+    this.titleShow.start();
   }
 
   // ------------------------------------------------------------ Pause-Fenster mit Kurzbilanz
@@ -445,7 +458,10 @@ export class Hud {
     this.g.paused = this.pausedBeforePause;
   }
 
+  private titleShow = new TitleShow($('menu'));
+
   private closeMenu() {
+    this.titleShow.stop();
     $('menu').classList.add('hidden');
     this.ui.menu = false;
     this.g.paused = this.pausedBeforeMenu;
@@ -617,7 +633,7 @@ export class Hud {
 
   private renderScreen(force = false) {
     if (!this.screen) return;
-    if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); return; }
+    if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); this.renderTtOps(); return; }
     const mt = this.g.missionTool();
     const quest = mt?.tool === 'research' ? mt.variant : undefined;
     const key = this.screen === 'research' ? researchKey(this.g, this.rsTree, quest) : this.screen === 'stats' ? statsKey(this.g) : contractsKey(this.g);
@@ -767,7 +783,7 @@ export class Hud {
   private needOf(it: MenuItem): ResearchId | undefined {
     const k = it.variant ?? '';
     if (it.tool === 'facility') return FACILITY_RESEARCH[k];
-    if (it.tool === 'switch') return k.endsWith('_fast') ? 'fastSwitch' : k.startsWith('xover') ? 'double' : undefined;
+    if (it.tool === 'switch') return k.endsWith('_fast') ? 'fastSwitch' : k.startsWith('dsw') ? 'diagSwitch' : k.startsWith('xover') ? 'double' : undefined;
     if (it.tool === 'signal' && k.startsWith('S')) return 'shunt';
     if (it.tool === 'building') return BUILDING_RESEARCH[k] as ResearchId | undefined;
     return undefined;
@@ -929,6 +945,29 @@ export class Hud {
       m.style.left = `${Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, at.x + 14))}px`;
       m.style.top = `${Math.max(60, Math.min(window.innerHeight - m.offsetHeight - 8, at.y + 14))}px`;
     }
+  }
+
+  /** Fahrplan-Seitenleiste: nächste Abfahrten verschieben, Bahnsteig je Richtung festlegen */
+  private ttKey = '';
+  private renderTtOps() {
+    const g = this.g, sim = g.sim;
+    const ops = g.activeOperators().filter((o) => o.kind !== 'sort' && !o.industry);
+    const runs = g.platformRuns();
+    const next = (id: string, dir: string) => sim.queue.filter((t) => t.op.id === id && t.dir === dir).slice(0, 2).map((t) => fmtTime(t.plannedSpawn)).join(', ') || '–';
+    const key = ops.map((o) => `${o.id}${next(o.id, 'E')}${next(o.id, 'W')}${sim.platformPref[`${o.id}:E`]}${sim.platformPref[`${o.id}:W`]}`).join('|') + runs.length;
+    if (key === this.ttKey) return;
+    this.ttKey = key;
+    const plat = (o: (typeof ops)[number], dir: 'E' | 'W') => {
+      if (!o.needsStop || runs.length < 2) return '';
+      const k = `${o.id}:${dir}`, cur = sim.platformPref[k];
+      return `<div class="tto-pl"><span>${dir === 'E' ? '→' : '←'}</span><button class="btn${!cur ? ' on' : ''}" data-plat="" data-key="${k}">Auto</button>${runs.map((r, i) =>
+        `<button class="btn${cur === r.id ? ' on' : ''}" data-plat="${r.id}" data-key="${k}">${i + 1}</button>`).join('')}</div>`;
+    };
+    $('tt-ops').innerHTML = ops.length ? ops.map((o) => `<div class="tto">
+      <div class="tto-h"><span class="dot" style="background:${o.color}"></span><b>${o.short}</b><small>${o.name}</small></div>
+      <div class="tto-t"><small>nächste → ${next(o.id, 'E')} · ← ${next(o.id, 'W')}</small></div>
+      <div class="tto-b"><button class="btn" data-op="${o.id}" data-shift="-5">−5 min</button><button class="btn" data-op="${o.id}" data-shift="5">+5 min</button></div>
+      ${plat(o, 'E')}${plat(o, 'W')}</div>`).join('') : '<small>Noch keine Verträge.</small>';
   }
 
   /** was hilft, wenn ein Zug nicht weiterkommt */

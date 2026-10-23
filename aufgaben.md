@@ -148,7 +148,7 @@
 - [x] FEATURE: ich möchte einen Spielernamen und einen Avatar angeben können. Mach da gerne eine Auswahl, um jedes Geschlecht und Hautfarbe gut zu repräsentieren, gerne auch jüngere und ältere Personen. Die Anrede in den Briefen/Nachrichten soll immer persönlich und/oder genderneutral sein "Betriebsleiter Profil". Soll auch änderbar sein. soll beim Starten auch ausgewählt oder angelegt werden können (ohne authentifizierung oder PW, läuft ja eh nur lokal)
 - [x] FEATURE: optisches Update: ich hätte gerne in längeren Zügen auch Gepäckwägen und Speisewägen, die sich optisch ein wenig abheben
 - [ ] FEATURE: Wir brauchen noch einen fetzigeren Namen für unser Spiel
-- [ ] FEATURE: unterschiedliche Demoanimationen für den Titelscreen von Zügen die ur schnell durch die Wüste fahren, Busy Hauptbahnhöfen etc. mach da so 4-5 unterschiedliche, die abwechselnd mit dem letzten Spiel angezeigt (wie bisher) werden
+- [x] FEATURE: unterschiedliche Demoanimationen für den Titelscreen von Zügen die ur schnell durch die Wüste fahren, Busy Hauptbahnhöfen etc. mach da so 4-5 unterschiedliche, die abwechselnd mit dem letzten Spiel angezeigt (wie bisher) werden
 
 ## AP6 – Große Features *(später)*
 - [ ] FEATURE: Mach mir gerne einen Editor, wo ich Eisenbahnunternehmen hinzufgen und bearbeiten kann. Die bestehenden soll man als Vorlage verwenden können, aber nicht löschen können. Die selbst erstellten schon. Lass mich beim Spiel starten auch auswählen, welche Unternehmen teilhaben sollen. Man soll beim unternehmen den Vertreter mit Avatar, die Zugkategorien, ein Wappen und die Farben auswählen können. Auch gerne die Antriebe (Diesel, Dampf, Elektrisch)
@@ -166,12 +166,12 @@
 
 
 ## noch zuzuordnen
-- [ ] FEATURE: Fahrplan verändern, dass man zeiten anpassen kann und auch Gleise festlegen kann. Die Frequenz stellt man weiterhin im Vertrag ein
+- [x] FEATURE: Fahrplan verändern, dass man zeiten anpassen kann und auch Gleise festlegen kann. Die Frequenz stellt man weiterhin im Vertrag ein
 - [x] BUG: Blockstellen Aufgabe ergibt immer noch wenig sinn. Erstens wird einem nicht gezeigt, wo die Signale in welcher Richtung platziert werden sollen und zweites kann man die Aufgabe auch einfach schaffen, indem man wartet. vielleicht macht das Blocksignal erst Sinn, wenn man Weichen oder mehr strecke hat. 
 - [x] FEATURE: Neue Aufgabe: Feld kaufen, vielleicht kann man da einen Erfolg auch dazu machen?
 - [x] Mach mir bitte ein Ende für das Tutorial, wieder mit einem Briefing vom Vorstand, dass die Einschulung jetzt abgeschlossen ist, und der Betrieb jetzt richtig los gehen kann 
-- [ ] FEATURE: Lustiger Mauszeiger
-- [ ] FEATURE: Bessere Zuggeräusche beim Bremsen und starten, je nach Antrieb (Elektrisch, DIesel, Dampf)
+- [x] FEATURE: Lustiger Mauszeiger
+- [x] FEATURE: Bessere Zuggeräusche beim Bremsen und starten, je nach Antrieb (Elektrisch, DIesel, Dampf)
 - [x] BUG: Züge fahren mit der Automatik manchmal in ein Stumpfgleis ein, obwohl es keine Wendefahrt ist, das sollte so nicht sein
 - [x] BUG: Aufgabe mit den Block-Signalen sollte zeigen, wo Block-Signale platziert werden sollen
 - [x] BUG: Remise funktioniert nicht, bzw. wird nicht verwendet. vielleciht braucht es eine Zusatzklausel in den Verträgen, die besagen, wie oft ein Zug in eine Remise gestellt wird (gilt analog dann natürlich Pauschalpreis pro Reparatur bei Werkstatt, benutzung der Waschanlage, etc.)
@@ -179,4 +179,4 @@
 - [x] BUG: Züge sind nur in der Zugliste anklickbar, sollte aber direkt auf den Zug auch gehen
 - [x] BUG: Markeiren als Abstellbereich oder Verschubbereich sollte kein Geld kosten. Auch Vereinheitlichung Rangierbereich und Rangieren, Verschub gibt es nicht
 - [x] FEATURE: Anzeige in der Titelleiste, wie viel Tage man schon im Dienst ist
-- [ ] FEATURE:  Schräge Weichen (also auf Diagonalen mit der geraden Seite). Muss erforscht werden, vor der Schnellfahrweiche
+- [x] FEATURE:  Schräge Weichen (also auf Diagonalen mit der geraden Seite). Muss erforscht werden, vor der Schnellfahrweiche

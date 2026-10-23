@@ -643,6 +643,7 @@ export class Game {
     if (done.has('station2')) add('wc');
     if (done.has('station3')) add('inn');
     if (done.has('wash')) add('shunt');
+    if (done.has('fastSwitch')) add('diagSwitch');
     r.done = [...done];
   }
 
@@ -1567,6 +1568,7 @@ export class Game {
       case 'diag': {
         if (!PIECES[variant]) return fail('');
         if (PIECES[variant].fast && !this.researched('fastSwitch')) return fail('Schnellfahrweichen erst erforschen');
+        if (PIECES[variant].diagSwitch && !this.researched('diagSwitch')) return fail('Schräge Weichen erst erforschen');
         if (variant.startsWith('xover') && !this.researched('double')) return fail('Gleiswechsel erst mit dem zweigleisigen Ausbau (Forschung)');
         const fp: XY[] = [];
         const pc = checkPieces(cells.map((a) => ({ key: variant, x: a.x, y: a.y })), fp);
@@ -1694,6 +1696,12 @@ export class Game {
 
   /** Bahnsteiggleise mit Zugang, nummeriert von Nord nach Süd, West nach Ost */
   platformRuns() { return this.net.runs.filter((r) => r.accessible).sort((a, b) => a.row - b.row || a.x0 - b.x0); }
+
+  /** Fahrplan eines Unternehmens um Minuten verschieben */
+  shiftTimes(op: OperatorId, min: number) {
+    this.sim.shiftTimes(op, min * 60);
+    this.addLog(`Fahrplan ${OPERATORS[op].name}: ${min > 0 ? '+' : '−'}${Math.abs(min)} min`, 'info');
+  }
 
   /** Vertrags-Zusatz „Abstellen & Pflege“ umschalten */
   toggleService(op: OperatorId) {

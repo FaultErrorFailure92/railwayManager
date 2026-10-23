@@ -653,7 +653,8 @@ export class GameScene extends Phaser.Scene {
       const prev = this.lastState.get(t.id);
       if (visible && prev !== t.state) {
         if (t.state === 'dwell' && t.jobs[0]?.k === 'stop') Sound.gong();
-        if (prev === 'dwell' && t.state === 'running') Sound.whistle();
+        if (t.state === 'dwell' && prev === 'running') Sound.brake(t.op.traction);
+        if (prev === 'dwell' && t.state === 'running') { Sound.whistle(); Sound.depart(t.op.traction); }
       }
       this.lastState.set(t.id, t.state);
       if (sim.stuck(t)) put('warn', head.x, head.y - 16, Math.floor(this.time0 / 300) % 2 ? 1 : 0.5);

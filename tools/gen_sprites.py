@@ -167,6 +167,22 @@ for key, tracks in {"xover_down_fast": [(R0L, True), (R1L, True), (xdf, False)],
 for key, P in (("diag_desc", DD), ("diag_asc", DA)):
     img, (sx, sy) = tg.render([(P, True, tg.DIAG_OFF, tg.DIAG_STEP)], (0, 0, 16, 32))
     save("piece_" + key, img, sx, sy)
+# Schräge Weichen: Diagonale über 3 Felder, gerader Abzweig (raus oder rein)
+DD3, DA3 = tg.line((0, 8), (48, 56)), tg.line((0, 56), (48, 8))
+_sh = lambda P, dy: np.array(P, float) + np.array([0.0, dy])
+C1S, C4S = _sh(C["c1"], 32), _sh(C["c4"], 32)
+for k, v in {"dd3": DD3, "da3": DA3, "c1s": C1S, "c4s": C4S}.items():
+    store_path(k, v)
+DSW = {
+    "dsw_desc_out": [(DD3, True, tg.DIAG_OFF, tg.DIAG_STEP), cv("c2", False)],
+    "dsw_desc_in": [(DD3, True, tg.DIAG_OFF, tg.DIAG_STEP), (C1S, False) + tuple(tg.curve_sleepers(C1S, True))],
+    "dsw_asc_out": [(DA3, True, tg.DIAG_OFF, tg.DIAG_STEP), (C4S, False) + tuple(tg.curve_sleepers(C4S, False))],
+    "dsw_asc_in": [(DA3, True, tg.DIAG_OFF, tg.DIAG_STEP), cv("c3", False)],
+}
+for key, tracks in DSW.items():
+    img, (sx, sy) = tg.render(tracks, (0, 0, 48, 64))
+    save("piece_" + key, img, sx, sy)
+
 # Gleiskreuzungen: Diagonale über ein gerades Gleis (oben oder unten)
 for d, P in (("desc", DD), ("asc", DA)):
     for row in (0, 1):
@@ -706,6 +722,8 @@ for key in ("xover_down_fast", "xover_up_fast"):
 for key in ("xover_down", "xover_up", "branch_divDown", "branch_divUp", "branch_mergeAbove", "branch_mergeBelow",
             "curve_divDown", "curve_divUp", "curve_mergeAbove", "curve_mergeBelow"):
     icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], T32))
+for key in DSW:
+    icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], [(x, y) for x in range(3) for y in range(4)]))
 for key in ("diag_desc", "diag_asc", "cross_desc0", "cross_asc1"):
     icon_save("piece_" + key, compose([("piece_" + key, 0, 0)], [(0, 0), (0, 1)]))
 for name in BUILDINGS:
@@ -750,6 +768,10 @@ for key in PIECES:
     tracks = PIECES[key]
     pts = [[(float(x), float(y)) for x, y in t[0][::10]] + [(float(t[0][-1][0]), float(t[0][-1][1]))] for t in tracks]
     img, ox, oy = bg.wire_piece(pts, 3, 2)
+    save("wire_piece_" + key, img, ox, oy)
+for key, tracks in DSW.items():
+    pts = [[(float(x), float(y)) for x, y in t[0][::10]] + [(float(t[0][-1][0]), float(t[0][-1][1]))] for t in tracks]
+    img, ox, oy = bg.wire_piece(pts, 3, 4)
     save("wire_piece_" + key, img, ox, oy)
 for key, P in (("diag_desc", DD), ("diag_asc", DA)):
     img, ox, oy = bg.wire_piece([[(float(x), float(y)) for x, y in P[::10]] + [(float(P[-1][0]), float(P[-1][1]))]], 1, 2)

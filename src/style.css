@@ -603,3 +603,23 @@ ul { list-style: none; margin: 0; padding: 0; }
 .ct-svc.on { background: #2f5a2a; color: #b8f0a8; opacity: 1; }
 
 .stat.clock .day { font-size: 17px; color: var(--muted); min-width: 52px; }
+
+/* lustiger Pixel-Mauszeiger (Pfeil mit Lok, Hand im Schaffnerhandschuh) */
+html, body, #game canvas { cursor: url(/cursor.png) 0 0, auto; }
+button, .btn, .slot, a, [data-mail], [data-tree], [data-tip], .mp-card, .rs-tab, label, select, #company { cursor: url(/cursor_hand.png) 8 0, pointer !important; }
+input { cursor: text; }
+
+.tt-main { display: flex; gap: 12px; align-items: flex-start; }
+.tt-ops { width: 250px; max-height: 620px; overflow: auto; }
+.tt-ops h3 { margin: 0 0 6px; font-weight: 400; color: var(--gold); font-size: 22px; }
+.tto { background: var(--slot); padding: 6px 8px; margin-bottom: 6px; box-shadow: 0 0 0 2px var(--edge); }
+.tto-h { display: flex; align-items: center; gap: 6px; } .tto-h b { font-weight: 400; font-size: 20px; } .tto-h small { color: var(--muted); font-size: 14px; }
+.tto-t small { color: var(--muted); font-size: 14px; }
+.tto-b, .tto-pl { display: flex; gap: 4px; margin-top: 4px; align-items: center; flex-wrap: wrap; }
+.tto .btn { font-size: 15px; padding: 1px 6px; }
+.tto .btn.on { background: #2f5a2a; color: #b8f0a8; }
+
+/* Titelbildschirm-Szenen hinter dem Menü */
+#title-bg { position: absolute; inset: 0; z-index: 0; opacity: 0; transition: opacity 1.2s; pointer-events: none; image-rendering: pixelated; }
+#title-bg.on { opacity: 1; }
+#menu .m-box { position: relative; z-index: 1; }
