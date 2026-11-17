@@ -2,7 +2,7 @@ import type { DayStat, Game } from './Game';
 
 /** Tagesziel: kleine Aufgabe für den aktuellen Spieltag */
 export interface Goal {
-  kind: 'punct' | 'pax' | 'noLate' | 'shop' | 'balance';
+  kind: 'punct' | 'pax' | 'noLate' | 'shop' | 'balance' | 'conn';
   target: number;
   reward: number;
   fp: number;
@@ -29,6 +29,10 @@ export function goalProgress(goal: Goal, d: DayStat | undefined, g: Game): { val
     case 'noLate': {
       return { value: goal.failed ? 0 : 1, text: goal.failed ? 'verpasst' : 'bis Mitternacht', label: `Kein Zug über ${goal.target} min zu spät` };
     }
+    case 'conn': {
+      const n = d?.conn ?? 0;
+      return { value: Math.min(1, n / goal.target), text: `${Math.min(n, goal.target)}/${goal.target}`, label: `${goal.target} Anschlüsse erreicht` };
+    }
     case 'balance': {
       const b = d ? d.income - d.expense : 0;
       return { value: b > 0 ? 1 : 0, text: `${b >= 0 ? '+' : '−'}${eur(Math.abs(b))} €`, label: 'Tagesbilanz im Plus' };
@@ -51,6 +55,11 @@ export function newGoals(g: Game, prev: DayStat | undefined): Goal[] {
   if (shops) {
     const shop = Math.max(150, Math.round(((prev?.shop ?? 0) * 1.2) / 50) * 50);
     pool.push({ kind: 'shop', target: shop, reward: 300 + Math.round(shop / 2), fp: 1, done: false });
+  }
+  // Umsteigen: erst, wenn es schon Anschlüsse gibt (RM-FR-MODE-05: passend zum Ausbau)
+  if ((g.stats.connOk ?? 0) > 0) {
+    const conn = Math.max(5, Math.round((prev?.conn ?? 0) * 1.1));
+    pool.push({ kind: 'conn', target: conn, reward: 300 + conn * 25, fp: 1, done: false });
   }
   // zufällig drei verschiedene
   const out: Goal[] = [];

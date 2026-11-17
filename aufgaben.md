@@ -177,6 +177,30 @@
 - [x] BUG: Remise funktioniert nicht, bzw. wird nicht verwendet. vielleciht braucht es eine Zusatzklausel in den Verträgen, die besagen, wie oft ein Zug in eine Remise gestellt wird (gilt analog dann natürlich Pauschalpreis pro Reparatur bei Werkstatt, benutzung der Waschanlage, etc.)
 - [x] BUG: Nachtzüge haben aktuell auch eine Frequenz, die sollten aber eher nur Nachts fahren und da vielleicht 1x oder 2x. Vielleicht machen wirs eher so: Es gibt 1 Nachtzug unternehmen und die bieten an, dass unterschiedlichen Linien bei mir abfahren, dafür bekommt man Geld. Und ansonsten gibt es Nachtzüge die durchfahren (auch nachts) und dafür gibt es auch geld, wie für Güterzüge
 - [x] BUG: Züge sind nur in der Zugliste anklickbar, sollte aber direkt auf den Zug auch gehen
-- [x] BUG: Markeiren als Abstellbereich oder Verschubbereich sollte kein Geld kosten. Auch Vereinheitlichung Rangierbereich und Rangieren, Verschub gibt es nicht
+- [ ] BUG: Markieren als Abstellbereich oder Verschubbereich sollte kein Geld kosten. Auch Vereinheitlichung Rangierbereich und Rangieren, Verschub gibt es nicht. Zusätzlich sollte das Markieren auch gehen, wenn grade kein Geld da ist.
 - [x] FEATURE: Anzeige in der Titelleiste, wie viel Tage man schon im Dienst ist
 - [x] FEATURE:  Schräge Weichen (also auf Diagonalen mit der geraden Seite). Muss erforscht werden, vor der Schnellfahrweiche
+- [ ] BUG: Wendezüge bleiben auf langen Bahnsteigen manchmal 2x stehen, das ist nicht notwendig
+- [ ] BUG: Züge fahren in das Abstellgleis, oder Remise, obwohl sie einen Fahrplan hätten. Die Remise ist eher gedacht, dass sie dort abgestellt werden, wenn der Fahrplan sie nicht gleich wieder weiter schickt. Waschstraße, Remise, Abstellgleis und Werkstatt können nur ohne Fahrgäste befahren werden
+- [ ] BUG: Wendezüge bleiben in Stumpfgleis hängen und zucken herum
+- [ ] FEATURE: Bei Game Over soll sich auch der Vorstand nochmal mit einer aufmunternden Nachricht melden, aber dass wir an dieser Stelle nicht weiter machen können
+- [ ] FEATURE: Züge sind nicht verspätet, wenn sie +/-5min vom Fahrplan sind, 5-10 min gib es nur ein bisschen abzug vom Geld, zwischen 10 und 20 min noch weniger und ab 20 min gib es kein geld mehr. ab 45min gibt es dann strafen. bzw das könnte auch vertragsgegendstand sein
+- [ ] FEATURE: Vertrags-Waltraud soll auch mitteilen, wenn sie glaubt, dass sich mehr züge nicht mehr ausgehen
+- [ ] FEATURE: Bei Störungen und Vandalismus soll sich bitte der Instandhalter auch mit einer kurzen Nachricht melden.
+- [ ] BUG: Der "Menü"-Button im Spiel heisst "Hauptmenü", aber es wird ja eher nur das "Spiel"-Menü gezeigt
+- [ ] FEATURE: Der Spieler sollte unabhängig vom Spiel erstellbar und konfigurierbar sein, ein Spieler kann mehrere laufende Spiele haben.
+- [ ] FEATURE: gib mir lustige Bahnbezogene Accessories, die ich meinem Spieler-Avatar anziehen kann
+- [ ] BUG: Das Busterminal soll keinen Gleisanschluss brauchen, aber eine Bahnhofserweiterung sein und einen Straßenanschluss brauchen. Dann fahren dort Busse. Für die kann man auch Verträge abschließen. Aber nur 1 pro Busterminal und dann den Takt festlegen. Fokus des Spiels ist ja nicht Busverkehr
+- [ ] FEATURE: Der Finanzmitarbeiter soll regelmässig updates geben, wie die Bilanz sich entwickelt.
+- [ ] BUG: Wenn man einen Kredit bekommt, sollte man einfach 50k€ bekommen und wenn man dann wieder auf 0 kommt, kommt das Game over. Wenn der KRedit zurück gezahlt ist, sollte sich auch der Finanzmitarbeiter mit einer Nachricht melden.
+- [ ] FEATURE: Organigramm mit Vorstand, mir selbst, dem FInanzmitarbeiter und der Waltraud, damit man weiss, wer der Chef von wem ist, Instandhalter werden dort auch angezeigt
+- [ ] FEATURE: für jedes Gebäude, Sonderding und Bahnbetriebliche Ding soll es in irgend einer Form einen Auftrag geben, um das konkret zu lernen. Stelle gerne auch die Reihenfolge der Aufträge noch einmal so um, dass es auch mit dem Forschungsbaum sinn ergibt. Das Signal und auch die Weichen mach erforschbar (aber ganz billig und am Anfang)
+- [ ] BUG: Güterzug fährt gerade ein um durchzufahren. laut sim zugverkehr steht fährt aus und zwar schon bevor er im Bild sichtbar ist. Überprüfe die Anzeigen im Zugverkehr nochmal.
+- [ ] BUG: oft zahlt man strafe für einen Zug, der verspätet ist, obwohl er schon verspätet ankommt. das kann zwar passieren, aber wenn ich als betriebsleiter die verzögerung nicht schlimmer mache, sollte ich dafür keine strafe zahlen müssen
+- [ ] FEATURE: Gäste sollen teilweise auch Gepäck, kleine Kinder oder Hunde mit dabei haben. 
+- [ ] FEATURE: bei Hauptbahnhof soll es Gepäckwagen als Forschung geben und die können dann auch eingesetzt werdens
+- [ ] FEATURE: Erweiterung für Hauptbahnhof: Fahrkartenschalter mit Personal
+- [ ] FEATURE: Ticketautomat
+- [ ] FEATURE: Mehrgleisige Remise
+- [ ] BUG: Bahnhofsname wird manchmal zu groß angezeigt
+- [ ] BUG: Brücken und unterführungen für Passagiere müssen auch in Richtung West/Ost gebaut werden können

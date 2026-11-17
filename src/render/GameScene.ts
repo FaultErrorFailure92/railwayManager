@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
+import { settings } from '../game/settings';
 import { COST, MAP_H, MAP_W, PARCEL, START_PARCELS, TILE } from '../config';
 import { Game } from '../game/Game';
+import { elements, wearOf } from '../game/Wear';
 import type { ToolId } from '../game/Missions';
 import manifest from '../gen/manifest.json';
 import { toScreen, toWorld } from '../iso';
@@ -62,12 +64,25 @@ export interface UiState {
   stationClick: number | null;
   /** Zug unter dem Mauszeiger + Bildschirmposition */
   hoverTrain: number | null;
+  /** Fahrgast unter dem Mauszeiger bzw. per langem Druck gewählt (RM-FR-EVT-06) */
+  hoverPerson?: number | null;
   mouse: XY;
   /** Hauptmenü offen: Kamera schwenkt langsam */
   menu: boolean;
   /** Zug auf der Karte angeklickt (Bildschirmposition) */
   trainClick?: { id: number; x: number; y: number } | null;
+  /** eingeblendete Ebene (RM-FR-UI-12) */
+  layer?: Layer;
 }
+
+/** Ebenen-Ansicht (RM-FR-UI-12) – Taste E schaltet weiter */
+export type Layer = 'occupancy' | 'pax' | 'mood' | 'wear';
+export const LAYERS: { id: Layer; name: string; legend: [string, string][] }[] = [
+  { id: 'occupancy', name: 'Gleisbelegung', legend: [['#3fa34d', 'frei'], ['#ffb02e', 'belegt oder für einen Zug reserviert'], ['#d9534f', 'Störung']] },
+  { id: 'pax', name: 'Fahrgäste', legend: [['#4da3ff', 'wenige'], ['#ffd23f', 'viele'], ['#ff6a3d', 'Gedränge']] },
+  { id: 'mood', name: 'Stimmung', legend: [['#3fa34d', 'zufrieden'], ['#ffd23f', 'ungeduldig'], ['#d9534f', 'sauer']] },
+  { id: 'wear', name: 'Instandhaltung', legend: [['#3fa34d', 'Weiche/Signal neu'], ['#ffd23f', 'abgenutzt'], ['#d9534f', 'fällt bald aus · Zug muss in die Werkstatt']] },
+];
 
 export const variantOf = (ui: UiState, tool = ui.tool) => {
   const v = VARIANTS[tool];
@@ -84,6 +99,8 @@ const PANEL_BUILDING = (k?: string) => !!k && (isStation(k) || !!SHOPS[k]);
 /** Nebel: ab so vielen Feldern Abstand zur eigenen Fläche, voll nach weiteren … */
 const FOG_START = 4, FOG_FULL = 9;
 const FONT = '"VT323", monospace';
+/** Schriftgrößen der Beschriftungen auf der Karte in Bildschirm-Pixeln – unabhängig vom Zoom */
+const LABEL_PX = { price: 22, station: 16, cost: 16, platform: 14, fx: 16, fxBig: 18 };
 
 export class GameScene extends Phaser.Scene {
   private builtVersion = -1;
@@ -96,13 +113,25 @@ export class GameScene extends Phaser.Scene {
   private trainSprites = new Map<number, Phaser.GameObjects.Image[]>();
   private lastTrainPos = new Map<number, XY>();
   private overlay!: Phaser.GameObjects.Graphics;
+  private layerGfx!: Phaser.GameObjects.Graphics;
+  private layerNext = 0;
+  private layerOn = false;
   private priceLabels: Phaser.GameObjects.Text[] = [];
+  /** Beschriftungen mit fester Bildschirmgröße (werden mit 1/Zoom skaliert) */
+  private fixedLabels = new Set<Phaser.GameObjects.Text>();
+  private fixedSize<T extends Phaser.GameObjects.Text>(t: T): T {
+    this.fixedLabels.add(t);
+    t.once('destroy', () => this.fixedLabels.delete(t));
+    return t.setScale(1 / this.cameras.main.zoom);
+  }
   private hintGfx!: Phaser.GameObjects.Graphics;
   private hintArrow!: Phaser.GameObjects.Image;
   private hintCells: XY[] = [];
   private hintTimer = 0;
   private ghost!: Phaser.GameObjects.Graphics;
   private ghostImgs: Phaser.GameObjects.Image[] = [];
+  /** Kosten am Mauszeiger (RM-FR-BUILD-14) */
+  private costTag!: Phaser.GameObjects.Text;
   private dragStart: XY | null = null;
   private hoverCell: XY | null = null;
   private panLast: XY | null = null;
@@ -136,9 +165,14 @@ export class GameScene extends Phaser.Scene {
       setTimeout(() => ld?.remove(), 500);
     });
     this.overlay = this.add.graphics().setDepth(D_OVERLAY);
+    this.layerGfx = this.add.graphics().setDepth(D_OVERLAY + 1);
     this.hintGfx = this.add.graphics().setDepth(D_OVERLAY + 1);
     this.hintArrow = this.add.image(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
     this.ghost = this.add.graphics().setDepth(D_UI);
+    this.costTag = this.add.text(0, 0, '', {
+      fontFamily: FONT, fontSize: `${LABEL_PX.cost}px`, color: '#9dff8a', backgroundColor: '#140c06dd', padding: { x: 3, y: 0 },
+    }).setOrigin(0, 1).setResolution(2).setDepth(D_UI + 6).setVisible(false);
+    this.fixedSize(this.costTag);
     this.people = new People(this, this.g);
     this.lighting = new Lighting(this, this.g, D_OVERLAY - 10);
     this.weatherFx = new Weather(this, this.g, D_OVERLAY - 8);
@@ -196,7 +230,65 @@ export class GameScene extends Phaser.Scene {
   private place(name: string, wx: number, wy: number, depth: number) {
     const s = SPRITES[name];
     const p = toScreen(wx, wy);
-    return this.add.image(p.x + s.ox, p.y + s.oy, name).setOrigin(0).setDepth(depth);
+    const img = this.add.image(p.x + s.ox, p.y + s.oy, name).setOrigin(0).setDepth(depth);
+    if (this.animCells.size) this.animate(img, name, Math.floor(wx / TILE), Math.floor(wy / TILE));
+    return img;
+  }
+
+  // ------------------------------------------------------------ Bauanimationen (RM-FR-FEEL-02)
+  /** Feld → Startzeit der Animation (scene time) */
+  private animCells = new Map<number, number>();
+
+  /** Bau-Ereignisse aus dem Spiel abholen: Felder der Reihe nach animieren, Abriss staubt */
+  private takeBuildEvents() {
+    const evs = this.g.buildEvents.splice(0);
+    if (!settings.anim) return;
+    const now = this.time.now;
+    for (const [k, t0] of this.animCells) if (now - t0 > 2000) this.animCells.delete(k);
+    for (const e of evs) {
+      const seen = new Set<number>();
+      const cells = e.cells.filter((c) => { const k = this.g.grid.key(c.x, c.y); if (seen.has(k)) return false; seen.add(k); return true; })
+        .sort((a, b) => a.x - b.x || a.y - b.y);
+      // alles zusammen höchstens ~1,2 s
+      const step = Math.min(70, 900 / Math.max(1, cells.length));
+      cells.forEach((c, i) => {
+        if (e.remove) this.dust(c.x, c.y, i * step);
+        else this.animCells.set(this.g.grid.key(c.x, c.y), now + i * step);
+      });
+    }
+  }
+
+  private animate(img: Phaser.GameObjects.Image, name: string, cx: number, cy: number) {
+    const start = this.animCells.get(this.g.grid.key(cx, cy));
+    // nur frisch Gebautes; bei späterem Neuzeichnen nicht noch einmal
+    if (start === undefined || start < this.time.now - 30) return;
+    const delay = Math.max(0, start - this.time.now);
+    if (name.startsWith('bld_')) {
+      // Gebäude wächst von unten aus dem Gerüst
+      const h = img.height, w = img.width;
+      img.setCrop(0, h, w, 0);
+      const st = { v: 0 };
+      this.tweens.add({ targets: st, v: 1, delay, duration: 900, ease: 'Sine.easeOut',
+        onUpdate: () => { const v = Math.round(st.v * h); img.setCrop(0, h - v, w, v); },
+        onComplete: () => { img.setCrop(); } });
+      this.dust(cx, cy, delay + 850, 6);
+    } else {
+      // Schwellen, Schienen, Masten: von oben einsetzen
+      const y = img.y;
+      img.setAlpha(0).setY(y - 10);
+      this.tweens.add({ targets: img, y, alpha: 1, delay, duration: 220, ease: 'Back.easeOut' });
+    }
+  }
+
+  /** kleine Staubwolke auf einem Feld */
+  private dust(cx: number, cy: number, delay = 0, n = 4) {
+    const c = toScreen(cx * TILE + 8, cy * TILE + 8);
+    for (let i = 0; i < n; i++) {
+      const puff = this.add.circle(c.x + (Math.random() - 0.5) * 12, c.y + (Math.random() - 0.5) * 6, 2 + Math.random() * 2, 0xcfc6b4, 0.8)
+        .setDepth(D_UI - 2).setAlpha(0);
+      this.tweens.add({ targets: puff, alpha: { from: 0.8, to: 0 }, scale: { from: 1, to: 2.4 }, y: puff.y - 6 - Math.random() * 6,
+        delay: delay + i * 40, duration: 600, ease: 'Sine.easeOut', onComplete: () => puff.destroy() });
+    }
   }
 
   /** gedrehtes Gebäude: an der oberen Ecke gespiegelt (x und y tauschen) */
@@ -264,9 +356,12 @@ export class GameScene extends Phaser.Scene {
       this.g.buildRot = !this.g.buildRot;
     });
 
-    this.input.on('gameout', () => { this.ui.hoverTrain = null; this.hoverCell = null; });
+    this.input.on('gameout', () => { this.ui.hoverTrain = null; this.hoverCell = null; if (!this.personPinned) this.ui.hoverPerson = null; });
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.ui.menu) return;
+      // langer Druck (Tablet) zeigt einen Fahrgast
+      this.personPinned = false;
+      this.pressAt = p.wasTouch && this.ui.tool === 'select' ? { x: p.x, y: p.y, t: this.time.now } : null;
       if (p.rightButtonDown() || p.middleButtonDown() || this.ui.tool === 'select') {
         this.panLast = { x: p.x, y: p.y };
         this.downAt = p.leftButtonDown() ? { x: p.x, y: p.y } : null;
@@ -278,6 +373,8 @@ export class GameScene extends Phaser.Scene {
       this.hoverCell = this.cellAt(p.x, p.y);
       this.ui.mouse = { x: p.x, y: p.y };
       this.ui.hoverTrain = this.trainAt(p.x, p.y);
+      if (this.pressAt && Math.hypot(p.x - this.pressAt.x, p.y - this.pressAt.y) > 8) this.pressAt = null;
+      if (!this.personPinned) this.ui.hoverPerson = this.personAt(p.x, p.y);
       if (this.panLast && p.isDown) {
         const cam = this.cameras.main;
         cam.scrollX -= (p.x - this.panLast.x) / cam.zoom;
@@ -343,6 +440,51 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.pan(p.x, p.y, 400, 'Sine.easeInOut');
   }
 
+  // ------------------------------------------------------------ Minimap (RM-FR-UI-11)
+  /** Kamera sofort auf ein Feld setzen */
+  centerOnCell(x: number, y: number) {
+    const p = toScreen(x * TILE, y * TILE);
+    this.cameras.main.centerOn(p.x, p.y);
+  }
+
+  /** sichtbarer Ausschnitt (isometrische Bildschirm-Koordinaten der Welt) */
+  viewRect() {
+    const v = this.cameras.main.worldView;
+    return { x: v.x, y: v.y, width: v.width, height: v.height };
+  }
+
+  /** Zugspitzen in Feldern */
+  trainHeads() {
+    return this.g.sim.trains.filter((t) => t.route.length).map((t) => {
+      const c = this.worldOnTrain(t, 8);
+      return { x: c.x / TILE, y: c.y / TILE, color: t.op.color };
+    });
+  }
+
+  // ------------------------------------------------------------ Fahrgast im Detail (RM-FR-EVT-06)
+  private pressAt: { x: number; y: number; t: number } | null = null;
+  private personPinned = false;
+
+  private personAt(sx: number, sy: number) {
+    if (this.ui.menu || this.ui.tool !== 'select' || this.ui.hoverTrain !== null) return null;
+    const w = this.cameras.main.getWorldPoint(sx, sy);
+    return this.people.at(w.x, w.y);
+  }
+
+  personCard(id: number) { return this.people.card(id); }
+
+  /** langer Druck ohne Bewegung: Fahrgast festhalten, bis wieder getippt wird */
+  private checkLongPress() {
+    const pr = this.pressAt;
+    if (!pr || !this.input.activePointer.isDown || this.time.now - pr.t < 450) return;
+    this.pressAt = null;
+    const id = this.personAt(pr.x, pr.y);
+    if (id === null) return;
+    this.ui.hoverPerson = id;
+    this.ui.mouse = { x: pr.x, y: pr.y };
+    this.personPinned = true;
+  }
+
   /** Kamera zum Zug */
   /** Feld unter der Maus (für Hover-Fenster) */
   get hovered() { return this.hoverCell; }
@@ -372,7 +514,7 @@ export class GameScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     if (this.ui.menu) cam.scrollX += delta * 0.012;
-    const sp = (delta * 0.4) / cam.zoom;
+    const sp = (delta * 0.4 * (settings.scroll / 100)) / cam.zoom;
     if (!typing()) {
       if (this.keys.A.isDown || this.keys.LEFT.isDown) cam.scrollX -= sp;
       if (this.keys.D.isDown || this.keys.RIGHT.isDown) cam.scrollX += sp;
@@ -380,7 +522,12 @@ export class GameScene extends Phaser.Scene {
       if (this.keys.S.isDown || this.keys.DOWN.isDown) cam.scrollY += sp;
     }
 
+    this.takeBuildEvents();
     if (this.builtVersion !== this.g.version) this.rebuildStatic();
+    this.checkLongPress();
+    // Beschriftungen auf fester Bildschirmgröße halten
+    const inv = 1 / this.cameras.main.zoom;
+    for (const l of this.fixedLabels) if (l.scaleX !== inv) l.setScale(inv);
     const ok = `${this.g.version}|${this.ui.tool}`;
     if (ok !== this.overlayKey) { this.overlayKey = ok; this.drawOverlay(); }
     this.updateSignals();
@@ -391,6 +538,7 @@ export class GameScene extends Phaser.Scene {
     this.updateLights();
     this.weatherFx.update(dt, this.cameras.main.worldView, this.cameras.main.zoom);
     this.updateMarkers();
+    this.updateLayer();
     this.drawHint(dt);
     this.drawGhost();
     this.showFx();
@@ -451,9 +599,11 @@ export class GameScene extends Phaser.Scene {
       }
       if (b.name) {
         const c = toScreen((b.x + d.w / 2) * TILE, (b.y + d.h / 2) * TILE);
-        const label = this.add.text(c.x, c.y - 30, b.name, {
-          fontFamily: FONT, fontSize: '11px', color: '#ffe9a8', backgroundColor: '#1d3a6bdd', padding: { x: 4, y: 1 },
-        }).setOrigin(0.5, 1).setResolution(4).setDepth(D_OVERLAY + 2);
+        // Hauptbahnhof (höchste Bahnhofsstufe): „Hbf“ am größten Bahnhof
+        const hbf = this.g.tier === 3 && this.g.stations()[0]?.id === b.id ? ' Hbf' : '';
+        const label = this.fixedSize(this.add.text(c.x, c.y - 30, `${b.name}${hbf}`, {
+          fontFamily: FONT, fontSize: `${LABEL_PX.station}px`, color: '#ffe9a8', backgroundColor: '#1d3a6bdd', padding: { x: 4, y: 0 },
+        }).setOrigin(0.5, 1).setResolution(2).setDepth(D_OVERLAY + 2));
         this.staticObjs.push(label);
       }
     }
@@ -461,9 +611,9 @@ export class GameScene extends Phaser.Scene {
     const runs = this.g.platformRuns();
     if (runs.length > 1) runs.forEach((r, i) => {
       const c = toScreen((r.x0 + 0.5) * TILE, (r.row + 0.5) * TILE);
-      const lbl = this.add.text(c.x, c.y - 4, String(i + 1), {
-        fontFamily: FONT, fontSize: '10px', color: '#ffffff', backgroundColor: '#2c5f8add', padding: { x: 3, y: 0 },
-      }).setOrigin(0.5, 1).setResolution(4).setDepth(D_OVERLAY + 1);
+      const lbl = this.fixedSize(this.add.text(c.x, c.y - 4, String(i + 1), {
+        fontFamily: FONT, fontSize: `${LABEL_PX.platform}px`, color: '#ffffff', backgroundColor: '#2c5f8add', padding: { x: 3, y: 0 },
+      }).setOrigin(0.5, 1).setResolution(2).setDepth(D_OVERLAY + 1));
       this.staticObjs.push(lbl);
     });
     this.rebuildExtras();
@@ -585,9 +735,9 @@ export class GameScene extends Phaser.Scene {
             gfx.lineStyle(1, 0xffe066, 0.9);
             this.diamond(gfx, x0 + 0.15, y0 + 0.15, x0 + PARCEL - 0.15, y0 + PARCEL - 0.15, false, true);
             const c = toScreen((x0 + PARCEL / 2) * TILE, (y0 + PARCEL / 2) * TILE);
-            const t = this.add.text(c.x, c.y, `${g.parcelPrice(px, py).toLocaleString('de-AT')} €`, {
-              fontFamily: FONT, fontSize: '12px', color: '#fff6c8', stroke: '#3a2a00', strokeThickness: 3,
-            }).setOrigin(0.5).setResolution(3).setDepth(D_OVERLAY + 2);
+            const t = this.fixedSize(this.add.text(c.x, c.y, `${g.parcelPrice(px, py).toLocaleString('de-AT')} €`, {
+              fontFamily: FONT, fontSize: `${LABEL_PX.price}px`, color: '#fff6c8', stroke: '#3a2a00', strokeThickness: 5,
+            }).setOrigin(0.5).setResolution(2).setDepth(D_OVERLAY + 2));
             this.priceLabels.push(t);
           }
         }
@@ -632,6 +782,59 @@ export class GameScene extends Phaser.Scene {
   private lastState = new Map<number, string>();
 
   /** rote Uhr über verspäteten Zügen, Warnzeichen an Störungen, Geräusche bei Halt/Abfahrt */
+  /** Ebene neu zeichnen (gut dreimal pro Sekunde) */
+  private updateLayer() {
+    const layer = this.ui.layer;
+    if (!layer) { if (this.layerOn) { this.layerGfx.clear(); this.layerOn = false; } return; }
+    const now = performance.now();
+    if (this.layerOn && now < this.layerNext) return;
+    this.layerNext = now + 300;
+    this.layerOn = true;
+    const gfx = this.layerGfx, gr = this.g.grid, sim = this.g.sim;
+    gfx.clear();
+    // Karte abdunkeln, damit die Ebene heraussticht (in Parzellen – ein einziges Riesenvieleck zeichnet WebGL nicht zuverlässig)
+    gfx.fillStyle(0x0b0e18, 0.45);
+    for (let py = 0; py < MAP_H; py += PARCEL) for (let px = 0; px < MAP_W; px += PARCEL) this.diamond(gfx, px, py, px + PARCEL, py + PARCEL);
+    const cell = (x: number, y: number, color: number, alpha: number, grow = 0) => {
+      gfx.fillStyle(color, alpha);
+      this.diamond(gfx, x - grow, y - grow, x + 1 + grow, y + 1 + grow);
+    };
+    if (layer === 'occupancy') {
+      gr.cells.forEach((c, k) => {
+        if (!c.track && c.piece === null) return;
+        const { x, y } = gr.xy(k);
+        if (sim.faultCells.has(k)) cell(x, y, 0xd9534f, 0.9);
+        else if (sim.owner[k]) cell(x, y, 0xffb02e, 0.55);
+        else cell(x, y, 0x3fa34d, 0.35);
+      });
+    } else if (layer === 'pax' || layer === 'mood') {
+      const agg = new Map<number, { n: number; m: number }>();
+      for (const p of this.people.samples()) {
+        const x = Math.floor(p.x / TILE), y = Math.floor(p.y / TILE);
+        if (!gr.inside(x, y)) continue;
+        const k = gr.key(x, y), a = agg.get(k) ?? { n: 0, m: 0 };
+        a.n++; a.m += p.mood;
+        agg.set(k, a);
+      }
+      for (const [k, a] of agg) {
+        const { x, y } = gr.xy(k);
+        if (layer === 'pax') cell(x, y, a.n >= 6 ? 0xff6a3d : a.n >= 3 ? 0xffd23f : 0x4da3ff, a.n >= 6 ? 0.75 : 0.55);
+        else { const m = a.m / a.n; cell(x, y, m > 0.5 ? 0x3fa34d : m > -0.3 ? 0xffd23f : 0xd9534f, 0.7); }
+      }
+    } else if (layer === 'wear') {
+      for (const e of elements(this.g)) {
+        const w = wearOf(this.g, e.k), { x, y } = gr.xy(e.k);
+        cell(x, y, w >= 70 ? 0xd9534f : w >= 40 ? 0xffd23f : 0x3fa34d, 0.85);
+      }
+      // Züge, die in die Werkstatt oder zum Putzen müssten
+      for (const t of sim.trains) {
+        if ((t.wear <= 55 && t.dirt <= 70) || !t.route.length || t.state === 'stored') continue;
+        const p = this.worldOnTrain(t, t.length / 2);
+        cell(Math.floor(p.x / TILE), Math.floor(p.y / TILE), t.wear > 55 ? 0xd9534f : 0xffd23f, 0.6, 0.4);
+      }
+    }
+  }
+
   private updateMarkers() {
     let used = 0;
     const put = (key: string, wx: number, wy: number, alpha = 1) => {
@@ -663,8 +866,10 @@ export class GameScene extends Phaser.Scene {
     if (this.lastState.size > 200) for (const id of [...this.lastState.keys()]) if (!sim.trains.some((t) => t.id === id)) this.lastState.delete(id);
     const blink = Math.floor(this.time0 / 400) % 2 === 0;
     for (const f of this.g.faults) {
-      const q = this.g.grid.xy(f.k);
-      put('warn', q.x * TILE + 8, q.y * TILE + 8, f.repairAt ? 0.5 : blink ? 1 : 0.35);
+      for (const k of f.cells ?? [f.k]) {
+        const q = this.g.grid.xy(k);
+        put('warn', q.x * TILE + 8, q.y * TILE + 8, f.repairAt || f.boosted ? 0.5 : blink ? 1 : 0.35);
+      }
     }
     for (let i = used; i < this.markerPool.length; i++) this.markerPool[i].setVisible(false);
   }
@@ -784,6 +989,7 @@ export class GameScene extends Phaser.Scene {
     const gfx = this.ghost;
     gfx.clear();
     this.ghostImgs.forEach((i) => i.setVisible(false));
+    this.costTag.setVisible(false);
     const tool = this.ui.tool;
     if (tool === 'access' || tool === 'wire') {
       const h = this.toolHelp(tool);
@@ -840,7 +1046,17 @@ export class GameScene extends Phaser.Scene {
         gfx.lineStyle(2.5 / z, 0xffd23c, alpha).beginPath().moveTo(l.x, l.y).lineTo(tip.x, tip.y).lineTo(r.x, r.y).strokePath();
       }
     }
-    this.ui.message = plan.ok ? `${plan.note ? `${plan.note} · ` : ''}${plan.cost < 0 ? '+' : plan.cost > 0 ? '−' : ''}${Math.abs(plan.cost).toLocaleString('de-AT')} €` : plan.reason ?? '';
+    const eur = (n: number) => Math.abs(Math.round(n)).toLocaleString('de-AT');
+    const broke = !plan.ok && plan.reason === 'Zu wenig Geld' && plan.cost > 0;
+    this.ui.message = plan.ok ? `${plan.note ? `${plan.note} · ` : ''}${plan.cost < 0 ? '+' : plan.cost > 0 ? '−' : ''}${eur(plan.cost)} €`
+      : broke ? `Zu wenig Geld: kostet ${eur(plan.cost)} €, es fehlen ${eur(plan.cost - this.g.money)} €` : plan.reason ?? '';
+    // Betrag direkt am Mauszeiger, rot wenn das Geld nicht reicht
+    if ((plan.ok && plan.cost !== 0) || broke) {
+      const end = a.cells[a.cells.length - 1];
+      const q = toScreen((end.x + 1) * TILE, end.y * TILE);
+      this.costTag.setText(broke ? `−${eur(plan.cost)} € · fehlen ${eur(plan.cost - this.g.money)} €` : `${plan.cost < 0 ? '+' : '−'}${eur(plan.cost)} €`)
+        .setColor(broke ? '#ff6a5a' : plan.cost < 0 ? '#9dff8a' : '#ffe9a8').setPosition(q.x + 6 / this.cameras.main.zoom, q.y - 2 / this.cameras.main.zoom).setVisible(true);
+    }
   }
 
   /** schwebende Beträge (Bauen, Züge, Kiosk) */
@@ -857,11 +1073,13 @@ export class GameScene extends Phaser.Scene {
       }
       const big = f.train !== undefined;
       const txt = `${f.amount >= 0 ? '+' : '−'}${Math.abs(f.amount).toLocaleString('de-AT')} €${f.label ? `\n${f.label}` : ''}`;
+      // feste Bildschirmgröße wie die übrigen Beschriftungen (nicht in fixedLabels, weil die Größe animiert wird)
+      const inv = 1 / this.cameras.main.zoom;
       const t = this.add.text(p.x, p.y, txt, {
-        fontFamily: FONT, fontSize: big ? '13px' : '11px', align: 'center', lineSpacing: -3,
-        color: f.amount >= 0 ? '#9dff8a' : '#ff6a5a', stroke: '#140c06', strokeThickness: 3,
-      }).setOrigin(0.5, 1).setResolution(4).setDepth(D_UI + 10).setScale(0.6);
-      this.tweens.add({ targets: t, scale: 1, duration: 180, ease: 'Back.easeOut' });
+        fontFamily: FONT, fontSize: `${big ? LABEL_PX.fxBig : LABEL_PX.fx}px`, align: 'center', lineSpacing: -4,
+        color: f.amount >= 0 ? '#9dff8a' : '#ff6a5a', stroke: '#140c06', strokeThickness: 4,
+      }).setOrigin(0.5, 1).setResolution(2).setDepth(D_UI + 10).setScale(0.6 * inv);
+      this.tweens.add({ targets: t, scale: inv, duration: 180, ease: 'Back.easeOut' });
       this.tweens.add({ targets: t, y: p.y - 28, alpha: 0, delay: big ? 1300 : 700, duration: 1100, ease: 'Sine.easeIn', onComplete: () => t.destroy() });
     }
   }

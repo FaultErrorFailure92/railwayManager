@@ -5,11 +5,52 @@ import manifest from '../gen/manifest.json';
 import { toScreen } from '../iso';
 import type { OperatorId } from '../sim/Operators';
 import { pointOnEdge, StopRun } from '../world/Network';
+import { currentMap } from '../world/maps';
+import type { Train } from '../sim/Simulation';
 
 type State = 'arrive' | 'idle' | 'walk' | 'board' | 'leave';
 type Emote = 'dots' | 'excl' | 'angry' | 'heart' | 'happy';
 
+/** Steckbrief eines Fahrgasts (RM-FR-EVT-06) */
+interface Trip {
+  name: string;
+  /** Fahrtrichtung (Wartende) bzw. Herkunft (Aussteigende) */
+  dir: 'E' | 'W';
+  purpose: string;
+  /** nur Aussteigende */
+  train?: string;
+  late?: number;
+  dirty?: boolean;
+}
+
+export interface PersonCard { id: number; name: string; lines: { text: string; cls?: string }[]; mood: 'gut' | 'naja' | 'sauer' }
+
+const FIRST = ['Frau Huber', 'Herr Gruber', 'Oma Gerti', 'Opa Ferdl', 'Lena', 'Jonas', 'Frau Dr. Wallner', 'Herr Mayerhofer', 'Sophie', 'Maximilian', 'Frau Pichler',
+  'Herr Steiner', 'Mia', 'Lukas', 'Frau Moser', 'Herr Brandstätter', 'Tante Resi', 'Onkel Poldi', 'Anna', 'Elias', 'Frau Hofbauer', 'Herr Leitner', 'Emma', 'David'];
+const PURPOSE = [
+  'besucht die Enkerl – mit selbstgebackenem Marillenkuchen',
+  'hat ein Vorstellungsgespräch und übt leise die Antworten',
+  'fährt zum Zahnarzt und hofft auf eine Verspätung',
+  'will endlich den Dachboden der Tante entrümpeln',
+  'fährt zum Fußballtraining, die Stutzen hängen aus dem Rucksack',
+  'pendelt ins Büro, der Laptop ist schwerer als gedacht',
+  'hat ein erstes Date und zu viel Parfum erwischt',
+  'bringt einen Kürbis zur Gemüse-Prämierung',
+  'fährt zur Oper – im Rucksack belegte Semmeln für die Pause',
+  'besucht einen Modellbahn-Stammtisch (natürlich)',
+  'holt ein gebrauchtes Akkordeon ab',
+  'will heute endlich den Gipfel schaffen, die Wanderschuhe sind neu',
+  'fährt zur Uni und hat die Vorlesung schon zur Hälfte verschlafen',
+  'liefert eine Torte für eine Hochzeit – bitte nicht bremsen',
+  'zählt Züge und schreibt alle Nummern in ein Heft',
+  'fährt einkaufen und hat die Liste natürlich vergessen',
+];
+const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+let nextPersonId = 1;
+
 interface Person {
+  id: number;
+  trip: Trip;
   img: Phaser.GameObjects.Image;
   bubble: Phaser.GameObjects.Image;
   x: number;
@@ -103,7 +144,8 @@ export class People {
     const variant = Math.floor(Math.random() * VARIANTS);
     const img = this.scene.add.image(0, 0, 'people', variant * FRAMES).setOrigin(0.5, 1);
     const bubble = this.scene.add.image(0, 0, 'emotes', 0).setOrigin(0.5, 1).setVisible(false);
-    const p: Person = { img, bubble, x, y, tx, ty, state, variant, anim: Math.random(), wait: 1 + Math.random() * 6, alpha,
+    const trip: Trip = { name: pick(FIRST), dir: Math.random() < 0.5 ? 'E' : 'W', purpose: pick(PURPOSE) };
+    const p: Person = { id: nextPersonId++, trip, img, bubble, x, y, tx, ty, state, variant, anim: Math.random(), wait: 1 + Math.random() * 6, alpha,
       waited: 0, emote: null, emoteT: 0, blink: Math.random() * 4 };
     this.list.push(p);
     return p;
@@ -186,7 +228,10 @@ export class People {
           const s = this.spotOn(c.x, c.y);
           const side = Math.sign(c.y * TILE + 8 - d.y);
           const p = this.add(d.x + (Math.random() - 0.5) * 6, d.y + side * 5, 'leave', s.x, s.y, 1);
-          if (p) this.say(p, late || t.dirt > 70 ? 'angry' : 'happy', 2.5);
+          if (p) {
+            this.say(p, late || t.dirt > 70 ? 'angry' : 'happy', 2.5);
+            p.trip = { ...p.trip, dir: t.dir, train: `${t.number} (${t.op.category})`, late: Math.round(t.arrDelay ?? 0), dirty: t.dirt > 70 };
+          }
         }
       }
       if (!job.board) continue;
@@ -289,7 +334,74 @@ export class People {
     });
   }
 
+  // ------------------------------------------------------------ Fahrgast im Detail (RM-FR-EVT-06)
+  /** Fahrgast unter einem Weltpunkt (oberster) */
+  at(wx: number, wy: number): number | null {
+    let best: Person | null = null;
+    for (const p of this.list) {
+      if (p.alpha < 0.5 || !p.img.visible) continue;
+      const b = p.img.getBounds();
+      if (wx < b.x - 1 || wx > b.right + 1 || wy < b.y - 1 || wy > b.bottom + 1) continue;
+      if (!best || p.img.depth > best.img.depth) best = p;
+    }
+    return best?.id ?? null;
+  }
+
+  /** nächster Zug in diese Richtung, der hier hält und mitnimmt */
+  private nextTrain(dir: 'E' | 'W'): Train | undefined {
+    const sim = this.g.sim;
+    // Wendezüge fahren dorthin zurück, woher sie kamen
+    const goes = (t: Train) => (t.op.turnback ? (t.dir === 'E' ? 'W' : 'E') : t.dir);
+    return [...sim.trains, ...sim.queue]
+      .filter((t) => goes(t) === dir && !t.missedStop && t.jobs.some((j) => j.k === 'stop' && j.board))
+      .sort((a, b) => a.plannedSpawn - b.plannedSpawn)[0];
+  }
+
+  card(id: number): PersonCard | null {
+    const p = this.list.find((x) => x.id === id);
+    if (!p) return null;
+    const [west, east] = currentMap().ends;
+    const lines: PersonCard['lines'] = [];
+    let mood: PersonCard['mood'] = 'gut';
+    const trip = p.trip;
+    if (trip.train) {
+      lines.push({ text: `kommt mit ${trip.train} aus ${trip.dir === 'E' ? west : east}` });
+      if ((trip.late ?? 0) >= 3) { mood = 'sauer'; lines.push({ text: `${trip.late} min zu spät – „Typisch!“`, cls: 'no' }); }
+      else if (trip.dirty) { mood = 'naja'; lines.push({ text: 'Der Zug war ganz schön schmutzig.', cls: 'no' }); }
+      else lines.push({ text: 'Pünktlich angekommen – sehr zufrieden.', cls: 'ok' });
+    } else {
+      const t = this.nextTrain(trip.dir);
+      lines.push({ text: `will nach ${trip.dir === 'E' ? east : west}` });
+      if (t) {
+        const delay = Math.round(this.g.sim.delayNow(t));
+        lines.push({ text: `wartet auf ${t.number} (${t.op.category})${delay >= 2 ? ` – ${delay} min Verspätung` : ''}`, cls: delay >= 3 ? 'no' : undefined });
+      } else lines.push({ text: 'Weiß noch nicht, welcher Zug hier hält …', cls: 'no' });
+      const pat = this.patience(p), min = Math.round(p.waited / 60);
+      const c = this.cellOf(p), k = `${c.x},${c.y}`;
+      const comfort = this.comfort.get(k) ?? 1;
+      if (p.waited > 2 * pat) { mood = 'sauer'; lines.push({ text: `ist sauer: wartet schon ${min} min auf einen überfälligen Zug`, cls: 'no' }); }
+      else if (p.waited > pat) { mood = 'naja'; lines.push({ text: `wird ungeduldig (${min} min über der Zeit)`, cls: 'no' }); }
+      else if (this.kioskNear.has(k)) lines.push({ text: 'gut gelaunt – hat sich am Kiosk einen Kaffee geholt', cls: 'ok' });
+      else if (comfort >= 1.7) lines.push({ text: 'gut gelaunt – sitzt trocken in der Wartehalle', cls: 'ok' });
+      else if (comfort > 1) lines.push({ text: 'gut gelaunt – hier lässt es sich aushalten', cls: 'ok' });
+      else lines.push({ text: 'ganz entspannt – noch ist alles im Plan' });
+    }
+    lines.push({ text: trip.purpose, cls: 'muted' });
+    return { id, name: trip.name, lines, mood };
+  }
+
   /** Stimmung aller Wartenden: Anteil verärgert / glücklich (für die Anzeige) */
+  /** Position und Stimmung aller Fahrgäste (Ebenen RM-FR-UI-12): 1 gut, 0 naja, −1 sauer */
+  samples() {
+    return this.list.map((p) => {
+      let mood = 1;
+      if (p.state === 'leave' || p.state === 'arrive') mood = (p.trip.late ?? 0) >= 3 ? -1 : p.trip.dirty ? 0 : 1;
+      else if (p.waited > 2 * this.patience(p)) mood = -1;
+      else if (p.waited > this.patience(p)) mood = 0;
+      return { x: p.x, y: p.y, mood };
+    });
+  }
+
   moodSummary() {
     let angry = 0, waiting = 0;
     for (const p of this.list) {

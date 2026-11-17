@@ -2,6 +2,7 @@ import { ACC, CAR_LEN, DEC, LOOP_SLACK, MAIN_ROW, MAP_W, PASSING_LOOPS, SECOND_R
 import { Dir, Edge, edgeRow, isOut, Network, ParkKind, SortRun } from '../world/Network';
 import { industryById } from '../world/industries';
 import { inHours, LAYOVER_LEVEL, OPERATORS, Operator, OperatorId, SORT_DESTS } from './Operators';
+import { boostAt } from './demand';
 
 /** Aufgaben eines Zuges, der Reihe nach abgearbeitet */
 export type Job =
@@ -17,6 +18,17 @@ export interface Train {
   id: number;
   op: Operator;
   number: string;
+  /** Verstärkerzug in der Stoßzeit (RM-FR-ECO-08) */
+  boost?: boolean;
+  /** Anschluss abwarten: auf diesen Zug warten, höchstens bis zu dieser Zeit (RM-FR-OPS-13) */
+  waitFor?: number;
+  waitUntil?: number;
+  /** Verspätung von außen in Sekunden – der Zug kommt so viel später an die Kartengrenze (RM-FR-OPS-11) */
+  extDelay?: number;
+  /** nachfolgende Züge dürfen diesen (verspäteten) Zug überholen */
+  letPass?: boolean;
+  /** festgelegten Bahnsteig ignorieren, irgendein freier passt */
+  anyPlatform?: boolean;
   dir: Dir;
   /** Sprite-Arten je Wagen ab Zugspitze (loco, coach, wagon0..2 …) */
   cars: string[];
@@ -77,6 +89,7 @@ export interface Train {
 
 export type SimEvent =
   | { type: 'stop'; train: Train }
+  | { type: 'arrive'; train: Train }
   | { type: 'turn'; train: Train }
   | { type: 'exit'; train: Train; delayMin: number; missed: boolean }
   | { type: 'service'; train: Train; kind: 'wash' | 'repair' | 'clean'; fee: number }
@@ -214,10 +227,17 @@ export class Simulation {
       while (this.nextSpawn[id] < this.time + PLAN_AHEAD) {
         const at = this.nextSpawn[id];
         this.nextSpawn[id] += takt * 60;
-        if (!inHours(OPERATORS[id], at)) continue;
+        if (!inHours(OPERATORS[id], at) || !this.runs(OPERATORS[id], at)) continue;
         const dir = this.nextDir[id] ?? 'E';
         this.nextDir[id] = dir === 'E' ? 'W' : 'E';
         this.queue.push(this.createTrain(OPERATORS[id], at, dir));
+        // Stoßzeit: Verstärkerzug zwischen zwei Regelzügen, in die Gegenrichtung
+        const b = this.boostOf(id) ? boostAt(OPERATORS[id], at, takt) : null;
+        if (b !== null && this.runs(OPERATORS[id], b)) {
+          const tr = this.createTrain(OPERATORS[id], b, dir === 'E' ? 'W' : 'E');
+          tr.boost = true;
+          this.queue.push(tr);
+        }
       }
     }
     this.queue.sort((a, b) => a.plannedSpawn - b.plannedSpawn);
@@ -233,6 +253,14 @@ export class Simulation {
   dwellFactor = 1;
   /** Bahnhofs-Bewertung: Faktor auf die Fahrgastzahl */
   paxFactor = 1.1;
+  /** Anteil der Vertragszüge, die verspätet von außen kommen (RM-FR-OPS-11) */
+  extDelayChance = 0.08;
+  /** besondere Tage: Faktor je Unternehmen und Ankunftszeit (von Game gesetzt) */
+  paxMod: (op: Operator, at: number) => number = () => 1;
+  /** Vertragsoption „Verstärkerzüge in der Stoßzeit“ aktiv? (RM-FR-ECO-08, von Game gesetzt) */
+  boostOf: (id: OperatorId) => boolean = () => false;
+  /** besondere Tage: fährt das Unternehmen zu dieser Zeit? (Streik) */
+  runs: (op: Operator, at: number) => boolean = () => true;
   private hasWash() {
     for (const e of this.net.edges.values()) if (e.wash) return true;
     return false;
@@ -289,7 +317,7 @@ export class Simulation {
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
     const capacity = cars.filter((c) => c === 'coach' || c === 'cab' || c === 'emu' || c === 'ecab').length * 80 + cars.filter((c) => c === 'dine').length * 30;
     const paxScale = base.length / op.cars.length;
-    const fest = (at < this.festUntil ? 1.6 : 1) * this.paxFactor;
+    const fest = (at < this.festUntil ? 1.6 : 1) * this.paxFactor * this.paxMod(op, at);
     const passengers = !stops ? 0 : Math.min(capacity || 9999, Math.round((op.pax[0] + Math.random() * (op.pax[1] - op.pax[0])) * paxScale * fest));
     return {
       id: this.nextId++, op, cars, length, dir,
@@ -302,6 +330,7 @@ export class Simulation {
       dirt: Math.round(vandal ? rnd(75, 98) : rnd(5, 85)), wear: Math.round(rnd(0, 85)), layover,
       transit: !contract && op.kind !== 'sort',
       ends: ends || undefined,
+      extDelay: contract && this.extDelayChance > 0 && Math.random() < this.extDelayChance ? Math.round(rnd(3, 15)) * 60 : undefined,
     };
   }
 
@@ -661,7 +690,7 @@ export class Simulation {
           const f = c.filter((p) => this.net.paths(p[p.length - 1].to, el).length > 0);
           return f.length ? f : c;
         };
-        const pref = this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
+        const pref = t.anyPlatform ? undefined : this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
         if (pref) {
           const c = through(this.net.pathsTo(from, (e) => ok(e) && e.stopRun!.id === pref, el));
           if (c.length) return c;
@@ -848,9 +877,24 @@ export class Simulation {
     this.fillTimetable();
   }
 
+  /** Zug ist an der Kartengrenze angekommen (geplant plus Verspätung von außen) */
+  ready(t: Train) { return t.plannedSpawn + (t.extDelay ?? 0) <= this.time; }
+
+  /** verspäteter Zug, der nachfolgende Züge derselben Richtung aufhält */
+  blockedBehind(t: Train) {
+    if (!t.extDelay || t.letPass || this.ready(t) || !this.queue.includes(t)) return [];
+    return this.queue.filter((q) => q !== t && q.dir === t.dir && q.plannedSpawn >= t.plannedSpawn && q.plannedSpawn <= t.plannedSpawn + t.extDelay! + 60);
+  }
+
+  /** Zug neu leiten (z. B. nach Gleiswechsel) */
+  reroute(t: Train) {
+    if (t.state === 'running' && !t.rake) this.replan(t, t.committed, false);
+  }
+
   private spawn(dir: Dir) {
-    const t = this.queue.find((q) => q.dir === dir);
-    if (!t || t.plannedSpawn > this.time) return;
+    // Reihenfolge bleibt, außer ein verspäteter Zug lässt die nachfolgenden vor
+    const t = this.queue.find((q) => q.dir === dir && (this.ready(q) || !q.letPass));
+    if (!t || !this.ready(t)) return;
     let best: { entry: Edge; p: Edge[]; score: number; missed: boolean } | null = null;
     let anyBusy = false;
     for (const entry of this.net.entries) {
@@ -987,6 +1031,11 @@ export class Simulation {
   private moveTrain(t: Train, dt: number) {
     if (t.state === 'dwell') {
       t.dwellLeft -= dt;
+      // Anschluss abwarten: Abfahrt verschieben, bis der Zubringer da ist (höchstens bis waitUntil)
+      if (t.dwellLeft <= 0 && t.waitFor !== undefined) {
+        if (!this.arrivedAt.has(t.waitFor) && this.time < (t.waitUntil ?? 0) && this.isComing(t.waitFor)) t.dwellLeft = 1;
+        else { t.waitFor = undefined; t.waitUntil = undefined; }
+      }
       if (t.dwellLeft <= 0) {
         const job = t.jobs.shift();
         t.state = 'running';
@@ -1101,6 +1150,29 @@ export class Simulation {
     return Math.max(0, t.arrDelay ?? 0);
   }
 
+  // ------------------------------------------------------------ Anschlüsse (RM-FR-OPS-13)
+  /** tatsächliche Ankunft am Bahnhof je Zug (letzte Stunden) */
+  readonly arrivedAt = new Map<number, number>();
+
+  /** Zug ist noch unterwegs zum Bahnhof (oder angekündigt)? */
+  private isComing(id: number) {
+    return this.queue.some((t) => t.id === id) || this.trains.some((t) => t.id === id && !this.arrivedAt.has(id));
+  }
+
+  /** geplante Ankunft und Abfahrt am Bahnhof */
+  stationTimes(t: Train) {
+    const arr = this.dueAt(t);
+    // mit Abstellen (Wendezeit) fährt der Zug erst zur geplanten Rückfahrt, sonst nach der normalen Haltezeit
+    const parks = !!t.ends || t.jobs.some((j) => j.k === 'park');
+    const dep = parks ? this.plannedDeparture(t) : arr + (t.op.dwell + (t.passengers / 100) * 20) * this.dwellFactor;
+    return { arr, dep };
+  }
+
+  /** alte Ankünfte vergessen */
+  pruneArrivals(keep = 3 * 3600) {
+    for (const [id, at] of this.arrivedAt) if (at < this.time - keep) this.arrivedAt.delete(id);
+  }
+
   private plannedDeparture(t: Train) {
     return t.plannedExit - (MAP_W * TILE / 2 + t.length) / t.op.vmax - 180;
   }
@@ -1116,6 +1188,8 @@ export class Simulation {
       if (job.alight) {
         const nominal = (t.s - SPAWN_HEAD) / t.op.vmax + t.op.vmax / (2 * DEC) + 60;
         t.arrDelay = (this.time - (t.plannedSpawn + nominal)) / 60;
+        this.arrivedAt.set(t.id, this.time);
+        this.events.push({ type: 'arrive', train: t });
       }
       // Wendezug mit Wendezeit: Abstellzeit festlegen
       const park = t.jobs[1];

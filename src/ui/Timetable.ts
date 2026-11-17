@@ -5,6 +5,7 @@ import { fmtTime } from '../game/Game';
 import type { Train } from '../sim/Simulation';
 import { BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
+import { connectionsAtRisk, plannedConnections } from '../game/Connections';
 
 /** Weg-Zeit-Diagramm: Strecke waagrecht (West → Ost), Zeit senkrecht (oben früher, unten später) */
 const PAST = 60 * 60, FUTURE = 120 * 60;
@@ -132,6 +133,30 @@ export class Timetable {
       }
     }
     ctx.setLineDash([]);
+    // Anschlüsse am Bahnhof (RM-FR-OPS-13): Klammer von Ankunft (Zubringer) bis Abfahrt (Anschlusszug)
+    const st0 = this.g.stations()[0];
+    if (st0) {
+      const cx = X(st0.x + BUILDINGS[st0.key].w + 2) + 3;
+      const risk = new Set(connectionsAtRisk(this.g).map((c) => `${c.from.id}>${c.to.id}`));
+      const marks: { arr: number; dep: number; col: string; label: string }[] = [];
+      for (const c of plannedConnections(this.g)) {
+        const k = `${c.from.id}>${c.to.id}`;
+        if (this.g.connResults.has(k)) continue;
+        marks.push({ arr: c.arr, dep: c.dep, col: risk.has(k) ? '#d9822b' : '#2e7d32', label: `${c.from.number}→${c.to.number}` });
+      }
+      for (const r of this.g.connResults.values()) marks.push({ arr: r.arr, dep: r.dep, col: r.ok ? '#2e7d32' : '#c0392b', label: r.ok ? '✓' : '✗' });
+      let lane = 0;
+      for (const m of marks.sort((a, b) => a.arr - b.arr)) {
+        if (m.dep < t0 || m.arr > t1) continue;
+        const x = cx + (lane++ % 4) * 4, ya = Y(m.arr), yb = Y(m.dep);
+        ctx.strokeStyle = m.col;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x - 3, ya); ctx.lineTo(x, ya); ctx.lineTo(x, yb); ctx.lineTo(x - 3, yb); ctx.stroke();
+        ctx.fillStyle = m.col;
+        ctx.fillRect(x - 1, yb - 1, 3, 3);
+        if (m.label.length <= 2) { ctx.textAlign = 'left'; ctx.fillText(m.label, x + 3, (ya + yb) / 2); }
+      }
+    }
     // tatsächlich gefahren: kräftige Tinte
     ctx.lineWidth = 2;
     for (const [id, tr] of this.traces) {

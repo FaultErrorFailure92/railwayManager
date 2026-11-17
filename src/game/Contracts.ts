@@ -16,6 +16,8 @@ export interface Contract {
   declinedUntil?: number;
   /** Zusatz „Abstellen & Pflege“: Züge enden/wenden hier, werden abgestellt, gereinigt, gewaschen, repariert */
   service?: boolean;
+  /** Verstärkerzüge in der Stoßzeit (RM-FR-ECO-08) */
+  boost?: boolean;
   /** Nachtzug: Anzahl Linien (je Nacht ein Zug pro Richtung und Linie) */
   lines?: number;
 }

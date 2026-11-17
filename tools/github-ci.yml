@@ -1,0 +1,21 @@
+# Automatische Prüfung bei jeder Änderung (RM-FR-Q-02, RM-FR-SEC-03)
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # bekannte Sicherheitslücken in Abhängigkeiten
+      - run: npm audit --audit-level=high
+      - run: npm test
+      - run: npm run build

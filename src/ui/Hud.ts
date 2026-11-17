@@ -1,12 +1,23 @@
 import { COST, STATION_UPGRADE } from '../config';
-import { CANCEL_COST, Game, fmtTime, REPAIR_COST } from '../game/Game';
+import { BIG_REPAIR_COST, CANCEL_COST, Game, fmtTime, REPAIR_COST } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
 import { ACHIEVEMENTS } from '../game/Achievements';
 import { goalProgress } from '../game/Goals';
-import { currentMap, MAPS } from '../world/maps';
+import { currentMap } from '../world/maps';
+import { Menus } from './Menus';
+import type { NewGameSetup } from '../game/FreePlay';
+import { activeProfile, CHAPTERS, deleteProfile, listProfiles, setActive, type Profile } from '../game/Profiles';
 import { Sound } from '../render/Sound';
 import { MISSIONS, ToolId } from '../game/Missions';
-import { activateSlot, clearSave, deleteSlot, listSlots, saveState, writeSave, writeSlot } from '../game/storage';
+import { activateSlot, clearSave, deleteProfileSlots, deleteSlot, importSave, listSlots, readSlot, saveState, writeSave, writeSlot } from '../game/storage';
+import { exportSave, FILE_EXT, readSaveFile } from '../game/saveFile';
+import { downloadReport } from '../game/crash';
+import { Minimap } from './Minimap';
+import { findTerm, LEXICON } from '../game/Lexicon';
+import { firstPayment, loanLimit, loanOffers, repayLoan, takeLoan, totalInterest } from '../game/Loans';
+import { TIERS, tierChecks } from '../game/StationTiers';
+import { MENTOR, mentorLine, problems, type Problem } from '../game/Problems';
+import { fromUi, maxUiScale, setSettings, settings, toUi, UI_SCALES } from '../game/settings';
 import { OPERATORS } from '../sim/Operators';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
@@ -14,14 +25,30 @@ import { Timetable } from './Timetable';
 import { TitleShow } from '../render/TitleShow';
 import { author, newsPhoto, paperName } from './press';
 import { BOARD } from '../game/Board';
-import { avatar, AVATARS, portrait } from './portrait';
+import { avatar, portrait } from './portrait';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
 import type { Train } from '../sim/Simulation';
-import type { GameScene, UiState } from '../render/GameScene';
-import { VARIANTS, typing, variantOf } from '../render/GameScene';
+import type { PersonCard } from '../render/People';
+
+/** Text sicher in HTML einsetzen */
+const esc = (s: string) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+import type { GameScene, Layer, UiState } from '../render/GameScene';
+import { LAYERS, VARIANTS, typing, variantOf } from '../render/GameScene';
 
 const $ = (id: string) => document.getElementById(id)!;
+
+/** Laufschrift der Abfahrtstafel: Bahn-Fakten (neben den News aus „Was ist neu?“) */
+const RAIL_FACTS = [
+  'Wussten Sie? Die erste Bahn auf österreichischem Boden war eine Pferdeeisenbahn: Linz–Budweis, ab 1832.',
+  'Wussten Sie? Die Kaiser-Ferdinands-Nordbahn fuhr ab 1837 als erste Dampfeisenbahn Österreichs.',
+  'Wussten Sie? Die Semmeringbahn ist die erste normalspurige Gebirgsbahn Europas – und UNESCO-Welterbe.',
+  'Wussten Sie? Der Gotthard-Basistunnel ist mit 57 km der längste Eisenbahntunnel der Welt.',
+  'Wussten Sie? Normalspur heißt 1435 mm – so breit fahren die meisten Bahnen Europas.',
+  'Wussten Sie? Hinter jedem Hauptsignal beginnt ein Blockabschnitt – darin darf immer nur ein Zug sein.',
+  'Wussten Sie? Die Bauten der Wiener Stadtbahn stammen großteils von Otto Wagner.',
+  'Wussten Sie? Die durchschnittliche Verspätung des japanischen Shinkansen liegt unter einer Minute.',
+];
 const eur = (n: number) => Math.round(n).toLocaleString('de-AT');
 const SPEEDS = [1, 2, 4, 8];
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
@@ -31,6 +58,12 @@ const PHOTO_CAPTION: Record<string, string> = {
   fans: 'Archivbild: Fans beim letzten Auswärtsspiel.',
   'vandal-trains': 'Kein Kunstwerk: besprühte Garnitur vor der Waschanlage.',
   'vandal-station': 'Spuren der Verwüstung am Bahnsteig.',
+  'special-feiertag': 'Ruhiger Bahnhofsvorplatz – die Ausflügler sind schon unterwegs.',
+  'special-heimspiel': 'Archivbild: So voll war es beim letzten Derby.',
+  'special-ferien': 'Gepäckberge am Bahnsteig: Die Ferien können kommen.',
+  'special-streik': 'Leere Bänke: Hier fährt morgen nichts.',
+  'bigfault-tree': 'Hier geht vorerst nichts: Feuerwehr bei der Arbeit.',
+  'bigfault-wire': 'Der Fahrdraht hängt durch – Techniker sind unterwegs.',
 };
 
 interface ToolDef { id: ToolId; label: string; key: string; icon?: string; cost?: number; help: string }
@@ -93,6 +126,12 @@ export class Hud {
 
   constructor(private g: Game, private ui: UiState, private scene: () => GameScene | undefined, private hadSave: boolean, freshStart = false) {
     this.buildHotbar();
+    this.minimap = new Minimap($('minimap') as HTMLCanvasElement, g, scene);
+    $('layer-btns').innerHTML = LAYERS.map((l) => `<button data-layer="${l.id}" title="${l.name}">${l.name}</button>`).join('');
+    $('layer-btns').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-layer]') as HTMLElement | null;
+      if (b) this.setLayer(this.ui.layer === b.dataset.layer ? undefined : b.dataset.layer as Layer);
+    });
 
     $('speed').querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => this.setSpeed(Number((b as HTMLElement).dataset.speed)));
@@ -103,29 +142,7 @@ export class Hud {
     };
     $('m-load').onclick = () => this.toggleSlots('m-slots');
     $('go-load').onclick = () => this.toggleSlots('go-slots');
-    $('go-new').onclick = () => { $('gameover').classList.add('hidden'); this.openMapPick(); };
-    $('mp-close').onclick = () => $('mappick').classList.add('hidden');
-    // Kartenauswahl per Pfeiltasten wie in alten Spielen
-    $('mp-cards').addEventListener('mouseover', (e) => {
-      const b = (e.target as HTMLElement).closest('[data-map]') as HTMLElement | null;
-      if (b) { $('mp-cards').querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); }
-    });
-    $('mappick').addEventListener('keydown', (e) => {
-      const list = Array.from($('mp-cards').querySelectorAll<HTMLElement>('[data-map]'));
-      const i = list.findIndex((x) => x.classList.contains('sel'));
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const n = list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length];
-        list.forEach((x) => x.classList.remove('sel'));
-        n.classList.add('sel'); n.focus(); n.scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'Enter' && i >= 0) { e.preventDefault(); this.startOnMap(list[i].dataset.map!); }
-      else if (e.key === 'Escape') $('mappick').classList.add('hidden');
-      e.stopPropagation();
-    });
-    $('mp-cards').addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest('[data-map]') as HTMLElement | null;
-      if (b) this.startOnMap(b.dataset.map!);
-    });
+    $('go-new').onclick = () => { $('gameover').classList.add('hidden'); this.openMenu(); };
     for (const id of ['m-slots', 'go-slots']) {
       $(id).addEventListener('click', (e) => {
         const t = e.target as HTMLElement;
@@ -133,8 +150,17 @@ export class Hud {
         if (l && activateSlot(l.dataset.load!)) { saveState.disabled = true; location.reload(); }
         const d = t.closest('[data-del]') as HTMLElement | null;
         if (d) { deleteSlot(d.dataset.del!); this.renderSlots(id); }
+        const x = t.closest('[data-export]') as HTMLElement | null;
+        if (x) {
+          const s = readSlot(x.dataset.export!);
+          const info = listSlots().find((i) => i.id === x.dataset.export);
+          if (s) void exportSave(s, info?.label); else this.slotMsg(id, 'Dieser Spielstand ist nicht mehr da.', true);
+        }
+        if (t.closest('[data-import]')) this.pickImport(id);
       });
     }
+    $('p-export').onclick = () => { void exportSave(this.g.save(), `${this.g.company || 'Spiel'} · ${fmtTime(this.g.sim.time)}`); };
+    $('p-report').onclick = () => downloadReport();
     $('dl-show').onclick = () => { const id = this.g.sim.deadlock?.[0]; if (id) this.scene()?.focusTrain(id); };
     $('dl-cancel').onclick = () => {
       const ids = this.g.sim.deadlock;
@@ -148,17 +174,21 @@ export class Hud {
     $('p-close').onclick = () => this.closePause();
     $('p-save').onclick = () => { $('btn-save').click(); $('p-save').textContent = 'Gespeichert ✓'; };
     $('p-main').onclick = () => { this.closePause(); this.openMenu(); };
-    $('company').onclick = () => this.askName();
+    // im Spiel nur ansehen – ändern geht im Hauptmenü (rechts oben)
+    $('company').onclick = () => { const p = listProfiles().find((x) => x.id === this.g.profileId); if (p) this.menus.openStats(p, true); };
     $('name-ok').onclick = () => this.confirmName();
-    $('pl-avatars').addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest('[data-av]') as HTMLElement | null;
-      if (!b) return;
-      this.plAvatar = Number(b.dataset.av);
-      $('pl-avatars').querySelectorAll('.pl-av').forEach((x) => x.classList.toggle('on', x === b));
-    });
     ($('name-input') as HTMLInputElement).addEventListener('keydown', (e) => { if (e.key === 'Enter') this.confirmName(); });
+    // Ein-/Ausklappen, Zustand bleibt gespeichert
+    let folds: Record<string, boolean> = {};
+    try { folds = JSON.parse(localStorage.getItem('rm_folds') ?? '{}'); } catch { /* egal */ }
     document.querySelectorAll('[data-fold]').forEach((h) => {
-      h.addEventListener('click', () => $((h as HTMLElement).dataset.fold!).classList.toggle('closed'));
+      const id = (h as HTMLElement).dataset.fold!;
+      if (typeof folds[id] === 'boolean') $(id).classList.toggle('closed', folds[id]);
+      h.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('button')) return;
+        folds[id] = $(id).classList.toggle('closed');
+        try { localStorage.setItem('rm_folds', JSON.stringify(folds)); } catch { /* egal */ }
+      });
     });
     $('q-show').onclick = () => this.showQuest();
 
@@ -202,7 +232,9 @@ export class Hud {
 
     // Hauptmenü
     $('m-continue').onclick = () => this.closeMenu();
-    $('m-new').onclick = () => this.newGame();
+    $('m-campaign').onclick = () => this.withProfile(() => this.menus.openCampaign());
+    $('m-free').onclick = () => this.withProfile(() => this.menus.openFree());
+    $('m-stats').onclick = () => this.withProfile(() => this.menus.openStats(activeProfile()!));
     $('btn-mail').onclick = () => this.openInbox();
     $('ib-close').onclick = () => $('inbox').classList.add('hidden');
     $('ib-list').addEventListener('click', (e) => {
@@ -214,7 +246,7 @@ export class Hud {
       if (r) this.openMail(Number(r.dataset.mail));
     });
     $('ng-yes').onclick = () => this.saveDialog();
-    $('ng-no').onclick = () => { $('ng-ask').classList.add('hidden'); this.openMapPick(); };
+    $('ng-no').onclick = () => { $('ng-ask').classList.add('hidden'); this.launchPending(); };
     $('ng-cancel').onclick = () => $('ng-ask').classList.add('hidden');
     $('ng-back').onclick = () => $('ng-ask').classList.add('hidden');
     $('ng-ok').onclick = () => this.saveAndNew();
@@ -227,7 +259,27 @@ export class Hud {
         location.reload();
       };
     }
-    $('m-help').onclick = () => $('m-helpbox').classList.toggle('hidden');
+    $('m-help').onclick = () => this.openHelp();
+    $('p-help').onclick = () => this.openHelp();
+    $('help-close').onclick = () => $('help').classList.add('hidden');
+    $('help-tabs').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-help]') as HTMLElement | null;
+      if (b) this.openHelp(b.dataset.help as 'keys' | 'parts' | 'abc');
+    });
+    $('m-settings').onclick = () => this.openSettings();
+    $('p-settings').onclick = () => this.openSettings();
+    $('set-close').onclick = $('set-ok').onclick = () => $('settings').classList.add('hidden');
+    $('set-scale').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-scale]') as HTMLButtonElement | null;
+      if (b && !b.disabled) { setSettings({ uiScale: Number(b.dataset.scale) }); this.renderSettings(); }
+    });
+    $('set-sfx').addEventListener('input', () => { setSettings({ sfx: Number(($('set-sfx') as HTMLInputElement).value) }); this.renderSettings(); });
+    $('set-sfx').addEventListener('change', () => Sound.gong());
+    $('set-music').addEventListener('input', () => { setSettings({ music: Number(($('set-music') as HTMLInputElement).value) }); this.renderSettings(); });
+    $('set-scroll').addEventListener('input', () => { setSettings({ scroll: Number(($('set-scroll') as HTMLInputElement).value) }); this.renderSettings(); });
+    $('set-contrast').onclick = () => { setSettings({ contrast: !settings.contrast }); this.renderSettings(); };
+    $('set-anim').onclick = () => { setSettings({ anim: !settings.anim }); this.renderSettings(); };
+    window.addEventListener('resize', () => { if (!$('settings').classList.contains('hidden')) this.renderSettings(); });
 
     $('ev-ok').onclick = () => this.closeEvent();
     $('m-news').onclick = () => this.openChangelog(0);
@@ -251,6 +303,31 @@ export class Hud {
       if (t.closest('[data-decline]')) { this.g.declineOffer(); this.closeOffer(); }
     });
     $('btn-research').onclick = () => this.openScreen('research');
+    $('btn-issues').onclick = () => this.toggleIssues();
+    $('money-wrap').onclick = () => { if (this.g.company) this.openBank(); };
+    $('bank-close').onclick = () => $('bank').classList.add('hidden');
+    $('bank-body').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-loan],[data-repay]') as HTMLElement | null;
+      if (!b) return;
+      if (b.dataset.repay !== undefined) repayLoan(this.g);
+      else { const [amount, days] = b.dataset.loan!.split(':').map(Number); takeLoan(this.g, { amount, days, rate: 0 }); }
+      this.openBank();
+    });
+    $('is-close').onclick = () => $('issues').classList.add('hidden');
+    $('is-face').innerHTML = avatar(MENTOR.avatar, 36);
+    $('is-who').textContent = `${MENTOR.name}, ${MENTOR.role}`;
+    $('is-list').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-is]') as HTMLElement | null;
+      if (!b) return;
+      const p = this.issueList.find((x) => x.id === b.dataset.is);
+      if (!p) return;
+      if (b.dataset.act === 'show') this.showIssue(p);
+      else if (p.fix?.run) { const msg = p.fix.run(this.g); this.flash(msg || `Erledigt: ${p.fix.label}`); this.issueKey = ''; }
+      else if (p.fix?.ui === 'inbox') this.openInbox();
+      else if (p.fix?.ui === 'contracts') this.openScreen('contracts');
+      else if (p.fix?.ui === 'research') this.openScreen('research');
+      else if (p.fix?.ui === 'offer') this.showOffer();
+    });
     $('btn-contracts').onclick = () => this.openScreen('contracts');
     $('btn-stats').onclick = () => this.openScreen('stats');
     // Pixel-Lautsprecher: Wellen = an, Kreuz = stumm
@@ -262,6 +339,8 @@ export class Hud {
     };
     soundLabel();
     $('btn-sound').onclick = () => { Sound.toggle(); soundLabel(); };
+    $('btn-undo').onclick = () => this.undoRedo(false);
+    $('btn-redo').onclick = () => this.undoRedo(true);
     $('btn-timetable').onclick = () => this.openScreen('timetable');
     this.timetable = new Timetable(this.g);
     $('tt-ops').addEventListener('click', (e) => {
@@ -288,9 +367,10 @@ export class Hud {
       if (this.rsTipId !== c.dataset.tip) { this.rsTipId = c.dataset.tip; tip.innerHTML = researchTipHtml(this.g, c.dataset.tip as ResearchId); }
       tip.style.display = 'flex';
       const r = c.getBoundingClientRect();
-      const left = r.right + 12 + tip.offsetWidth > window.innerWidth ? r.left - 12 - tip.offsetWidth : r.right + 12;
-      tip.style.left = `${Math.max(4, left)}px`;
-      tip.style.top = `${Math.max(4, Math.min(window.innerHeight - tip.offsetHeight - 4, r.top))}px`;
+      const tw = fromUi(tip.offsetWidth), th = fromUi(tip.offsetHeight);
+      const left = r.right + 12 + tw > window.innerWidth ? r.left - 12 - tw : r.right + 12;
+      tip.style.left = `${toUi(Math.max(4, left))}px`;
+      tip.style.top = `${toUi(Math.max(4, Math.min(window.innerHeight - th - 4, r.top)))}px`;
     });
     $('rs-tabs').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-tree]') as HTMLElement | null;
@@ -311,6 +391,8 @@ export class Hud {
       }
       const sv = t.closest('[data-svc]') as HTMLElement | null;
       if (sv) this.g.toggleService(sv.dataset.svc as keyof typeof OPERATORS);
+      const bo = t.closest('[data-boost]') as HTMLElement | null;
+      if (bo) this.g.toggleBoost(bo.dataset.boost as keyof typeof OPERATORS);
       const cr = t.closest('[data-crew]') as HTMLElement | null;
       if (cr) this.g.setCrew(this.g.crew + Number(cr.dataset.crew));
       const tk = t.closest('[data-takt]') as HTMLElement | null;
@@ -324,6 +406,19 @@ export class Hud {
         if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); this.closeChangelog(); }
         return;
       }
+      if (!$('bank').classList.contains('hidden')) {
+        if (e.key === 'Escape') { e.preventDefault(); $('bank').classList.add('hidden'); }
+        return;
+      }
+      if (!$('help').classList.contains('hidden')) {
+        if (e.key === 'Escape' || e.key === 'F1' || e.key.toLowerCase() === 'h') { e.preventDefault(); $('help').classList.add('hidden'); }
+        return;
+      }
+      if (e.key === 'F1') { e.preventDefault(); this.openHelp(); return; }
+      if (!$('settings').classList.contains('hidden')) {
+        if (e.key === 'Escape') { e.preventDefault(); $('settings').classList.add('hidden'); }
+        return;
+      }
       // Schnellspeichern
       if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's')) { e.preventDefault(); if (this.g.company) $('btn-save').click(); return; }
       if (!$('event').classList.contains('hidden')) {
@@ -331,6 +426,12 @@ export class Hud {
         return;
       }
       if (!$('modal').classList.contains('hidden') || typing()) return;
+      // Rückgängig / Wiederholen (Strg+Z, Strg+Y, Strg+Umschalt+Z; am Mac mit ⌘)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
+        e.preventDefault();
+        if (this.g.company) this.undoRedo(e.key.toLowerCase() === 'y' || e.shiftKey);
+        return;
+      }
       if (this.screen) {
         const k = e.key.toLowerCase();
         if (e.key === 'Escape' || (k === 'f' && this.screen === 'research') || (k === 'v' && this.screen === 'contracts') || (k === 't' && this.screen === 'timetable')) this.closeScreen();
@@ -338,6 +439,10 @@ export class Hud {
       }
       if (!this.ui.menu && e.key.toLowerCase() === 'f') { this.openScreen('research'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'v') { this.openScreen('contracts'); return; }
+      if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey) { this.openHelp(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'l' && !e.ctrlKey && !e.metaKey) { this.toggleIssues(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) { this.cycleLayer(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) { $('minimap-box').classList.toggle('hidden'); this.minimap.draw(); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'p') { if ($('inbox').classList.contains('hidden')) this.openInbox(); else $('inbox').classList.add('hidden'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 't') { this.openScreen('timetable'); return; }
       if (e.key === 'Escape' && !$('bpanel').classList.contains('hidden')) { this.closePanel(); return; }
@@ -364,10 +469,11 @@ export class Hud {
       if (grp) { this.pickGroup(grp); this.groupKeyUntil = performance.now() + 2000; }
     });
 
-    if (freshStart) {
+    // neues Spiel aus dem Menü (Profil und Modus stehen schon fest): gleich los
+    if (freshStart && this.g.company) {
       this.ui.menu = false;
       $('menu').classList.add('hidden');
-      this.askName();
+      this.g.paused = false;
     } else this.openMenu();
     this.setupTooltips();
     $('fault-pop').addEventListener('mouseenter', () => { this.faultHold = true; });
@@ -414,12 +520,11 @@ export class Hud {
     this.g.paused = true;
     this.ui.menu = true;
     this.ui.tool = 'select';
-    const running = this.hadSave || !!this.g.company;
-    $('m-continue').style.display = running ? '' : 'none';
-    $('m-new').textContent = running ? 'Neues Spiel' : 'Spiel starten';
+    this.refreshMenu();
     $('m-sub').textContent = '';
-    void running;
     $('menu').classList.remove('hidden');
+    // erster Start: zuerst ein Profil anlegen (RM-FR-PROF-02)
+    if (!activeProfile()) setTimeout(() => this.menus.onboard(() => { this.refreshMenu(); this.menus.openCampaign(); }), 300);
     this.titleShow.start();
   }
 
@@ -465,16 +570,95 @@ export class Hud {
     $('menu').classList.add('hidden');
     this.ui.menu = false;
     this.g.paused = this.pausedBeforeMenu;
-    if (!this.g.company) this.askName();
   }
 
-  private newGame() {
-    const running = this.hadSave || !!this.g.company;
-    if (!running) { this.openMapPick(); return; }
-    // laufendes Spiel: vorher speichern?
+  // ------------------------------------------------------------ Profile (RM-FR-PROF-01/02)
+  private menus = new Menus({
+    start: (s) => this.startGame(s),
+    switchProfile: (id) => this.switchProfile(id),
+    deleteProfile: (p) => this.removeProfile(p),
+    changed: () => this.refreshMenu(),
+  });
+
+  /** erst ein Profil anlegen, dann weiter */
+  private withProfile(then: () => void) {
+    if (activeProfile()) then();
+    else this.menus.onboard(() => { this.refreshMenu(); then(); });
+  }
+
+  private switchProfile(id: string) {
+    // laufendes Spiel gehört zum alten Profil: dort sichern, dann frisch starten
+    if (this.g.company && this.g.profileId !== id) {
+      writeSlot(`${this.g.company} · Profilwechsel`, true, this.g.save());
+      saveState.disabled = true;
+      clearSave();
+      setActive(id);
+      location.reload();
+      return;
+    }
+    setActive(id);
+    this.menus.renderProfiles();
+    this.refreshMenu();
+  }
+
+  private removeProfile(p: Profile) {
+    deleteProfileSlots(p.id);
+    deleteProfile(p.id);
+    if (this.g.profileId === p.id) { saveState.disabled = true; clearSave(); location.reload(); return; }
+    this.menus.renderProfiles();
+    this.refreshMenu();
+  }
+
+  private clockTimer = 0;
+
+  private refreshMenu() {
+    const p = activeProfile();
+    // Profil geändert: laufendes Spiel dieses Profils mitziehen
+    if (p && this.g.company && this.g.profileId === p.id && (this.g.company !== p.company || this.g.player.avatar !== p.player.avatar || this.g.player.name !== p.player.name || this.g.player.title !== p.player.title)) {
+      this.g.company = p.company; this.g.player = { ...p.player }; this.companyKey = '';
+    }
+    const running = !!this.g.company && (!this.g.profileId || this.g.profileId === p?.id);
+    $('m-continue').style.display = running ? '' : 'none';
+    this.menus.renderAccount();
+    const cs = document.getElementById('m-campaign-sub');
+    if (cs) cs.textContent = p ? (p.chapters.length >= CHAPTERS.length ? 'alle Kapitel geschafft!' : `Kapitel ${p.chapters.length + 1} von ${CHAPTERS.length}`) : 'Kapitel für Kapitel zum Hauptbahnhof';
+    const sub = document.getElementById('m-continue-sub');
+    if (running && sub) sub.textContent = `${this.g.company} · Tag ${Math.floor(this.g.sim.time / 86400) + 1} · ${currentMap().name}`;
+    // Abfahrtstafel: Uhr und Laufschrift
+    // fehlende Felder (z. B. alte index.html im Browser-Cache) einfach überspringen
+    const clock = () => { const c = document.getElementById('mb-clock'); if (c) c.textContent = new Date().toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit' }); };
+    clock();
+    if (!this.clockTimer) this.clockTimer = window.setInterval(clock, 15000);
+    // News der aktuellen Version (kurz) und ein paar Bahn-Fakten im Wechsel
+    const plain = (t: string) => { const x = t.replace(/<[^>]+>/g, '').split(' – ')[0]; return x.length > 110 ? `${x.slice(0, x.lastIndexOf(' ', 107))} …` : x; };
+    const news = (CHANGELOG[0]?.items ?? []).filter((x) => x.kind === 'neu').map((x) => `Neu in ${CHANGELOG[0].version}: ${plain(x.text)}`);
+    const facts = [...RAIL_FACTS].sort(() => Math.random() - 0.5).slice(0, 3);
+    const lines: string[] = [];
+    news.slice(0, 6).forEach((n, k) => { lines.push(n); if (k % 2 === 1 && facts.length) lines.push(facts.shift()!); });
+    lines.push(...facts);
+    if (p) lines.unshift(`Willkommen zurück, ${[p.player.title, p.player.name].filter(Boolean).join(' ') || 'Betriebsleitung'} (${p.company})!`);
+    const tick = document.getElementById('mb-ticker');
+    if (tick) tick.textContent = lines.join('   +++   ');
+  }
+
+  /** neues Spiel aus Kampagne / freiem Spiel: laufendes Spiel vorher speichern? */
+  private pendingSetup: NewGameSetup | null = null;
+  private startGame(setup: NewGameSetup) {
+    this.pendingSetup = setup;
+    const running = !!this.g.company && this.g.profileId === setup.profileId;
+    if (!running) { this.launchPending(); return; }
     $('ng-ask').classList.remove('hidden');
     $('ng-save').classList.add('hidden');
     $('ng-q').classList.remove('hidden');
+  }
+
+  private launchPending() {
+    const s = this.pendingSetup;
+    if (!s) return;
+    saveState.disabled = true;
+    clearSave();
+    try { sessionStorage.setItem('rm_new', '1'); sessionStorage.setItem('rm_map', s.map); sessionStorage.setItem('rm_setup', JSON.stringify(s)); } catch { /* egal */ }
+    location.reload();
   }
 
   private saveDialog() {
@@ -490,51 +674,11 @@ export class Hud {
     const label = ($('ng-name') as HTMLInputElement).value.trim() || this.g.company || 'Spiel';
     if (!writeSlot(label, false, s)) { $('ng-err').textContent = 'Speichern fehlgeschlagen – Speicher voll?'; return; }
     $('ng-ask').classList.add('hidden');
-    this.openMapPick();
-  }
-
-  /** Kartenauswahl vor einem neuen Spiel */
-  private openMapPick() {
-    const diff: Record<string, string> = { leicht: '★', mittel: '★★', schwer: '★★★' };
-    const bg = (m: (typeof MAPS)[number]) => m.ground === 'sand' ? '#d8b878' : m.ground === 'snow' ? '#e4ebf4'
-      : `color-mix(in srgb, #6c9a3c 80%, #${m.tint.toString(16).padStart(6, '0')})`;
-    $('mp-cards').innerHTML = MAPS.map((m, i) => `<button class="mp-card${i === 0 ? ' sel' : ''}" data-map="${m.id}">
-      <span class="mp-arrow">▶</span><div class="mp-prev" style="background:${bg(m)}"><img src="assets/maps/${m.id}.png" alt="" onerror="this.remove()" />${this.mapPreview(m)}</div>
-      <div class="mp-txt"><b>${m.name}</b><span class="mp-theme">${m.theme} · Schwierigkeit ${diff[m.difficulty]}</span><small>${m.info}</small></div>
-      <span class="mp-money">Start<br>${eur(m.startMoney)} €</span></button>`).join('');
-    $('mappick').classList.remove('hidden');
-    ($('mp-cards').firstElementChild as HTMLElement).focus();
-  }
-
-  /** kleine Vorschau: Fels, Wasser, Wald grob als Pixel */
-  private mapPreview(m: (typeof MAPS)[number]) {
-    const W = 64, H = 16, px: string[] = [];
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const gx = x * 4, gy = y * 4;
-      let c = '';
-      if (m.rocks.some((r) => gx >= r.x0 && gx < r.x1 && gy >= r.y0 && gy < r.y1 && (r.edge === 'N' ? gy < r.y0 + (r.y1 - r.y0) * 0.7 : gy > r.y0 + (r.y1 - r.y0) * 0.3))) c = '#8f887c';
-      if (m.lakes.some((l) => ((gx - l.x) / (l.rx + 1)) ** 2 + ((gy - l.y) / (l.ry + 1)) ** 2 <= 1)) c = '#4a7fc4';
-      if (m.rivers.some((rv) => Math.abs(gx - rv.x) <= 2)) c = '#4a7fc4';
-      if (gy === 28 || gy === 32) c = '#5a4632';
-      if (m.industries.some((i) => Math.abs(gx - i.x) <= 3 && Math.abs(gy - i.y) <= 3)) c = '#c0392b';
-      if (c) px.push(`<i style="left:${x * 3}px;top:${y * 3}px;background:${c}"></i>`);
-    }
-    return px.join('');
-  }
-
-  private startOnMap(id: string) {
-    const running = this.hadSave || !!this.g.company;
-    $('mappick').classList.add('hidden');
-    // erstes Spiel auf der schon geladenen Karte: kein Neuladen nötig
-    if (!running && id === currentMap().id) { this.pausedBeforeMenu = false; this.closeMenu(); return; }
-    saveState.disabled = true;
-    clearSave();
-    try { sessionStorage.setItem('rm_new', '1'); sessionStorage.setItem('rm_map', id); } catch { /* egal */ }
-    location.reload();
+    this.launchPending();
   }
 
   // ------------------------------------------------------------ Namen (Firma, Bahnhof)
-  private naming: { kind: 'company' } | { kind: 'station'; id: number } = { kind: 'company' };
+  private naming: { kind: 'station'; id: number } = { kind: 'station', id: -1 };
   private pausedBeforeDialog = false;
 
   private openNameDialog(title: string, text: string, value: string, placeholder: string) {
@@ -550,45 +694,20 @@ export class Hud {
     setTimeout(() => { inp.focus(); inp.select(); }, 50);
   }
 
-  private askName() {
-    this.naming = { kind: 'company' };
-    this.openNameDialog('Deine Bahngesellschaft', 'Wie soll dein Unternehmen heißen?', this.g.company, 'z.B. Donaubahn AG');
-    $('name-ok').textContent = this.g.company ? 'Passt!' : "Los geht's!";
-    // Spieler: Name, Anrede, Avatar
-    const pl = this.g.player;
-    ($('pl-name') as HTMLInputElement).value = pl.name;
-    ($('pl-title') as HTMLSelectElement).value = pl.title;
-    this.plAvatar = pl.avatar;
-    $('pl-avatars').innerHTML = AVATARS.map((_, i) => `<button class="pl-av${i === pl.avatar ? ' on' : ''}" data-av="${i}">${avatar(i, 40)}</button>`).join('');
-    $('pl-box').classList.remove('hidden');
-    // neues Spiel: Tutorial an- oder abwählen
-    $('tut-row').classList.toggle('hidden', !!this.g.company || this.g.missionIdx > 0);
-  }
-
   private askStation(id: number) {
     const b = this.g.grid.buildings.get(id);
     if (!b) return;
     this.naming = { kind: 'station', id };
     this.openNameDialog('Neuer Bahnhof', 'Wie soll dieser Bahnhof heißen?', b.name ?? '', 'z.B. Donaufeld');
-    $('pl-box').classList.add('hidden');
     $('name-ok').textContent = 'Taufen!';
-    $('tut-row').classList.add('hidden');
   }
 
   private confirmName() {
     const v = ($('name-input') as HTMLInputElement).value.trim();
-    const first = !this.g.company;
-    if (this.naming.kind === 'company') {
-      if (first && !$('tut-row').classList.contains('hidden') && !($('tut-check') as HTMLInputElement).checked) this.g.skipTutorial();
-      this.g.company = v || 'Meine Bahn AG';
-      this.g.player = { name: ($('pl-name') as HTMLInputElement).value.trim(), title: ($('pl-title') as HTMLSelectElement).value as '' | 'Frau' | 'Herr', avatar: this.plAvatar };
-      this.companyKey = '';
-      if (first) this.g.welcome();
-    }
-    else this.g.stationName(this.naming.id, v || this.g.suggestStationName());
+    this.g.stationName(this.naming.id, v || this.g.suggestStationName());
     ($('name-input') as HTMLInputElement).blur();
     $('modal').classList.add('hidden');
-    this.g.paused = first && this.naming.kind === 'company' ? false : this.pausedBeforeDialog;
+    this.g.paused = this.pausedBeforeDialog;
   }
 
   // ------------------------------------------------------------ Forschung / Verträge
@@ -701,19 +820,224 @@ export class Hud {
   }
 
   // ------------------------------------------------------------ Spielstände
+  // ------------------------------------------------------------ Einstellungen (RM-FR-UI-09, RM-FR-UI-14)
+  private openSettings() {
+    this.renderSettings();
+    $('settings').classList.remove('hidden');
+  }
+
+  private renderSettings() {
+    const max = maxUiScale();
+    $('set-scale').innerHTML = UI_SCALES.map((s) => `<button class="btn${settings.uiScale === s ? ' on' : ''}" data-scale="${s}"${s > max ? ' disabled' : ''}>${s} %</button>`).join('');
+    $('set-scale-note').textContent = settings.uiScale > max
+      ? `Auf diesem Bildschirm passen höchstens ${max} % – es wird ${max} % verwendet.`
+      : `Das Spielfeld bleibt gleich groß (zoomen mit dem Mausrad).${max < UI_SCALES[UI_SCALES.length - 1] ? ' Größere Stufen passen nicht auf diesen Bildschirm.' : ''}`;
+    ($('set-music') as HTMLInputElement).value = String(settings.music);
+    $('set-music-v').textContent = settings.music ? `${settings.music} %` : 'aus';
+    ($('set-sfx') as HTMLInputElement).value = String(settings.sfx);
+    $('set-sfx-v').textContent = settings.sfx ? `${settings.sfx} %` : 'aus';
+    ($('set-scroll') as HTMLInputElement).value = String(settings.scroll);
+    $('set-scroll-v').textContent = `${settings.scroll} %`;
+    $('set-contrast').textContent = settings.contrast ? 'An' : 'Aus';
+    $('set-contrast').classList.toggle('on', settings.contrast);
+    $('set-anim').textContent = settings.anim ? 'An' : 'Aus';
+    $('set-anim').classList.toggle('on', settings.anim);
+  }
+
+  private minimap!: Minimap;
+
+  /** Ebene ein-/umschalten (RM-FR-UI-12) */
+  setLayer(l: Layer | undefined) {
+    this.ui.layer = l;
+    const def = LAYERS.find((x) => x.id === l);
+    document.querySelectorAll<HTMLElement>('#layer-btns [data-layer]').forEach((b) => b.classList.toggle('on', b.dataset.layer === l));
+    const leg = $('layer-legend');
+    leg.classList.toggle('hidden', !def);
+    leg.innerHTML = def ? def.legend.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') : '';
+    if (def) $('minimap-box').classList.remove('hidden');
+  }
+
+  private cycleLayer() {
+    const i = LAYERS.findIndex((x) => x.id === this.ui.layer);
+    this.setLayer(i + 1 < LAYERS.length ? LAYERS[i + 1].id : undefined);
+  }
+
+  // ------------------------------------------------------------ Bahnhofsstufen (RM-FR-PROG-08)
+  private tierKey = '';
+  /** Abschnitte ohne Verwendung ganz ausblenden; rechte Spalte macht dem Dock unten Platz */
+  private updateLayout() {
+    const g = this.g, sim = g.sim;
+    const show = (id: string, on: boolean) => $(id).classList.toggle('hidden', !on);
+    show('p-goals', g.goals.length > 0);
+    show('p-tier', g.stations().length > 0);
+    show('p-trains', sim.trains.length + sim.queue.length > 0);
+    show('p-log', g.log.length > 0);
+    show('p-sat', Object.values(g.contracts).some((c) => c.status !== 'none'));
+    const dock = $('dock');
+    document.documentElement.style.setProperty('--dock-h', `${dock.offsetHeight}px`);
+  }
+
+  private updateTier() {
+    const g = this.g;
+    if (!g.stations().length) return;
+    const next = g.tier + 1 < TIERS.length ? g.tier + 1 : -1;
+    const checks = next > 0 ? tierChecks(g, next) : [];
+    const key = `${g.tier}|${checks.map((c) => `${c.have}${c.ok}`).join()}`;
+    if (key === this.tierKey) return;
+    this.tierKey = key;
+    const cur = TIERS[g.tier];
+    $('tier').innerHTML = `<div class="tr-steps">${TIERS.map((_, i) => `<i class="${i <= g.tier ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="tr-name">${cur.name}</div>${g.tier ? `<div class="tr-bonus">${cur.unlock}</div>` : ''}
+      ${next > 0 ? `<div class="tr-next">Nächste Stufe: <b>${TIERS[next].name}</b> – ${TIERS[next].unlock}</div>
+        ${checks.map((c) => `<div class="tr-check ${c.ok ? 'ok' : 'no'}"><span>${c.ok ? '✓' : '·'} ${c.label}</span><span>${c.have} / ${c.need}</span></div>`).join('')}`
+      : '<div class="tr-next">Höchste Stufe erreicht.</div>'}`;
+  }
+
+
+  // ------------------------------------------------------------ Bank (RM-FR-ECO-10)
+  private openBank() {
+    const g = this.g, l = g.loan;
+    const pct = (r: number) => `${(r * 100).toLocaleString('de-AT', { maximumFractionDigits: 1 })} %`;
+    const status = l
+      ? `<div class="bk-loan">Laufender Kredit: Restschuld <b>${eur(l.rest)} €</b>, noch ${l.daysLeft} Tage, ${pct(l.rate)} Zinsen pro Tag.
+         <button class="btn" data-repay${g.money < l.rest ? ' disabled' : ''}>Restschuld jetzt tilgen (${eur(l.rest)} €)</button></div>`
+      : '';
+    const rows = loanOffers(g).map((o) => `<tr class="${o.ok ? '' : 'no'}"><td class="num">${eur(o.amount)} €</td><td>${o.days} Tage</td><td>${pct(o.rate)}</td>
+      <td class="num">${eur(firstPayment(o))} €</td><td class="num">${eur(totalInterest(o))} €</td>
+      <td>${o.ok ? `<button class="btn" data-loan="${o.amount}:${o.days}">Aufnehmen</button>` : `<small>${o.why}</small>`}</td></tr>`).join('');
+    $('bank-body').innerHTML = `<p class="bk-intro">Planbarer als der Überziehungskredit (${pct(0.03)} pro Tag): feste Laufzeit, tägliche Rate aus Tilgung und Zinsen. Höchstbetrag für deine Bahnhofsstufe: <b>${eur(loanLimit(g))} €</b>.</p>${status}
+      <table class="bk-table"><tr><th>Betrag</th><th>Laufzeit</th><th>Zins/Tag</th><th>1. Rate</th><th>Zinsen gesamt</th><th></th></tr>${rows}</table>`;
+    $('bank').classList.remove('hidden');
+  }
+
+  // ------------------------------------------------------------ Hilfe (RM-FR-UI-08)
+  private openHelp(tab: 'keys' | 'parts' | 'abc' = 'keys', term?: string) {
+    $('help-tabs').querySelectorAll('[data-help]').forEach((b) => b.classList.toggle('on', (b as HTMLElement).dataset.help === tab));
+    if (tab === 'abc') {
+      const list = [...LEXICON].sort((a, b) => a.term.localeCompare(b.term, 'de'));
+      $('help-body').innerHTML = list.map((e) => `<div class="abc-item${e.term === term ? ' on' : ''}" data-term="${e.term}"><b>${e.term}</b>${e.text}</div>`).join('');
+      $('help').classList.remove('hidden');
+      if (term) $('help-body').querySelector('.abc-item.on')?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    if (tab === 'keys') {
+      const keys: [string, string][] = [
+        ['Maus ziehen', 'Karte verschieben'], ['W A S D / Pfeile', 'Karte verschieben'], ['Mausrad', 'Zoom'],
+        ['1–9', 'Baumenüs, danach Ziffer = Eintrag'], ['B', 'Gebäude'], ['R', 'Variante / Richtung wechseln'], ['Q', 'Gebäude drehen'],
+        ['Abriss', 'Fläche aufziehen'], ['Rechtsklick', 'Abbrechen'], ['Esc', 'Werkzeug weg · Menü'],
+        ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen (am Mac ⌘)'], ['F5 / Strg+S', 'Speichern'],
+        ['Leertaste', 'Pause'], ['+ / −', 'Tempo'],
+        ['L', 'Was ist los?'], ['M', 'Übersichtskarte ein/aus'], ['E', 'Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung'], ['T', 'Fahrplan'], ['F', 'Forschung'], ['V', 'Verträge'], ['P', 'Postfach'],
+        ['H / F1', 'Diese Hilfe'], ['?', 'Bahn-ABC zum Begriff im Tooltip'], ['Zug anfahren', 'Infos zum Zug, anklicken für Menü'],
+      ];
+      $('help-body').innerHTML = `<div class="hp-keys">${keys.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('')}</div>`;
+    } else {
+      $('help-body').innerHTML = MENU.filter((g) => g.id !== 'select').map((grp) => `<div class="hp-grp"><h3>${grp.key} · ${grp.label}<small>${grp.help}</small></h3>
+        ${grp.items.map((it) => {
+          const locked = !!this.itemLocked(it);
+          return `<div class="hp-item${locked ? ' locked' : ''}"><img src="${ICON(it.icon)}" alt="" /><span>${it.label}${it.info ? `<small>${it.info}</small>` : ''}${locked ? '<small>noch gesperrt</small>' : ''}</span><span class="cost">${it.cost ? `${eur(it.cost)} €` : ''}</span></div>`;
+        }).join('')}</div>`).join('');
+    }
+    $('help').classList.remove('hidden');
+  }
+
+
+  // ------------------------------------------------------------ „Was ist los?“ (RM-FR-CPX-03)
+  private issueList: Problem[] = [];
+  private issueKey = '';
+
+  private toggleIssues() {
+    $('issues').classList.toggle('hidden');
+    this.issueKey = '';
+    this.updateIssues();
+  }
+
+  private showIssue(p: Problem) {
+    const sc = this.scene();
+    if (!sc || !p.at) return;
+    if ('train' in p.at) sc.focusTrain(p.at.train);
+    else sc.focus(p.at.x, p.at.y);
+  }
+
+  private updateIssues() {
+    if (!this.g.company) return;
+    const list = problems(this.g);
+    this.issueList = list;
+    const red = list.filter((p) => p.level === 'rot').length, yellow = list.filter((p) => p.level === 'gelb').length;
+    $('amp').className = `amp${red ? ' rot' : yellow ? ' gelb' : ''}`;
+    $('issue-count').textContent = String(red + yellow);
+    $('issue-count').classList.toggle('hidden', !(red + yellow));
+    $('btn-issues').dataset.tt = red || yellow ? `Was ist los? ${red ? `${red} dringend` : ''}${red && yellow ? ', ' : ''}${yellow ? `${yellow} zum Anschauen` : ''} (L)` : 'Was ist los? Alles in Ordnung (L)';
+    if ($('issues').classList.contains('hidden')) return;
+    const key = list.map((p) => `${p.id}|${p.level}|${p.text}|${p.fix?.label ?? ''}`).join('\n');
+    if (key === this.issueKey) return;
+    this.issueKey = key;
+    $('is-say').textContent = mentorLine(list);
+    $('is-list').innerHTML = list.length ? list.map((p) => `<li><i class="amp ${p.level}"></i><span>${p.text}</span>
+      <span class="is-btns">${p.at ? `<button class="btn" data-is="${p.id}" data-act="show">Zeigen</button>` : ''}${p.fix ? `<button class="btn" data-is="${p.id}" data-act="fix">${p.fix.label}</button>` : ''}</span></li>`).join('')
+      : '<li class="is-ok">✓ Keine Probleme</li>';
+  }
+
+  private undoKey = '';
+  private flashTimer = 0;
+
+  /** Bau-Aktion zurücknehmen oder wiederholen und kurz Bescheid geben */
+  private undoRedo(forward: boolean) {
+    const r = forward ? this.g.redo() : this.g.undo();
+    this.flash(r.text, !r.ok);
+  }
+
+  /** kurze Meldung oben in der Mitte */
+  private flash(text: string, bad = false) {
+    const f = $('flash');
+    f.textContent = text;
+    f.classList.toggle('bad', bad);
+    f.classList.remove('hidden');
+    clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => f.classList.add('hidden'), 1800);
+  }
+
   private toggleSlots(id: string) {
     $(id).classList.toggle('hidden');
     this.renderSlots(id);
   }
 
   private renderSlots(id: string) {
-    const list = listSlots();
-    $(id).innerHTML = list.length ? list.map((x) => {
+    const list = listSlots(activeProfile()?.id ?? '');
+    const head = `<div class="slots-head"><span class="slots-msg" data-msg>Spielstände liegen im Browser. Als Datei sind sie sicher aufgehoben.</span>
+      <button class="btn" data-import title="Spielstand-Datei (${FILE_EXT}) öffnen">Datei importieren…</button></div>`;
+    $(id).innerHTML = head + (list.length ? list.map((x) => {
       const day = Math.floor(x.gameTime / 86400) + 1;
       const date = new Date(x.saved).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-      return `<div class="slot-row${x.auto ? ' auto' : ''}"><div><b>${x.auto ? '⟳ ' : ''}${x.label}</b><small>${x.company} · Tag ${day}, ${fmtTime(x.gameTime)} · ${eur(x.money)} € · ${date}</small></div>
-        <button class="btn" data-load="${x.id}">Laden</button><button class="btn" data-del="${x.id}">✕</button></div>`;
-    }).join('') : '<div class="slots-empty">Noch keine Spielstände. „Speichern“ oben rechts legt einen an, Aufträge und Forschung speichern automatisch.</div>';
+      return `<div class="slot-row${x.auto ? ' auto' : ''}"><div><b>${x.auto ? '⟳ ' : ''}${esc(x.label)}</b><small>${esc(x.company)} · Tag ${day}, ${fmtTime(x.gameTime)} · ${eur(x.money)} € · ${date}</small></div>
+        <button class="btn" data-load="${esc(x.id)}">Laden</button><button class="btn" data-export="${esc(x.id)}" title="Als Datei exportieren">⤓</button><button class="btn" data-del="${esc(x.id)}">✕</button></div>`;
+    }).join('') : '<div class="slots-empty">Noch keine Spielstände. „Speichern“ oben rechts legt einen an, Aufträge und Forschung speichern automatisch.</div>');
+  }
+
+  private slotMsg(id: string, text: string, err = false) {
+    const m = $(id).querySelector('[data-msg]');
+    if (!m) return;
+    m.textContent = text;
+    m.classList.toggle('err', err);
+  }
+
+  /** Spielstand-Datei wählen, prüfen und laden (RM-FR-SAVE-03, RM-FR-SEC-01) */
+  private pickImport(id: string) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = `${FILE_EXT},.json,.gz`;
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      this.slotMsg(id, 'Prüfe Datei…');
+      const r = await readSaveFile(f);
+      if (!r.ok) { this.slotMsg(id, r.error, true); return; }
+      const label = `Import · ${r.label ?? f.name.replace(/\.[^.]+$/, '')}`.slice(0, 80);
+      if (!importSave(r.save, label)) { this.slotMsg(id, 'Speichern fehlgeschlagen – Speicher voll?', true); return; }
+      saveState.disabled = true;
+      location.reload();
+    };
+    input.click();
   }
 
   // ------------------------------------------------------------ Ausschreibung / Anfrage
@@ -938,12 +1262,12 @@ export class Hud {
     m.classList.remove('hidden');
     if (li) {
       const r = li.getBoundingClientRect();
-      m.style.left = `${Math.max(8, r.left - m.offsetWidth - 12)}px`;
-      m.style.top = `${Math.min(window.innerHeight - m.offsetHeight - 8, r.top)}px`;
+      m.style.left = `${toUi(Math.max(8, r.left - fromUi(m.offsetWidth) - 12))}px`;
+      m.style.top = `${toUi(Math.min(window.innerHeight - fromUi(m.offsetHeight) - 8, r.top))}px`;
       if (shown) this.scene()?.focusTrain(id);
     } else if (at) {
-      m.style.left = `${Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, at.x + 14))}px`;
-      m.style.top = `${Math.max(60, Math.min(window.innerHeight - m.offsetHeight - 8, at.y + 14))}px`;
+      m.style.left = `${toUi(Math.max(8, Math.min(window.innerWidth - fromUi(m.offsetWidth) - 8, at.x + 14)))}px`;
+      m.style.top = `${toUi(Math.max(60, Math.min(window.innerHeight - fromUi(m.offsetHeight) - 8, at.y + 14)))}px`;
     }
   }
 
@@ -983,6 +1307,15 @@ export class Hud {
     return `<div class="bar"><div style="width:${Math.round(Math.max(0, Math.min(100, v)))}%;background:${color}"></div></div>`;
   }
 
+  private personHover: { id: number | null; since: number } = { id: null, since: 0 };
+
+  /** Steckbrief eines Fahrgasts (RM-FR-EVT-06) */
+  private personHtml(p: PersonCard) {
+    const [word, cls] = { gut: ['zufrieden', 'ok'], naja: ['ungeduldig', 'gold'], sauer: ['sauer', 'no'] }[p.mood];
+    return `<div class="tc-head"><b>${p.name}</b><span class="pc-mood ${cls}">${word}</span></div>
+      <div class="tc-sub">Fahrgast</div>${p.lines.map((l) => `<div class="pc-line ${l.cls ?? ''}">${l.text}</div>`).join('')}`;
+  }
+
   private card(t: Train) {
     const delay = Math.round(this.g.sim.delayNow(t));
     const isPax = t.capacity > 0;
@@ -992,7 +1325,7 @@ export class Hud {
     const dirTxt = t.dir === 'E' ? '→ Ost' : '← West';
     const rows = [
       `<div class="tc-head"><span class="dot" style="background:${t.op.color}"></span><b>${t.number}</b><span class="muted">${dirTxt}</span></div>`,
-      `<div class="tc-sub">${t.op.category} · ${t.op.name}</div>`,
+      `<div class="tc-sub">${t.op.category} · ${t.op.name}${t.boost ? ' · Verstärkerzug (Stoßzeit)' : ''}${t.extDelay ? ` · kam ${Math.round(t.extDelay / 60)} min verspätet von außen` : ''}</div>`,
       `<div class="tc-cars">${cars}</div>`,
       `<div class="tc-row"><span>Status</span><span>${this.status(t)}</span></div>`,
     ];
@@ -1025,21 +1358,39 @@ export class Hud {
       t = find(this.ui.hoverTrain);
       x = this.ui.mouse.x + 18; y = this.ui.mouse.y + 18;
     }
-    if (!t || !$('train-menu').classList.contains('hidden')) { box.classList.add('hidden'); return; }
-    box.innerHTML = this.card(t);
+    // Fahrgast erst nach kurzem Verweilen zeigen (nicht bei jedem Vorbeifahren mit der Maus)
+    const hp = this.ui.hoverPerson ?? null;
+    if (hp !== this.personHover.id) this.personHover = { id: hp, since: performance.now() };
+    const pc = !t && hp !== null && !this.ui.menu && performance.now() - this.personHover.since > 350 ? this.scene()?.personCard(hp) : null;
+    if (pc) { t = undefined; x = this.ui.mouse.x + 18; y = this.ui.mouse.y + 18; }
+    if ((!t && !pc) || !$('train-menu').classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.innerHTML = t ? this.card(t) : this.personHtml(pc!);
     box.classList.remove('hidden');
-    const w = box.offsetWidth, h = box.offsetHeight;
+    const w = fromUi(box.offsetWidth), h = fromUi(box.offsetHeight);
     if (side === 'list') x -= w;
     x = Math.max(8, Math.min(window.innerWidth - w - 8, x));
     y = Math.max(8, Math.min(window.innerHeight - h - 8, y));
-    box.style.left = `${x}px`;
-    box.style.top = `${y}px`;
+    box.style.left = `${toUi(x)}px`;
+    box.style.top = `${toUi(y)}px`;
   }
 
   // ------------------------------------------------------------ Aktualisieren
   update() {
     const g = this.g, sim = g.sim;
     const now = performance.now();
+    this.minimap.draw();
+    this.updateIssues();
+    this.updateLayout();
+    this.updateTier();
+    // Rückgängig-Knöpfe
+    const ul = g.undoLog, uk = `${ul.canUndo}|${ul.canRedo}|${ul.peekUndo()?.label}|${ul.peekRedo()?.label}`;
+    if (uk !== this.undoKey) {
+      this.undoKey = uk;
+      ($('btn-undo') as HTMLButtonElement).disabled = !ul.canUndo;
+      ($('btn-redo') as HTMLButtonElement).disabled = !ul.canRedo;
+      $('btn-undo').title = ul.canUndo ? `Rückgängig: ${ul.peekUndo()!.label} (Strg+Z)` : 'Rückgängig (Strg+Z)';
+      $('btn-redo').title = ul.canRedo ? `Wiederholen: ${ul.peekRedo()!.label} (Strg+Y)` : 'Wiederholen (Strg+Y)';
+    }
 
     $('company-name').textContent = g.company || '…';
     // Avatar in der Titelleiste
@@ -1092,7 +1443,12 @@ export class Hud {
     // Mini-Balken: weiteste laufende Forschung; Punkt, wenn ein Baum frei ist
     const prog = TREES.map((t) => g.runningIn(t.id)).filter(Boolean).map((rc) => 100 - (rc!.left / (RESEARCH_BY_ID[rc!.id].hours * 3600)) * 100);
     $('rs-mini').style.width = prog.length ? `${Math.max(...prog).toFixed(0)}%` : '0';
-    $('btn-research').classList.toggle('locked', !g.unlocked.has('research'));
+    // Knöpfe erst zeigen, wenn sie gebraucht werden
+    $('btn-research').classList.toggle('hidden', !g.unlocked.has('research'));
+    const anyContract = Object.values(g.contracts).some((c) => c.status !== 'none');
+    $('btn-contracts').classList.toggle('hidden', !g.stations().length && !anyContract && !g.offers.open);
+    $('btn-timetable').classList.toggle('hidden', !anyContract);
+    $('btn-mail').classList.toggle('hidden', !g.inbox.length);
     const mtq = g.missionTool();
     $('btn-research').classList.toggle('quest', mtq?.tool === 'research' && this.screen !== 'research');
     const warn = Object.values(OPERATORS).some((o) => {
@@ -1154,7 +1510,7 @@ export class Hud {
       if (it?.info && it.info !== 'Deko' && grp.items.length > 1) html += ` <small>(${it.info})</small>`;
       if (grp.id === 'building' && it && Game.canRotate(it.variant ?? '')) html += ` <small>· ${this.g.buildRot ? 'gedreht' : 'normal'} (Q = drehen)</small>`;
       if (!hv && this.ui.message) {
-        const bad = !/€$/.test(this.ui.message);
+        const bad = !/€$/.test(this.ui.message) || this.ui.message.startsWith('Zu wenig Geld');
         html += ` · <span class="${bad ? 'no' : 'ok'}">${this.ui.message}</span>`;
       } else if (grp.items.length < 2) html += ` <small>· ${grp.help}</small>`;
     }
@@ -1163,7 +1519,7 @@ export class Hud {
     // Auftrag
     const m = g.mission;
     const q = g.missionInfo();
-    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : 'ALLE AUFTRÄGE ERLEDIGT';
+    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : g.mode === 'free' ? 'FREIES SPIEL' : 'ALLE AUFTRÄGE ERLEDIGT';
     $('q-title').textContent = q.title;
     $('q-short').textContent = q.short;
     // Checkliste: Teilschritte abhaken
@@ -1207,11 +1563,11 @@ export class Hud {
       if (tr.state === 'rolling' || tr.state === 'stored') { wagons++; continue; }
       const st = this.status(tr);
       const arrow = this.g.sim.isTurn(tr) && !tr.turned ? '↩' : tr.dir;
-      rows.push(this.row(tr.id, tr.op.color, tr.number, arrow, st, tr.waiting && !!tr.note));
+      rows.push(this.row(tr.id, tr.op.color, tr.boost ? `${tr.number} V` : tr.number, arrow, st, tr.waiting && !!tr.note));
     }
     for (const tr of sim.queue.slice(0, Math.max(3, 8 - rows.length))) {
       const late = sim.time - tr.plannedSpawn;
-      rows.push(this.row(tr.id, tr.op.color, tr.number, this.g.sim.isTurn(tr) ? '↩' : tr.dir,
+      rows.push(this.row(tr.id, tr.op.color, tr.boost ? `${tr.number} V` : tr.number, this.g.sim.isTurn(tr) ? '↩' : tr.dir,
         late > 0 ? `wartet +${Math.ceil(late / 60)} min` : fmtTime(tr.plannedSpawn), late > 60));
     }
     if (wagons) rows.push(`<li class="wag"><span class="dot" style="background:#9c4a2c"></span><span class="tnum">${wagons} Wagen</span><span class="tstat">im Rangierbahnhof</span></li>`);
@@ -1249,7 +1605,7 @@ export class Hud {
       if (ev.type === 'gameover') {
         const debt = ev.reason === 'debt';
         $('go-title').textContent = debt ? 'Pleite!' : 'Deine Strecke ist dicht.';
-        $('go-info').textContent = debt ? `Die Schulden haben ${eur(-Game.DEBT_LIMIT)} € erreicht – die Bank dreht den Hahn zu. Lade einen Spielstand oder fang neu an.`
+        $('go-info').textContent = debt ? `Die Schulden haben ${eur(-this.g.debtLimit)} € erreicht – die Bank dreht den Hahn zu. Lade einen Spielstand oder fang neu an.`
           : 'Die Züge haben sich eine Stunde lang gegenseitig blockiert. Lade einen Spielstand oder fang neu an.';
         $('gameover').classList.remove('hidden');
         continue;
@@ -1278,7 +1634,7 @@ export class Hud {
           ${ev.bonus ? `<div class="lt-bonus"><img src="assets/gen/ui/coin.png" alt="" />+${eur(ev.bonus)} €</div>` : ''}
           <div class="lt-sign">${portrait(from.seed, 40)}<div><i>${ev.mood === 'bad' ? 'Mit ernsten Grüßen' : 'Mit freundlichen Grüßen'}</i><b>${from.name}</b><small>${from.role}</small></div></div></div>`;
         // Begrüßung gleich öffnen, alles andere landet im Postfach
-        this.mail('letter', ev.title, `${from.name}, ${from.org}`, html, ev.title === 'Willkommen an Bord!');
+        this.mail('letter', ev.title, `${from.name}, ${from.org}`, html, ev.open || ev.title === 'Willkommen an Bord!');
         continue;
       }
       if (ev.type === 'achievement') {
@@ -1332,6 +1688,23 @@ export class Hud {
     if (!sc || !at || !cur || (!this.faultHold && now > this.faultUntil)) { pop.classList.add('hidden'); this.faultAt = null; return; }
     const kind = cur.kind === 'switch' ? 'Weiche' : 'Signal';
     const mins = Math.round((this.g.sim.time - cur.since) / 60);
+    if (cur.cells) {
+      // Großstörung (RM-FR-EVT-09)
+      const left = Math.max(1, Math.ceil(((cur.until ?? 0) - this.g.sim.time) / 60));
+      const key = `big|${at.x},${at.y}|${left}|${!!cur.boosted}|${this.g.money >= BIG_REPAIR_COST}`;
+      if (key !== this.faultKey) {
+        this.faultKey = key;
+        pop.innerHTML = `<b>${cur.kind === 'tree' ? 'Baum auf der Strecke' : 'Oberleitungsschaden'}</b><small>Streckengleis gesperrt – noch ${left} min</small>
+          ${cur.boosted ? '<span class="ok">Großeinsatz läuft</span>'
+            : `<button class="btn" data-repair="${at.x},${at.y}"${this.g.money < BIG_REPAIR_COST ? ' disabled' : ''}>Großeinsatz (${eur(BIG_REPAIR_COST)} €): halbe Zeit</button>`}
+          <small>Züge über ein zweites Gleis umleiten oder ausfallen lassen</small>`;
+      }
+      const p = sc.cellToScreen(at.x, at.y);
+      pop.style.left = `${Math.round(toUi(Math.min(window.innerWidth - fromUi(pop.offsetWidth) - 6, p.x + 18)))}px`;
+      pop.style.top = `${Math.round(toUi(Math.max(60, p.y - fromUi(pop.offsetHeight) - 14)))}px`;
+      pop.classList.remove('hidden');
+      return;
+    }
     const left = cur.repairAt ? Math.max(0, Math.ceil((cur.repairAt - this.g.sim.time) / 60)) : 0;
     const key = `${at.x},${at.y}|${!!cur.repairAt}|${left}|${mins}|${this.g.money >= REPAIR_COST}`;
     if (key !== this.faultKey) {
@@ -1342,14 +1715,13 @@ export class Hud {
              <small>${this.g.crew ? 'Deine Instandhalter rücken gleich selbst aus' : 'ohne Trupp nach ein paar Stunden von selbst behoben – aber die Unternehmen ärgern sich'}</small>`}`;
     }
     const p = sc.cellToScreen(at.x, at.y);
-    pop.style.left = `${Math.round(Math.min(window.innerWidth - pop.offsetWidth - 6, p.x + 18))}px`;
-    pop.style.top = `${Math.round(Math.max(60, p.y - pop.offsetHeight - 14))}px`;
+    pop.style.left = `${Math.round(toUi(Math.min(window.innerWidth - fromUi(pop.offsetWidth) - 6, p.x + 18)))}px`;
+    pop.style.top = `${Math.round(toUi(Math.max(60, p.y - fromUi(pop.offsetHeight) - 14)))}px`;
     pop.classList.remove('hidden');
   }
 
   // ------------------------------------------------------------ Bahnhof: Kurzinfo beim Hovern
   private stKey = '';
-  private plAvatar = 0;
   private companyKey = '';
   private updateStationPop() {
     const pop = $('st-pop');
@@ -1376,8 +1748,8 @@ export class Hud {
         <span class="h"><small>Klicken: umbenennen und ausbauen</small></span></div>`;
     }
     pop.classList.remove('hidden');
-    const x = Math.min(window.innerWidth - pop.offsetWidth - 8, this.ui.mouse.x + 18), y = Math.min(window.innerHeight - pop.offsetHeight - 8, this.ui.mouse.y + 18);
-    pop.style.left = `${x}px`; pop.style.top = `${y}px`;
+    const x = Math.min(window.innerWidth - fromUi(pop.offsetWidth) - 8, this.ui.mouse.x + 18), y = Math.min(window.innerHeight - fromUi(pop.offsetHeight) - 8, this.ui.mouse.y + 18);
+    pop.style.left = `${toUi(x)}px`; pop.style.top = `${toUi(y)}px`;
   }
 
   /** erwarteter Umsatz des Tages */
@@ -1405,13 +1777,17 @@ export class Hud {
   }
 
   /** eigene Tooltips im Spiel-Look statt der Browser-Tooltips */
+  /** Begriff im gerade sichtbaren Tooltip (für „?“ → Bahn-ABC) */
+  private ttTerm: string | undefined;
+
   private setupTooltips() {
     const tt = $('tt');
     let cur: HTMLElement | null = null;
     const place = (e: MouseEvent) => {
-      const x = Math.min(window.innerWidth - tt.offsetWidth - 6, e.clientX + 14);
-      const y = e.clientY + 18 + tt.offsetHeight > window.innerHeight ? e.clientY - tt.offsetHeight - 10 : e.clientY + 18;
-      tt.style.left = `${Math.max(4, x)}px`; tt.style.top = `${Math.max(4, y)}px`;
+      const tw = fromUi(tt.offsetWidth), th = fromUi(tt.offsetHeight);
+      const x = Math.min(window.innerWidth - tw - 6, e.clientX + 14);
+      const y = e.clientY + 18 + th > window.innerHeight ? e.clientY - th - 10 : e.clientY + 18;
+      tt.style.left = `${toUi(Math.max(4, x))}px`; tt.style.top = `${toUi(Math.max(4, y))}px`;
     };
     document.addEventListener('mouseover', (e) => {
       const el = (e.target as HTMLElement).closest?.('[title],[data-tt],#money-wrap,#daycost-wrap') as HTMLElement | null;
@@ -1420,12 +1796,21 @@ export class Hud {
       if (!el) { tt.style.display = 'none'; return; }
       const fin = el.id === 'money-wrap' || el.id === 'daycost-wrap';
       if (!fin && !el.dataset.tt) { tt.style.display = 'none'; return; }
-      tt.innerHTML = fin ? this.financeHtml() : el.dataset.tt!.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const text = fin ? '' : el.dataset.tt!;
+      this.ttTerm = fin ? (el.id === 'money-wrap' ? 'Kredit' : undefined) : findTerm(text)?.term;
+      tt.innerHTML = (fin ? `${this.financeHtml()}${el.id === 'money-wrap' ? '<small class="tt-abc">Klicken: Bank (Kredit)</small>' : ''}` : text.replace(/&/g, '&amp;').replace(/</g, '&lt;'))
+        + (this.ttTerm ? `<small class="tt-abc">„?“ – ${this.ttTerm} im Bahn-ABC</small>` : '');
       tt.style.display = 'block';
       place(e);
     });
     document.addEventListener('mousemove', (e) => { if (cur && tt.style.display === 'block') place(e); });
     document.addEventListener('mousedown', () => { tt.style.display = 'none'; });
+    // „?“ öffnet das Bahn-ABC beim Begriff des sichtbaren Tooltips (sonst die Liste)
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '?' || typing()) return;
+      e.preventDefault();
+      this.openHelp('abc', tt.style.display === 'block' ? this.ttTerm : undefined);
+    });
   }
 
   // ------------------------------------------------------------ Postfach

@@ -1,3 +1,6 @@
+import { CHAPTERS, completeChapter } from './Profiles';
+import { applyFreeCfg, contractCap, enterFreePlay, faultCfg, freeInfo, freeTick, paxCfg, type FreeCfg, type GameMode } from './FreePlay';
+import { crewMaintain, faultFactor, pickWeighted, tickWear } from './Wear';
 import { BANK, BoardState, dailyLetter, newBoard, Sender, welcomeLetter } from './Board';
 import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
 import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
@@ -12,9 +15,20 @@ import { Goal, goalProgress, newGoals } from './Goals';
 import { Grid } from '../world/Grid';
 import { edgeRow, Network } from '../world/Network';
 import { PIECES } from '../world/pieces';
-import { FREE_PLAY, Mission, MISSIONS, MISSIONS_VERSION, ToolId, TUTORIAL_MISSIONS } from './Missions';
+import { Mission, MISSIONS, MISSIONS_VERSION, ToolId, TUTORIAL_MISSIONS } from './Missions';
+import { VERSION } from './changelog';
+import { SAVE_VERSION } from './saveFile';
+import { UndoHistory } from './Undo';
+import { tierChecks, TIERS } from './StationTiers';
+import { payLoan, type Loan } from './Loans';
+import { noteArrival, settleDeparture, type Arrival } from './Connections';
+import { canBoost, dayPax, rushPenalty } from '../sim/demand';
+import { rollSpecial, SPECIALS, specialPax, specialRuns, type SpecialDay } from './SpecialDays';
 
 export interface Stats {
+  /** Anschlüsse erreicht / verpasst (RM-FR-OPS-13) */
+  connOk?: number;
+  connMissed?: number;
   handled: number;
   punctual: number;
   streak: number;
@@ -39,7 +53,7 @@ export interface Stats {
 }
 
 /** Tageswerte für die Statistik */
-export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number; shop?: number; maxDelay?: number }
+export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number; shop?: number; maxDelay?: number; conn?: number }
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
 
@@ -78,7 +92,7 @@ export type UiEvent =
   | { type: 'autosave'; label: string }
   | { type: 'news'; title: string; text: string; tag: string }
   | { type: 'decision'; title: string; text: string; yes: string; no: string; tag: string }
-  | { type: 'letter'; title: string; text: string; mood: 'good' | 'bad' | 'info'; bonus?: number; from?: Sender }
+  | { type: 'letter'; title: string; text: string; mood: 'good' | 'bad' | 'info'; bonus?: number; from?: Sender; open?: boolean }
   | { type: 'achievement'; id: string }
   | { type: 'goal' };
 
@@ -91,7 +105,10 @@ const STATION_NAMES = ['Donaufeld', 'Mühlbach', 'Lindenau', 'Am Steinfeld', 'Gr
   'Auhof', 'Bachstetten', 'Rosental', 'Marchegg Nord', 'Eichgraben', 'Sonnleiten', 'Hainfeld West', 'Wolfsthal'];
 
 export interface GameSave {
+  /** Formatversion, siehe saveFile.ts (RM-FR-SAVE-02) */
   v: 4 | 5;
+  /** Spielversion beim Speichern */
+  app?: string;
   links: { id: number; kind: 'tunnel' | 'bridge'; x: number; y0: number; y1: number }[];
   sortDest: (number | null)[];
   company: string;
@@ -115,6 +132,7 @@ export interface GameSave {
   achievements?: string[];
   weather?: Game['weather'];
   faults?: Game['faults'];
+  wear?: Record<number, number>;
   goals?: Goal[];
   mapId?: string;
   board?: BoardState;
@@ -123,8 +141,15 @@ export interface GameSave {
   player?: Game['player'];
   missionsV?: number;
   missionMark?: number;
+  mode?: GameMode;
+  longGoals?: string[];
+  profileId?: string;
+  freeCfg?: FreeCfg;
   offers?: Game['offers'];
   news?: Game['news'];
+  specials?: SpecialDay[];
+  tier?: number;
+  loan?: Loan | null;
 }
 
 export const fmtTime = (t: number) => {
@@ -143,11 +168,32 @@ export const REPAIR_COST = 300;
 const DEADLOCK_LIMIT = 3600;
 /** Kosten, wenn ein Zug aus dem Verkehr genommen wird */
 export const CANCEL_COST = 500;
+/** Großeinsatz bei einer Großstörung (RM-FR-EVT-09) */
+export const BIG_REPAIR_COST = 1500;
+
+/** Störung: Weiche/Signal (klein) oder gesperrter Streckenabschnitt (groß) */
+export interface Fault {
+  k: number;
+  kind: 'switch' | 'signal' | 'tree' | 'wire';
+  since: number;
+  repairAt?: number;
+  /** Großstörung: gesperrte Felder und Ende der Sperre */
+  cells?: number[];
+  until?: number;
+  /** Großeinsatz schon bestellt */
+  boosted?: boolean;
+}
 
 const unpackCell = (b: number, sortDest: number | null) => ({
   track: !!(b & 1), fixed: !!(b & 2), platform: !!(b & 4), signal: !!(b & 8), signalW: !!(b & 16),
   wire: !!(b & 32), siding: !!(b & 64), road: !!(b & 128), shunt: !!(b & 256), shuntSig: !!(b & 512), sortDest,
 });
+
+/** Bezeichnung der Werkzeuge für Meldungen beim Rückgängigmachen */
+const TOOL_LABEL: Partial<Record<ToolId, string>> = {
+  land: 'Landkauf', platform: 'Bahnsteig', track: 'Gleis', signal: 'Signal', switch: 'Weiche', curve: 'Kurve', diag: 'Diagonale',
+  wire: 'Oberleitung', access: 'Zugang', building: 'Gebäude', facility: 'Anlage', remove: 'Abriss', road: 'Straße',
+};
 
 const newStats = (): Stats => ({
   handled: 0, punctual: 0, streak: 0, stopsRegio: 0, stopsIC: 0, passengers: 0, missed: 0, maxDwellSince: 0, secondRuns: 0, turnbacks: 0, parks: 0, services: 0, sortedWagons: 0, recent: [], platformRuns: [],
@@ -167,7 +213,15 @@ export class Game {
     if (!this.sim || !d) return;
     const t = this.today();
     if (d > 0) t.income += d; else t.expense -= d;
+    this.bump(d > 0 ? 'earned' : 'spent', Math.abs(d));
+    this.lifeMax = Math.max(this.lifeMax, v);
+    this.lifeMin = Math.min(this.lifeMin, v);
   }
+  /** Zähler fürs Spielerprofil seit dem letzten Übertragen (RM-FR-PROF-03) */
+  life: Record<string, number> = {};
+  lifeMax = -Infinity;
+  lifeMin = Infinity;
+  bump(key: string, n = 1) { this.life[key] = (this.life[key] ?? 0) + n; }
   /** letzte 14 Tage */
   history: DayStat[] = [];
   today(): DayStat {
@@ -187,6 +241,14 @@ export class Game {
   stats: Stats = newStats();
   satisfaction = Object.fromEntries(Object.keys(OPERATORS).map((k) => [k, 70])) as Record<OperatorId, number>;
   missionIdx = 0;
+  /** Kampagne oder freies Spiel (RM-FR-MODE-01) */
+  mode: GameMode = 'campaign';
+  /** Spielerprofil, zu dem dieses Spiel gehört (RM-FR-PROF-01) */
+  profileId?: string;
+  /** Einstellungen des freien Spiels (RM-FR-MODE-06) */
+  freeCfg?: FreeCfg;
+  /** erreichte Langzeitziele im freien Spiel (RM-FR-MODE-05) */
+  longGoals: string[] = [];
   private missionBase: Stats = newStats();
   readonly unlocked = new Set<ToolId>(['select', 'land', 'platform', 'building', 'remove']);
   log: LogEntry[] = [];
@@ -230,8 +292,21 @@ export class Game {
   /** Wetter */
   weather = { kind: 'sun' as 'sun' | 'rain' | 'snow', until: 0 };
   /** Störungen an Weichen/Signalen */
-  faults: { k: number; kind: 'switch' | 'signal'; since: number; repairAt?: number }[] = [];
+  faults: Fault[] = [];
+  /** Abnutzung eigener Weichen/Signale in Prozent je Feld (RM-FR-UI-12) */
+  wear: Record<number, number> = {};
   /** offene Entscheidung aus der Zeitung */
+  /** Anschlüsse (RM-FR-OPS-13): angekommene Zubringer und Ergebnisse (nicht gespeichert) */
+  readonly arrivals = new Map<number, Arrival>();
+  readonly connResults = new Map<string, { ok: boolean; at: number; arr: number; dep: number; fromNo: string; toNo: string }>();
+  /** aufgenommener Kredit (RM-FR-ECO-10) */
+  loan: Loan | null = null;
+  /** Geld gutschreiben, ohne es als Einnahme zu zählen (z. B. Kreditauszahlung) */
+  addCash(v: number) { this._money += v; }
+  /** Bahnhofsstufe 0..3 (RM-FR-PROG-08) */
+  tier = 0;
+  /** besondere Tage: heute und morgen (RM-FR-EVT-08) */
+  specials: SpecialDay[] = [];
   decision: { id: 'fans' | 'sponsor'; at?: number; dir?: 'E' | 'W'; reward?: number; penalty?: number; cost?: number } | null = null;
   get repairs() { return this.stats.repairs ?? 0; }
   get specialsOk() { return this.stats.specialsOk ?? 0; }
@@ -278,20 +353,31 @@ export class Game {
     this.sim.taktOf = (id) => (this.contracts[id].status === 'none' ? 0 : this.contracts[id].takt);
     this.sim.nightLines = (id) => this.contracts[id].lines ?? 1;
     this.sim.serviceOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].service;
+    this.sim.boostOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].boost;
     if (save && !save.offers) this.migrateContracts(save);
     if (save?.offers) Object.assign(this.offers, save.offers);
     if (save?.news) Object.assign(this.news, save.news);
+    if (save?.specials) this.specials = save.specials;
+    if (save?.loan) this.loan = save.loan;
+    if (save?.tier) this.tier = Math.max(0, Math.min(TIERS.length - 1, Math.floor(save.tier)));
+    this.sim.paxMod = (op, at) => specialPax(this, op, at) * dayPax(op, at);
+    this.sim.runs = (op, at) => specialRuns(this, op, at);
     if (save?.history) this.history = save.history;
     if (save?.achievements) this.achievements = save.achievements;
     if (save?.weather) Object.assign(this.weather, save.weather);
     if (save?.faults) this.faults = save.faults;
+    if (save?.wear) this.wear = save.wear;
     if (save?.goals) this.goals = save.goals;
     if (save?.board) this.board = save.board;
     if (save?.crew) this.crew = save.crew;
     if (save?.inbox) this.inbox = save.inbox;
     if (save?.player) this.player = save.player;
     if (save?.missionMark !== undefined) this.missionMark = save.missionMark;
-    this.faults.forEach((f) => this.sim.faultCells.add(f.k));
+    if (save?.mode) this.mode = save.mode;
+    if (save?.profileId) this.profileId = save.profileId;
+    if (save?.freeCfg) { this.freeCfg = save.freeCfg; applyFreeCfg(this); }
+    if (save?.longGoals) this.longGoals = save.longGoals;
+    this.faults.forEach((f) => { this.sim.faultCells.add(f.k); f.cells?.forEach((k) => this.sim.faultCells.add(k)); });
     this.applyWeather();
     this.clampTakts();
     this.updatePlatformLength();
@@ -339,7 +425,7 @@ export class Game {
   save(): GameSave {
     const g = this.grid;
     return {
-      v: 5, missionsV: MISSIONS_VERSION, missionMark: this.missionMark,
+      v: SAVE_VERSION, app: VERSION, missionsV: MISSIONS_VERSION, missionMark: this.missionMark,
       company: this.company,
       cells: g.cells.map((c) => (+c.track) | (+c.fixed << 1) | (+c.platform << 2) | (+c.signal << 3) | (+c.signalW << 4)
         | (+c.wire << 5) | (+c.siding << 6) | (+c.road << 7) | (+c.shunt << 8) | (+c.shuntSig << 9)),
@@ -350,10 +436,10 @@ export class Game {
       owned: [...g.owned],
       mainRows: [...g.mainRows],
       money: this.money, stats: this.stats, missionBase: this.missionBase,
-      satisfaction: this.satisfaction, missionIdx: this.missionIdx,
+      satisfaction: this.satisfaction, missionIdx: this.missionIdx, mode: this.mode, profileId: this.profileId, freeCfg: this.freeCfg, longGoals: this.longGoals,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, goals: this.goals, mapId: currentMap().id, board: this.board, crew: this.crew, inbox: this.inbox, player: this.player,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, wear: this.wear, goals: this.goals, specials: this.specials, tier: this.tier, loan: this.loan, mapId: currentMap().id, board: this.board, crew: this.crew, inbox: this.inbox, player: this.player,
     };
   }
 
@@ -483,6 +569,7 @@ export class Game {
     if (hour !== this.lastHour) { this.lastHour = hour; this.hourly(); }
     this.checkOffers();
     this.tickFaults();
+    tickWear(this);
     this.checkDeadlock();
     for (const ev of this.sim.events.splice(0)) {
       if (ev.type === 'note') { this.addLog(ev.text, 'bad'); continue; }
@@ -494,6 +581,7 @@ export class Game {
         continue;
       }
       const t = ev.train;
+      if (ev.type === 'arrive') { noteArrival(this, t); continue; }
       if (ev.type === 'cancel') {
         this.money -= CANCEL_COST;
         this.stats.handled++;
@@ -505,6 +593,7 @@ export class Game {
         continue;
       }
       if (ev.type === 'stop') {
+        settleDeparture(this, t);
         this.stats.passengers += t.passengers;
         if (trafficClass(t.op) === 'regional') this.stats.stopsRegio++;
         const run = t.route[this.sim.posOnTrain(t, 0).i]?.stopRun?.id ?? t.route[t.route.length - 1]?.stopRun?.id;
@@ -535,7 +624,7 @@ export class Game {
           this.money += ads;
           this.fx.push({ amount: ads, x: 0, y: 0, train: t.id, label: 'Werbung' });
         }
-        if (shopSum) { const td = this.today(); td.shop = (td.shop ?? 0) + shopSum; }
+        if (shopSum) { const td = this.today(); td.shop = (td.shop ?? 0) + shopSum; this.bump('shop', shopSum); }
         if (t.op.needsStop && !t.transit) this.cleanEma += ((1 - t.dirt / 100) - this.cleanEma) * 0.05;
         if (t.dirt > 70) this.satisfaction[t.op.id] = Math.max(0, this.satisfaction[t.op.id] - 2);
         this.addLog(`${t.number} abgefertigt · ${t.passengers} Fahrgäste${shopSum ? ` · Läden +${shopSum} €` : ''}${t.dirt > 70 ? ' · Zug verschmutzt!' : ''}`, t.dirt > 70 ? 'bad' : 'info');
@@ -558,6 +647,7 @@ export class Game {
       }
       if (ev.type === 'service') {
         this.stats.services++;
+        this.bump('services');
         this.money += ev.fee;
         const what = { wash: 'gewaschen', repair: 'repariert', clean: 'innen gereinigt' }[ev.kind];
         this.addLog(`${t.number} ${what} · +${ev.fee} €`, 'good');
@@ -578,7 +668,10 @@ export class Game {
   /** Abrechnung eines Zugs: pünktlich = Bonus, verspätet = Abzug pro Minute */
   private settle(t: Train, delayMin: number, missed: boolean) {
     t.paid = true;
+    // Verspätung von außen zählt nicht gegen den Bahnhof (RM-FR-OPS-11) – nur was hier dazukommt
+    delayMin = Math.max(0, delayMin - (t.extDelay ?? 0) / 60);
     const punctual = !missed && delayMin < PUNCTUAL_LIMIT_MIN;
+    this.bump('trains'); if (punctual) this.bump('punctual');
     let income: number;
     if (t.transit) {
       income = TRANSIT_FEE;
@@ -601,11 +694,14 @@ export class Game {
     } else {
       const f = t.op.needsStop ? this.incomeFactor : 1;
       const late = Math.max(0, delayMin - PUNCTUAL_LIMIT_MIN);
+      this.bump('lateMin', late);
       const price = this.contracts[t.op.id].price[lengthClass(t.cars.length)];
-      income = punctual ? Math.round(price * f) : Math.round(price * 0.7 * f - late * DELAY_PENALTY_PER_MIN);
+      // Stoßzeit: Pendler ärgern sich mehr über Verspätungen (RM-FR-ECO-08)
+      const rushF = rushPenalty(t.op, this.sim.time);
+      income = punctual ? Math.round(price * f) : Math.round(price * 0.7 * f - late * DELAY_PENALTY_PER_MIN * rushF);
       income = Math.max(-Math.round(price * 0.7), income);
       if (punctual) this.research.points++;
-      this.satisfaction[t.op.id] += punctual ? 3 : -Math.min(15, delayMin * 2);
+      this.satisfaction[t.op.id] += punctual ? 3 : -Math.min(15 * rushF, delayMin * 2 * rushF);
       const d = delayMin < 1 ? 'pünktlich' : `+${Math.round(delayMin)} min`;
       this.addLog(`${t.number} ${d} · ${income >= 0 ? '+' : ''}${income} €`, punctual ? 'good' : 'bad');
     }
@@ -621,6 +717,7 @@ export class Game {
     td.handled++;
     if (punctual) td.punctual++;
     td.pax += t.passengers;
+    this.bump('pax', t.passengers);
     td.maxDelay = Math.max(td.maxDelay ?? 0, missed ? 99 : delayMin);
     this.checkGoals();
     this.stats.recent.push(punctual);
@@ -705,7 +802,7 @@ export class Game {
     this.sim.switchV = (10 * 16) / 60;
     // Forschungs-Wirkungen
     this.sim.dwellFactor = this.researched('dwell') ? 0.85 : 1;
-    priceMod.fair = this.researched('haggle') ? 1.1 : 1;
+    priceMod.fair = (this.researched('haggle') ? 1.1 : 1) * (1 + TIERS[this.tier].bonus.fair);
   }
 
   get maxStations() { return this.researched('stations') ? 4 : 1; }
@@ -842,7 +939,8 @@ export class Game {
   /** ab und zu fällt eine eigene Weiche oder ein eigenes Signal aus */
   private maybeFault() {
     // Instandhalter warten vorbeugend: weniger Ausfälle
-    const chance = 0.05 * (1 - 0.15 * this.crew) * (this.researched('crew2') ? 0.5 : 1);
+    // abgenutzte Weichen und Signale fallen öfter aus
+    const chance = 0.05 * (1 - 0.15 * this.crew) * (this.researched('crew2') ? 0.5 : 1) * faultFactor(this) * faultCfg(this);
     if (this.faults.length || Math.random() > chance) return;
     const g = this.grid;
     const cand: { k: number; kind: 'switch' | 'signal' }[] = [];
@@ -853,14 +951,68 @@ export class Game {
     }
     g.cells.forEach((c, k) => { if ((c.signal || c.signalW) && !c.fixed && g.isOwned(g.xy(k).x, g.xy(k).y)) cand.push({ k, kind: 'signal' }); });
     if (cand.length < 2) return;
-    const f = cand[Math.floor(Math.random() * cand.length)];
+    const f = pickWeighted(this, cand);
     if (this.sim.owner[f.k] !== 0) return;
     this.faults.push({ ...f, since: this.sim.time });
+    this.bump('faults');
     this.sim.faultCells.add(f.k);
     const p = g.xy(f.k);
     this.addLog(this.crew ? `Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – deine Instandhalter rücken aus`
       : `Störung: ${f.kind === 'switch' ? 'Weiche' : 'Signal'} defekt – anklicken, um den Störtrupp zu schicken (${REPAIR_COST} €)`, 'bad');
     this.fx.push({ amount: 0, x: p.x, y: p.y, label: 'STÖRUNG!' });
+  }
+
+  /** Großstörung (RM-FR-EVT-09): selten wird ein Stück Streckengleis für 1–2½ Stunden gesperrt */
+  private maybeBigFault(chance = 0.015) {
+    if (!this.stations().length || this.sim.time < 86400 + 6 * 3600 || this.faults.some((f) => f.cells)) return false;
+    if (Math.random() > chance * faultCfg(this)) return false;
+    return this.startBigFault();
+  }
+
+  /** Großstörung jetzt auslösen (auch für Tests) */
+  startBigFault(kind?: 'tree' | 'wire') {
+    const g = this.grid, LEN = 5;
+    const options: { cells: number[]; wire: boolean }[] = [];
+    for (const row of g.mainRows) {
+      for (let x = 2; x + LEN < g.w - 2; x++) {
+        const cells: number[] = [];
+        let ok = true;
+        for (let i = 0; i < LEN && ok; i++) {
+          const c = g.get(x + i, row);
+          const k = g.key(x + i, row);
+          ok = !!c && c.track && c.fixed && c.piece === null && !c.signal && !c.signalW && this.sim.owner[k] === 0 && g.isOwned(x + i, row);
+          cells.push(k);
+        }
+        if (ok) options.push({ cells, wire: cells.every((k) => g.cells[k].wire) });
+      }
+    }
+    if (!options.length) return false;
+    const o = options[Math.floor(Math.random() * options.length)];
+    const kd = kind ?? (o.wire && Math.random() < 0.5 ? 'wire' : 'tree');
+    const minutes = kd === 'tree' ? 60 + Math.random() * 60 : 90 + Math.random() * 60;
+    const f: Fault = { k: o.cells[2], kind: kd, since: this.sim.time, cells: o.cells, until: this.sim.time + Math.round(minutes) * 60 };
+    this.faults.push(f);
+    o.cells.forEach((k) => this.sim.faultCells.add(k));
+    const p = g.xy(f.k);
+    const what = kd === 'tree' ? 'Baum auf der Strecke' : 'Oberleitungsschaden';
+    this.addLog(`Großstörung: ${what} – Streckengleis ca. ${Math.round(minutes)} min gesperrt`, 'bad');
+    this.fx.push({ amount: 0, x: p.x, y: p.y, label: 'GESPERRT!' });
+    this.uiEvents.push({ type: 'news', tag: `bigfault-${kd}`,
+      title: kd === 'tree' ? 'Sturm: Baum stürzt auf die Bahnstrecke' : 'Oberleitung gerissen: Strecke gesperrt',
+      text: `${kd === 'tree' ? 'Eine umgestürzte Fichte blockiert das Streckengleis.' : 'Ein Fahrdrahtriss legt das Streckengleis lahm – wegen der Arbeiten darf auch kein Dieselzug durch.'} Die Sperre dauert etwa ${Math.round(minutes)} Minuten. Wer ein zweites Gleis hat, kann die Züge daran vorbeileiten – sonst heißt es warten oder Züge ausfallen lassen.` });
+    return true;
+  }
+
+  /** Großeinsatz: halbiert die restliche Sperrzeit (einmal je Störung) */
+  boostBigFault(f: Fault) {
+    if (!f.cells || f.boosted || this.money < BIG_REPAIR_COST) return false;
+    this.money -= BIG_REPAIR_COST;
+    f.boosted = true;
+    f.until = this.sim.time + Math.max(5 * 60, Math.round(((f.until ?? this.sim.time) - this.sim.time) / 2));
+    const p = this.grid.xy(f.k);
+    this.fx.push({ amount: -BIG_REPAIR_COST, x: p.x, y: p.y, label: 'Großeinsatz' });
+    this.addLog(`Großeinsatz bestellt (−${BIG_REPAIR_COST.toLocaleString('de-AT')} €) – Strecke früher frei`, 'info');
+    return true;
   }
 
   faultAt(x: number, y: number) {
@@ -869,12 +1021,13 @@ export class Game {
     if (!c) return undefined;
     const keys = new Set<number>([g.key(x, y)]);
     if (c.piece !== null) g.pieceCells(g.pieces.get(c.piece)!).forEach((k) => keys.add(k));
-    return this.faults.find((f) => keys.has(f.k));
+    return this.faults.find((f) => keys.has(f.k) || f.cells?.some((k) => keys.has(k)));
   }
 
   /** Störtrupp schicken: kostet, braucht 20 Spielminuten */
   repairFault(x: number, y: number) {
     const f = this.faultAt(x, y);
+    if (f?.cells) return this.boostBigFault(f);
     if (!f || f.repairAt) return false;
     this.money -= REPAIR_COST;
     f.repairAt = this.sim.time + this.repairMinutes * 60;
@@ -900,6 +1053,16 @@ export class Game {
     if (!this.faults.length) return;
     const t = this.sim.time;
     for (const f of [...this.faults]) {
+      // Großstörung: Sperre läuft einfach ab
+      if (f.cells) {
+        if (t >= (f.until ?? 0)) {
+          this.faults.splice(this.faults.indexOf(f), 1);
+          this.sim.faultCells.delete(f.k);
+          f.cells.forEach((k) => this.sim.faultCells.delete(k));
+          this.addLog(f.kind === 'tree' ? 'Baum weggeräumt – die Strecke ist wieder frei' : 'Oberleitung repariert – die Strecke ist wieder frei', 'good');
+        }
+        continue;
+      }
       // eigene Instandhalter rücken nach 5 min von selbst aus, ohne Extrakosten
       if (this.crew && !f.repairAt && t - f.since > 5 * 60) {
         f.repairAt = t + this.repairMinutes * 60;
@@ -911,11 +1074,13 @@ export class Game {
       if ((f.repairAt && t >= f.repairAt) || auto) {
         this.faults.splice(this.faults.indexOf(f), 1);
         this.sim.faultCells.delete(f.k);
+        this.wear[f.k] = 0;
         if (auto) {
           for (const o of this.activeOperators()) this.satisfaction[o.id] = Math.max(0, this.satisfaction[o.id] - 5);
           this.addLog('Störung nach Stunden endlich behoben – die Unternehmen sind verärgert', 'bad');
         } else {
           this.stats.repairs = (this.stats.repairs ?? 0) + 1;
+          this.bump('repairs');
           this.addLog('Störung behoben', 'good');
         }
       }
@@ -956,6 +1121,8 @@ export class Game {
 
   /** Kredit: unter 0 € automatisch, Zinsen täglich; ab dieser Schuld ist Schluss */
   static readonly DEBT_LIMIT = -50000;
+  /** Pleite-Grenze: im freien Spiel einstellbar (RM-FR-MODE-06) */
+  get debtLimit() { return this.freeCfg ? -this.freeCfg.debt : Game.DEBT_LIMIT; }
   static readonly LOAN_RATE = 0.03;
 
   private checkDebt() {
@@ -965,14 +1132,14 @@ export class Game {
       this.stats.wasDebt = true;
       this.addLog(`Kasse leer – automatischer Kredit, ${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag`, 'bad');
       if (this.company) this.uiEvents.push({ type: 'letter', mood: 'bad', from: BANK(), title: 'Ihr Konto ist im Minus',
-        text: `<p>${this.salutation(`Sehr geehrte Damen und Herren der ${this.company}`)}</p><p>Ihr Geschäftskonto ist soeben ins Minus gerutscht. Damit Ihre Züge weiterfahren, gewähren wir Ihnen automatisch einen Kredit – zu <b>${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag</b>.</p><p>Bitte beachten Sie: Bei <b>${(-Game.DEBT_LIMIT).toLocaleString('de-AT')}&nbsp;€ Schulden</b> müssen wir die Kreditlinie leider kündigen.</p>` });
+        text: `<p>${this.salutation(`Sehr geehrte Damen und Herren der ${this.company}`)}</p><p>Ihr Geschäftskonto ist soeben ins Minus gerutscht. Damit Ihre Züge weiterfahren, gewähren wir Ihnen automatisch einen Kredit – zu <b>${Math.round(Game.LOAN_RATE * 100)} % Zinsen pro Tag</b>.</p><p>Bitte beachten Sie: Bei <b>${(-this.debtLimit).toLocaleString('de-AT')}&nbsp;€ Schulden</b> müssen wir die Kreditlinie leider kündigen.</p>` });
     } else if (this.money >= 0 && this.inDebt) {
       this.inDebt = false;
       this.addLog('Kredit zurückgezahlt!', 'good');
       this.uiEvents.push({ type: 'letter', mood: 'good', from: BANK(), title: 'Kredit getilgt',
         text: `<p>${this.salutation('Sehr geehrte Damen und Herren')}</p><p>wir freuen uns, Ihnen mitzuteilen, dass Ihr Kredit vollständig zurückgezahlt ist. Es war uns ein Vergnügen. Beehren Sie uns bald wieder – aber nicht zu bald.</p>` });
     }
-    if (this.money <= Game.DEBT_LIMIT) {
+    if (this.money <= this.debtLimit) {
       this.gameOver = true;
       this.paused = true;
       this.uiEvents.push({ type: 'gameover', reason: 'debt' });
@@ -1030,6 +1197,8 @@ export class Game {
     }
     // 3. danach melden sich immer wieder Unternehmen (E-Züge erst mit Oberleitung)
     if (!this.offers.done.includes('freight') || t < this.offers.nextInquiry) return;
+    // freies Spiel: mehr Verkehr erst mit der nächsten Bahnhofsstufe
+    if (this.activeOperators().filter((o) => this.contracts[o.id].status === 'active').length >= contractCap(this)) { this.offers.nextInquiry = t + 3600; return; }
     const order: OperatorId[] = currentMap().inquiries;
     const cand = order.find((op) => none(op) && !this.canRun(op) && (this.contracts[op].declinedUntil ?? 0) <= t
       && (op !== 'hs' || this.grid.mainRows.includes(SECOND_ROW)));
@@ -1137,7 +1306,7 @@ export class Game {
     const stars = Math.max(1, Math.min(5, Math.round(score * 5)));
     if (this.stations().length && stars !== this.rating.stars) this.addLog(`Bahnhofs-Bewertung: ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`, stars > this.rating.stars ? 'good' : 'bad');
     this.rating = { stars, parts };
-    this.sim.paxFactor = 0.8 + 0.1 * stars;
+    this.sim.paxFactor = (0.8 + 0.1 * stars) * (1 + TIERS[this.tier].bonus.pax) * paxCfg(this);
   }
 
   private daily() {
@@ -1148,6 +1317,7 @@ export class Game {
       this.money -= cost;
       this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
     }
+    payLoan(this);
     const zins = this.interest;
     if (zins) {
       this.money -= zins;
@@ -1226,18 +1396,70 @@ export class Game {
     }
   }
 
+  /** nächste Bahnhofsstufe erreicht? */
+  private checkTier() {
+    if (!this.stations().length || this.tier >= TIERS.length - 1) return;
+    const next = this.tier + 1;
+    if (!tierChecks(this, next).every((c) => c.ok)) return;
+    this.tier = next;
+    const t = TIERS[next];
+    if (t.reward) { this.money += t.reward.money; this.research.points += t.reward.fp; }
+    this.applySwitchSpeed();
+    this.updateRating();
+    this.version++;
+    const name = this.stations()[0]?.name ?? 'Unser Bahnhof';
+    this.addLog(`${name} ist jetzt ${next === 1 ? 'ein ' : next === 2 ? 'ein ' : 'der '}${t.name}!`, 'good');
+    this.uiEvents.push({
+      type: 'letter', mood: 'good', open: true, bonus: t.reward?.money,
+      title: `${name} ist jetzt ${t.name === 'Hauptbahnhof' ? 'Hauptbahnhof' : `ein ${t.name}`}!`,
+      text: `<p>${next === 3 ? 'Ich bin – man verzeihe mir den Ausdruck – ganz aus dem Häuschen.' : next === 2 ? 'Was für eine Entwicklung!' : 'Herzlichen Glückwunsch!'} ${name} hat die Stufe <b>${t.name}</b> erreicht.</p>`
+        + `<p>Das spricht sich herum: <b>${t.unlock}</b>. Dazu gibt der Vorstand eine Prämie und ${t.reward?.fp ?? 0} Forschungspunkte frei.</p>`
+        + (next < TIERS.length - 1 ? `<p>Nächstes Ziel: ${TIERS[next + 1].name}. Ich zähle auf Sie.</p>` : '<p>Mehr geht nicht. Ich lasse ein Schild mit „Hbf“ anfertigen.</p>'),
+    });
+  }
+
+  /** besondere Tage: am Vorabend ankündigen, am Morgen starten */
+  private checkSpecials() {
+    if (!this.stations().length || !this.company) return;
+    const t = this.sim.time, hour = Math.floor(t / 3600) % 24, day = Math.floor(t / 86400);
+    if (hour === 18) {
+      const sd = rollSpecial(this);
+      if (sd) {
+        const p = SPECIALS[sd.id].paper(this, sd);
+        this.uiEvents.push({ type: 'news', tag: `special-${sd.id}`, title: p.title, text: p.text });
+        this.addLog(`Zeitung: morgen ${SPECIALS[sd.id].name} – ${SPECIALS[sd.id].hint}`, 'info');
+      }
+    }
+    const today = this.specials.find((s) => s.day === day);
+    if (today && !today.started && hour >= 6) {
+      today.started = true;
+      this.addLog(`Heute: ${SPECIALS[today.id].name} – ${SPECIALS[today.id].hint}`, 'info');
+      if (today.id === 'heimspiel') {
+        const at = day * 86400 + 17.5 * 3600;
+        const tr = this.sim.addSpecial('fx', at, Math.random() < 0.5 ? 'E' : 'W');
+        this.news.deals[tr.id] = { reward: 1500, penalty: 800 };
+      }
+      // Fahrgäste und Streik wirken schon beim Planen der Züge (angekündigt am Vorabend, geplant wird 90 min voraus)
+    }
+  }
+
   /** stündlich: Zufriedenheit je nach Preis, Kündigungen */
   private hourly() {
     const day = Math.floor(this.sim.time / 86400);
     if (this.news.lastDay < 0) this.news.lastDay = day;
-    if (day !== this.news.lastDay) { this.news.lastDay = day; this.daily(); }
+    if (day !== this.news.lastDay) { this.news.lastDay = day; this.bump('days'); this.daily(); }
     // Auftrag „Wendezüge“: Ausschreibung wiederholen, falls noch kein Partner gewählt
     if (this.mission?.title === 'Wendezüge' && !this.offers.open) this.requestTurnback();
     this.checkNews();
+    this.checkSpecials();
     this.updateRating();
+    this.checkTier();
     if (!this.goals.length && this.stations().length) this.goals = newGoals(this, undefined);
     this.updateWeather();
     this.maybeFault();
+    this.maybeBigFault();
+    freeTick(this);
+    crewMaintain(this);
     this.checkAchievements();
     if (this.stations().length && Math.floor(this.sim.time / 3600) % 3 === 0) this.uiEvents.push({ type: 'autosave', label: `Autosave ${fmtTime(this.sim.time)}` });
     for (const o of this.activeOperators()) {
@@ -1272,7 +1494,8 @@ export class Game {
 
   missionInfo() {
     const m = this.mission;
-    if (!m) return { title: FREE_PLAY.title, short: FREE_PLAY.short, reward: 0, value: 1, text: '', index: MISSIONS.length, total: MISSIONS.length };
+    // nach der Kampagne bzw. im freien Spiel: Langzeitziele
+    if (!m) return freeInfo(this);
     const p = m.progress(this.stats, this.missionBase, this);
     return { title: m.title, short: m.short, reward: m.reward, ...p, index: this.missionIdx, total: MISSIONS.length, checks: m.checks?.(this, this.stats, this.missionBase) };
   }
@@ -1322,6 +1545,24 @@ export class Game {
     this.loopsPending = left;
   }
 
+  /** Kapitel der Kampagne abgeschlossen */
+  private finishChapter() {
+    const id = currentMap().id;
+    const i = CHAPTERS.findIndex((c) => c.map === id);
+    const fresh = completeChapter(this.profileId, id);
+    const next = CHAPTERS[i + 1];
+    this.uiEvents.push({ type: 'letter', mood: 'good', open: true, title: `Kapitel ${i + 1} geschafft: ${CHAPTERS[i]?.title ?? currentMap().name}`,
+      text: `<p>${this.salutation()}</p><p>alle Aufträge dieses Kapitels sind erfüllt – der Vorstand ist begeistert.</p>`
+        + (next && fresh ? `<p>Damit ist <b>Kapitel ${i + 2}: ${next.title}</b> freigeschaltet${next.ready ? '' : ' (wird gerade noch vorbereitet)'} – und die Karte ist ab sofort auch im <b>freien Spiel</b> wählbar.</p>` : '')
+        + '<p>Sie können hier gerne weiterbauen: ab jetzt gelten die Langzeitziele.</p>' });
+  }
+
+  /** freies Spiel wählen (RM-FR-MODE-01) – mit Tutorial erst nach den Tutorial-Aufträgen */
+  startFreePlay(tutorial: boolean) {
+    this.mode = 'free';
+    if (!tutorial) { enterFreePlay(this); this.addLog('Freies Spiel: alle Werkzeuge frei – Ziele oben rechts', 'info'); }
+  }
+
   /** ohne Tutorial: alles aus den Tutorial-Aufträgen sofort freischalten und mit dem ersten richtigen Auftrag beginnen */
   skipTutorial() {
     if (this.missionIdx >= TUTORIAL_MISSIONS) return;
@@ -1350,8 +1591,12 @@ export class Game {
     this.missionIdx++;
     this.missionMark = undefined;
     // Ende des Tutorials: Brief vom Vorstand
-    if (this.missionIdx === TUTORIAL_MISSIONS) this.uiEvents.push({ type: 'letter', mood: 'good', title: 'Einschulung abgeschlossen!',
-      text: `<p>${this.salutation()}</p><p>die Einschulung ist geschafft – herzlichen Glückwunsch! Sie haben einen Bahnhof eröffnet, Signale gesetzt, geforscht, Land gekauft, ein zweites Bahnsteiggleis gebaut und Wendezüge abgefertigt.</p><p>Ab jetzt läuft der <b>richtige Betrieb</b>: mehr Züge, größere Aufträge, eigene Entscheidungen. Der Vorstand traut Ihnen das zu. Enttäuschen Sie uns nicht – und vergessen Sie die Pünktlichkeit nicht.</p>` });
+    // Kampagne: letztes Kapitel-Ziel geschafft → im Profil merken, nächstes Kapitel frei (RM-FR-MODE-02/09)
+    if (this.mode === 'campaign' && !this.mission) this.finishChapter();
+    const freeNow = this.mode === 'free' && this.missionIdx === TUTORIAL_MISSIONS;
+    if (freeNow) enterFreePlay(this);
+    if (this.missionIdx === TUTORIAL_MISSIONS || freeNow) this.uiEvents.push({ type: 'letter', mood: 'good', title: 'Einschulung abgeschlossen!',
+      text: `<p>${this.salutation()}</p><p>die Einschulung ist geschafft – herzlichen Glückwunsch! Sie haben einen Bahnhof eröffnet, Signale gesetzt, geforscht, Land gekauft, ein zweites Bahnsteiggleis gebaut und Wendezüge abgefertigt.</p>${freeNow ? '<p>Ab jetzt ist es <b>Ihr Bahnhof</b>: keine Aufträge mehr, nur noch große Ziele (oben rechts). Mehr Unternehmen melden sich, sobald der Bahnhof wächst.' : '<p>Ab jetzt läuft der <b>richtige Betrieb</b>: mehr Züge, größere Aufträge, eigene Entscheidungen.'} Der Vorstand traut Ihnen das zu. Enttäuschen Sie uns nicht – und vergessen Sie die Pünktlichkeit nicht.</p>` });
     this.stats.streak = 0;
     this.stats.maxDwellSince = 0;
     this.missionBase = structuredClone(this.stats);
@@ -1712,6 +1957,15 @@ export class Game {
     this.addLog(`${OPERATORS[op].name}: Abstellen & Pflege ${c.service ? 'vereinbart' : 'gekündigt'}`, 'info');
   }
 
+  /** Vertragsoption „Verstärkerzüge in der Stoßzeit“ umschalten (nur Pendlerverkehr im 30-/60-Minuten-Takt) */
+  toggleBoost(op: OperatorId) {
+    const c = this.contracts[op];
+    if (c.status !== 'active' || !canBoost(OPERATORS[op], this.sim.taktOf(op))) return;
+    c.boost = !c.boost;
+    this.sim.retime(op);
+    this.addLog(`${OPERATORS[op].name}: Verstärkerzüge in der Stoßzeit ${c.boost ? 'vereinbart' : 'abbestellt'}`, 'info');
+  }
+
   /** Zug gegen Gebühr aus dem Verkehr nehmen (auch angekündigte) */
   removeTrain(id: number) {
     if (this.sim.trains.some((t) => t.id === id)) { this.sim.cancelTrain(id); return true; }
@@ -1760,7 +2014,62 @@ export class Game {
     return this.natureIn(cells).reduce((a, id) => a + BUILDINGS[this.grid.buildings.get(id)!.key].demolish, 0);
   }
 
+  /** Rückgängig / Wiederholen (RM-FR-BUILD-11) */
+  readonly undoLog = new UndoHistory();
+  /** gebaute/abgerissene Felder für Bauanimationen (vom Renderer abgeholt, RM-FR-FEEL-02) */
+  readonly buildEvents: { tool: ToolId; cells: XY[]; remove: boolean }[] = [];
+  private buildDepth = 0;
+
   build(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
+    // nur die äußerste Aktion merken (Abriss mehrerer Teile ruft build mehrfach auf)
+    if (this.buildDepth > 0) return this.buildOnce(tool, cells, variant);
+    const before = this.undoLog.snapshot(this.grid);
+    this.buildDepth++;
+    try {
+      const p = this.buildOnce(tool, cells, variant);
+      if (p.ok) {
+        this.undoLog.record(this.grid, before, TOOL_LABEL[tool] ?? 'Bauen', p.cost);
+        this.bump(tool === 'remove' ? 'demolished' : tool === 'land' ? 'land' : 'built');
+        if (tool !== 'land') this.buildEvents.push({ tool, cells: [...cells, ...p.cells], remove: tool === 'remove' });
+        if (this.buildEvents.length > 20) this.buildEvents.shift();
+      }
+      return p;
+    } finally {
+      this.buildDepth--;
+    }
+  }
+
+  /** letzte Bau-Aktion zurücknehmen; liefert eine Meldung */
+  undo(): { ok: boolean; text: string } { return this.step(false); }
+  /** zurückgenommene Aktion wiederholen */
+  redo(): { ok: boolean; text: string } { return this.step(true); }
+
+  private step(forward: boolean): { ok: boolean; text: string } {
+    const h = this.undoLog;
+    const s = forward ? h.peekRedo() : h.peekUndo();
+    if (!s) return { ok: false, text: forward ? 'Nichts zum Wiederholen' : 'Nichts zum Rückgängigmachen' };
+    if (!h.matches(this.grid, s, forward)) {
+      // Welt hat sich dort inzwischen geändert (z. B. Ausbau der Strecke) – Verlauf ist nicht mehr gültig
+      h.clear();
+      return { ok: false, text: 'Geht nicht mehr – dort hat sich inzwischen etwas geändert' };
+    }
+    if (this.trainsOn(h.touched(this.grid, s)).length) return { ok: false, text: 'Geht gerade nicht – ein Zug steht dort' };
+    const pay = forward ? s.cost : -s.cost;
+    if (pay > 0 && pay > this.money) return { ok: false, text: `Zu wenig Geld (${Math.round(pay).toLocaleString('de-AT')} € nötig)` };
+    h.apply(this.grid, s, forward);
+    if (forward) h.moveRedone(); else h.moveUndone();
+    // als Korrektur der Baukosten buchen, nicht als Einnahme
+    this._money -= pay;
+    const day = this.today();
+    day.expense = Math.max(0, day.expense + pay);
+    const c = s.cells[Math.floor(s.cells.length / 2)];
+    const at = c ? this.grid.xy(c.k) : undefined;
+    if (pay !== 0 && at) this.fx.push({ amount: -pay, x: at.x, y: at.y });
+    this.rebuild();
+    return { ok: true, text: `${s.label} ${forward ? 'wiederholt' : 'rückgängig'}${pay ? ` · ${pay < 0 ? '+' : '−'}${Math.abs(Math.round(pay)).toLocaleString('de-AT')} €` : ''}` };
+  }
+
+  private buildOnce(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const p = this.plan(tool, cells, variant);
     if (!p.ok) return p;
     if (tool === 'remove' && p.removeAt) {

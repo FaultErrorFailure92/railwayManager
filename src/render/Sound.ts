@@ -1,9 +1,25 @@
+import { onSettings, settings } from '../game/settings';
 /** Kleine Geräuschkulisse per WebAudio (keine Dateien): Bahnhofsgong und Abfahrtspfiff */
 let ctx: AudioContext | null = null;
 let muted = false;
 try { muted = localStorage.getItem('rm_mute') === '1'; } catch { /* egal */ }
 
 const last: Record<string, number> = {};
+const muteListeners: (() => void)[] = [];
+/** Ton an/aus (Knopf in der Titelleiste) beobachten */
+export function onMute(f: () => void) { muteListeners.push(f); }
+
+/** Gesamtlautstärke der Geräusche (Einstellungen, RM-FR-UI-09) */
+let master: GainNode | null = null;
+let volume = settings.sfx / 100;
+onSettings(() => { volume = settings.sfx / 100; if (master) master.gain.value = volume; });
+function out(a: AudioContext) {
+  if (!master) { master = a.createGain(); master.gain.value = volume; master.connect(a.destination); }
+  return master;
+}
+
+/** gemeinsamer Audio-Kontext (auch für die Musik) */
+export function audioCtx() { return ac(); }
 
 function ac() {
   if (!ctx) {
@@ -25,7 +41,7 @@ function tone(freq: number, start: number, dur: number, type: OscillatorType, vo
   g.gain.setValueAtTime(0, t0);
   g.gain.linearRampToValueAtTime(vol, t0 + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  o.connect(g).connect(a.destination);
+  o.connect(g).connect(out(a));
   o.start(t0);
   o.stop(t0 + dur + 0.05);
 }
@@ -53,14 +69,14 @@ function noise(start: number, dur: number, vol: number, freq: number, q = 1, fre
   g.gain.setValueAtTime(0, t0);
   g.gain.linearRampToValueAtTime(vol, t0 + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(f).connect(g).connect(a.destination);
+  src.connect(f).connect(g).connect(out(a));
   src.start(t0);
   src.stop(t0 + dur + 0.05);
 }
 
 /** höchstens alle `gap` ms je Geräusch */
 function allowed(key: string, gap: number) {
-  if (muted) return false;
+  if (muted || volume <= 0) return false;
   const now = performance.now();
   if (now - (last[key] ?? -1e9) < gap) return false;
   last[key] = now;
@@ -73,6 +89,7 @@ export const Sound = {
     muted = !muted;
     try { localStorage.setItem('rm_mute', muted ? '1' : '0'); } catch { /* egal */ }
     if (!muted) this.gong();
+    muteListeners.forEach((f) => f());
     return muted;
   },
   /** Ding-Dong vor der Durchsage */

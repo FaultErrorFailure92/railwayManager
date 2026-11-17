@@ -3,6 +3,7 @@ import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
 import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES, treeOf } from '../game/Research';
 import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
+import { canBoost } from '../sim/demand';
 import { ACHIEVEMENTS } from '../game/Achievements';
 import { contactOf, VERBUND } from '../game/Board';
 import { portrait } from './portrait';
@@ -96,12 +97,16 @@ export function statsHtml(g: Game) {
       return `<div class="st-op"><span class="dot" style="background:${o.color}"></span><span>${o.name}</span><span>${s.handled} Züge</span>
         <div class="bar"><div style="width:${p}%;background:${p < 70 ? '#d9534f' : o.color}"></div></div><span class="${p < 70 ? 'no' : 'ok'}">${p} %</span></div>`;
     }).join('') || '<div class="ct-empty">Noch keine Züge abgefertigt.</div>';
+  const cOk = g.stats.connOk ?? 0, cMiss = g.stats.connMissed ?? 0, conn = cOk + cMiss;
+  const cP = conn ? Math.round((cOk / conn) * 100) : 0;
   const ach = ACHIEVEMENTS.map((a) => {
     const on = g.achievements.includes(a.id);
     return `<div class="st-ach${on ? ' on' : ''}" title="${a.info}"><span class="slot"><img src="${ICON(a.icon)}" alt="" /></span><b>${a.name}</b><small>${a.info}</small></div>`;
   }).join('');
   return `<div class="st-sec">Tagesbilanz <small>(grün Einnahmen, rot Ausgaben)</small></div><div class="st-days">${bars}</div>
     <div class="st-sec">Pünktlichkeit je Unternehmen</div><div class="st-ops">${ops}</div>
+    ${conn ? `<div class="st-sec">Anschlüsse</div><div class="st-ops"><div class="st-op"><span>erreicht ${cOk}</span><span>verpasst ${cMiss}</span>
+      <div class="bar"><div style="width:${cP}%;background:${cP < 80 ? '#d9534f' : '#3fa34d'}"></div></div><span class="${cP < 80 ? 'no' : 'ok'}">${cP} %</span></div></div>` : ''}
     <div class="st-sec">Erfolge ${g.achievements.length}/${ACHIEVEMENTS.length}</div><div class="st-achs">${ach}</div>`;
 }
 
@@ -184,7 +189,7 @@ export function contractsHtml(g: Game) {
       <div><small class="ct-lbl">kurzer Zug</small>${price('short')}</div>
       <div><small class="ct-lbl">langer Zug</small>${price('long')}</div>
       <div class="ct-sat"><small class="ct-lbl">Zufriedenheit</small><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
-      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Abstellen &amp; Pflege</button>` : ''}</div>
+      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Abstellen &amp; Pflege</button>` : ''}${c.status === 'active' && canBoost(o, g.sim.taktOf(o.id)) ? `<button class="btn ct-svc${c.boost ? ' on' : ''}" data-boost="${o.id}" data-tt="Verstärkerzüge: In der Stoßzeit (6–9 und 16–19 Uhr) schickt ${o.name} zusätzlich einen Zug zwischen zwei Regelzügen – mehr Halte, mehr Einnahmen, aber auch mehr Betrieb. Nur einschalten, wenn der Bahnhof genug Bahnsteige hat.">${c.boost ? '✓' : '○'} Verstärker in der Stoßzeit</button>` : ''}</div>
     </div>`;
   }).join('');
   return crewHtml(g) + rows;

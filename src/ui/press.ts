@@ -23,6 +23,12 @@ const PHOTOS: Record<string, Part[]> = {
   'vandal-trains': [['bld_wash', 100, 18], ...train('ro', 96, 60, 4)],
   'vandal-station': [['bld_station', 50, 10], ['bld_bench', 18, 60], ['bld_lamp', 140, 38], ['bld_bench', 150, 66]],
   sawmill: [['bld_sawmill', 30, 4], ['bld_pine0', 140, 20], ['bld_pine1', 160, 36], ...train('sw', 150, 74, 3, 'wagon0')],
+  'special-feiertag': [['bld_houseA', 0, 6], ['bld_flowers', 70, 54], ['bld_statue', 96, 34], ['bld_tree1', 150, 10], ['bld_tree0', 170, 40]],
+  'special-heimspiel': [['bld_station', 2, 16], ...train('fx', 176, 60, 5)],
+  'special-ferien': [['bld_station2', 10, 4], ...train('wx', 180, 66, 6)],
+  'special-streik': [['bld_station', 50, 10], ['bld_bench', 18, 60], ['bld_clock', 140, 34], ['bld_bench', 150, 66]],
+  'bigfault-tree': [['bld_pine0', 60, 0], ['bld_pine1', 100, 10], ['bld_tree1', 140, 20], ...train('ro', 60, 70, 3)],
+  'bigfault-wire': [['bld_tree0', 10, 10], ...train('wx', 176, 64, 5)],
   mine: [['bld_mine', 24, -12], ['bld_rock0', 140, 40], ...train('mn', 160, 74, 3, 'wagon0')],
 };
 
