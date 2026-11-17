@@ -1,4 +1,9 @@
+import { autoCode } from './StationCode';
 import { CHAPTERS, completeChapter } from './Profiles';
+import { chapterRating } from './ChapterRating';
+import { inspectTrain, INSPECTOR_WAGE } from './FareDodgers';
+import { challengeInfo, challengeTick, type ChallengeState } from './Challenges';
+import { CHAPTER2_MISSIONS, chapter2Letter } from './Chapter2';
 import { applyFreeCfg, contractCap, enterFreePlay, faultCfg, freeInfo, freeTick, paxCfg, type FreeCfg, type GameMode } from './FreePlay';
 import { crewMaintain, faultFactor, pickWeighted, tickWear } from './Wear';
 import { BANK, BoardState, dailyLetter, newBoard, Sender, welcomeLetter } from './Board';
@@ -28,6 +33,9 @@ import { rollSpecial, SPECIALS, specialPax, specialRuns, type SpecialDay } from 
 export interface Stats {
   /** Anschlüsse erreicht / verpasst (RM-FR-OPS-13) */
   connOk?: number;
+  /** Schwarzfahrer gesehen / erwischt (RM-FR-ECO-13) */
+  dodgers?: number;
+  caught?: number;
   connMissed?: number;
   handled: number;
   punctual: number;
@@ -53,7 +61,7 @@ export interface Stats {
 }
 
 /** Tageswerte für die Statistik */
-export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number; shop?: number; maxDelay?: number; conn?: number }
+export interface DayStat { day: number; income: number; expense: number; handled: number; punctual: number; pax: number; shop?: number; maxDelay?: number; conn?: number; /** Kontostand am Tagesende */ cash?: number; /** Buchungen je Kategorie */ cats?: Record<string, number> }
 
 export interface LogEntry { time: number; text: string; kind: 'good' | 'bad' | 'info' }
 
@@ -94,7 +102,9 @@ export type UiEvent =
   | { type: 'decision'; title: string; text: string; yes: string; no: string; tag: string }
   | { type: 'letter'; title: string; text: string; mood: 'good' | 'bad' | 'info'; bonus?: number; from?: Sender; open?: boolean }
   | { type: 'achievement'; id: string }
-  | { type: 'goal' };
+  | { type: 'goal' }
+  | { type: 'dayEnd'; day: number; income: number; expense: number; handled: number; punctual: number; pax: number; goalsDone: number; goalsTotal: number }
+  | { type: 'streak'; n: number };
 
 /** Effekte auf der Karte (schwebende Beträge) */
 export interface FxEvent { amount: number; x: number; y: number; train?: number; label?: string }
@@ -114,7 +124,7 @@ export interface GameSave {
   company: string;
   cells: number[];
   pieces: { id: number; key: string; x: number; y: number }[];
-  buildings: { id: number; key: string; x: number; y: number; decor: boolean; name?: string; rot?: boolean }[];
+  buildings: { id: number; key: string; x: number; y: number; decor: boolean; name?: string; code?: string; rot?: boolean }[];
   owned: boolean[];
   mainRows: number[];
   money: number;
@@ -137,11 +147,13 @@ export interface GameSave {
   mapId?: string;
   board?: BoardState;
   crew?: number;
+  inspectors?: number;
   inbox?: InboxEntry[];
   player?: Game['player'];
   missionsV?: number;
   missionMark?: number;
   mode?: GameMode;
+  challenge?: ChallengeState;
   longGoals?: string[];
   profileId?: string;
   freeCfg?: FreeCfg;
@@ -207,12 +219,22 @@ export class Game {
   private _money = currentMap().startMoney;
   /** Kasse – jede Änderung landet in der Tagesstatistik */
   get money() { return this._money; }
+  /** Buchung mit Kategorie für die Finanz-Diagramme (RM-FR-ECO-09) */
+  private moneyCat?: string;
+  book(cat: string, delta: number) {
+    this.moneyCat = cat;
+    this.money += delta;
+    this.moneyCat = undefined;
+  }
   set money(v: number) {
     const d = v - this._money;
     this._money = v;
     if (!this.sim || !d) return;
     const t = this.today();
     if (d > 0) t.income += d; else t.expense -= d;
+    t.cash = v;
+    const cat = this.moneyCat ?? (d > 0 ? 'Sonstiges' : 'Bau');
+    (t.cats ??= {})[cat] = (t.cats[cat] ?? 0) + d;
     this.bump(d > 0 ? 'earned' : 'spent', Math.abs(d));
     this.lifeMax = Math.max(this.lifeMax, v);
     this.lifeMin = Math.min(this.lifeMin, v);
@@ -228,7 +250,7 @@ export class Game {
     const day = Math.floor(this.sim.time / 86400);
     let t = this.history[this.history.length - 1];
     if (!t || t.day !== day) {
-      t = { day, income: 0, expense: 0, handled: 0, punctual: 0, pax: 0 };
+      t = { day, income: 0, expense: 0, handled: 0, punctual: 0, pax: 0, cash: this._money };
       this.history.push(t);
       if (this.history.length > 14) this.history.shift();
     }
@@ -243,6 +265,8 @@ export class Game {
   missionIdx = 0;
   /** Kampagne oder freies Spiel (RM-FR-MODE-01) */
   mode: GameMode = 'campaign';
+  /** laufende Herausforderung (RM-FR-MODE-08) */
+  challenge?: ChallengeState;
   /** Spielerprofil, zu dem dieses Spiel gehört (RM-FR-PROF-01) */
   profileId?: string;
   /** Einstellungen des freien Spiels (RM-FR-MODE-06) */
@@ -280,13 +304,15 @@ export class Game {
   inbox: InboxEntry[] = [];
   /** Auftrag: Zählerstand beim Erreichen einer Bedingung (z. B. Signale gesetzt) */
   missionMark?: number;
-  /** Gebäude gedreht bauen (Taste Q) */
+  /** Gebäude gedreht bauen (Taste R) */
   buildRot = false;
   /** drehbar: quadratische Gebäude */
   static canRotate(key: string) { const d = BUILDINGS[key]; return !!d && d.w === d.h && !d.onTrack; }
 
   /** eigene Instandhalter (Forschung „Instandhaltungsteam“) */
   crew = 0;
+  /** Kontrolleure (RM-FR-ECO-13) */
+  inspectors = 0;
   static readonly CREW_WAGE = 250;
   static readonly CREW_MAX = 4;
   /** Wetter */
@@ -324,7 +350,7 @@ export class Game {
         save.cells.forEach((b, k) => Object.assign(g.cells[k], unpackCell(b, save.sortDest?.[k] ?? null)));
         save.links?.forEach((l) => g.addLink(l.kind, l.x, l.y0, l.y1, l.id));
         save.pieces.forEach((p) => g.addPiece(p.key, p.x, p.y, p.id));
-        save.buildings.forEach((b) => { Object.assign(g.addBuilding(b.key, b.x, b.y, b.decor, b.id), { name: b.name, rot: b.rot }); });
+        save.buildings.forEach((b) => { Object.assign(g.addBuilding(b.key, b.x, b.y, b.decor, b.id), { name: b.name, code: b.code, rot: b.rot }); });
         save.owned.forEach((o, i) => (g.owned[i] = o));
         g.mainRows = save.mainRows;
         g.markFixedLoops();
@@ -339,7 +365,7 @@ export class Game {
       if (save.research) this.research = save.research;
       else this.migrateResearch(save);
       this.migrateTrees(!!save.research);
-      if (old) this.missionIdx = Math.min(this.missionIdx, MISSIONS.length);
+      if (old) this.missionIdx = Math.min(this.missionIdx, this.missions.length);
       if (save.contracts) Object.assign(this.contracts, save.contracts);
       if (save.shopPrices) Object.assign(this.shopPrices, save.shopPrices);
     }
@@ -370,10 +396,12 @@ export class Game {
     if (save?.goals) this.goals = save.goals;
     if (save?.board) this.board = save.board;
     if (save?.crew) this.crew = save.crew;
+    if (save?.inspectors) this.inspectors = save.inspectors;
     if (save?.inbox) this.inbox = save.inbox;
     if (save?.player) this.player = save.player;
     if (save?.missionMark !== undefined) this.missionMark = save.missionMark;
     if (save?.mode) this.mode = save.mode;
+    if (save?.challenge) this.challenge = save.challenge;
     if (save?.profileId) this.profileId = save.profileId;
     if (save?.freeCfg) { this.freeCfg = save.freeCfg; applyFreeCfg(this); }
     if (save?.longGoals) this.longGoals = save.longGoals;
@@ -401,7 +429,7 @@ export class Game {
     }
     save.links?.forEach((l) => g.addLink(l.kind, l.x + dx, l.y0 + dy, l.y1 + dy));
     save.pieces.forEach((p) => g.addPiece(p.key, p.x + dx, p.y + dy));
-    save.buildings.forEach((b) => { g.addBuilding(b.key, b.x + dx, b.y + dy, b.decor).name = b.name; });
+    save.buildings.forEach((b) => { Object.assign(g.addBuilding(b.key, b.x + dx, b.y + dy, b.decor), { name: b.name, code: b.code }); });
     const opw = OW / PARCEL;
     save.owned.forEach((o, i) => { if (o) g.buyParcel((i % opw) + dx / PARCEL, Math.floor(i / opw) + dy / PARCEL); });
     // Kreuzungsstellen im alten Bereich neu setzen, wo Platz ist
@@ -436,10 +464,10 @@ export class Game {
       owned: [...g.owned],
       mainRows: [...g.mainRows],
       money: this.money, stats: this.stats, missionBase: this.missionBase,
-      satisfaction: this.satisfaction, missionIdx: this.missionIdx, mode: this.mode, profileId: this.profileId, freeCfg: this.freeCfg, longGoals: this.longGoals,
+      satisfaction: this.satisfaction, missionIdx: this.missionIdx, mode: this.mode, challenge: this.challenge, profileId: this.profileId, freeCfg: this.freeCfg, longGoals: this.longGoals,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, wear: this.wear, goals: this.goals, specials: this.specials, tier: this.tier, loan: this.loan, mapId: currentMap().id, board: this.board, crew: this.crew, inbox: this.inbox, player: this.player,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, wear: this.wear, goals: this.goals, specials: this.specials, tier: this.tier, loan: this.loan, mapId: currentMap().id, board: this.board, crew: this.crew, inspectors: this.inspectors, inbox: this.inbox, player: this.player,
     };
   }
 
@@ -457,9 +485,16 @@ export class Game {
     return free[Math.floor(Math.random() * free.length)] ?? `Bahnhof ${used.size + 1}`;
   }
 
-  stationName(id: number, name: string) {
+  stationName(id: number, name: string, code?: string) {
     const b = this.grid.buildings.get(id);
-    if (b) { b.name = name; this.version++; }
+    if (b) { b.name = name; b.code = code || undefined; this.version++; }
+  }
+
+  /** Kürzel eines Bahnhofs (selbst vergeben oder aus dem Namen) */
+  stationCode(b: { id: number; name?: string; code?: string }): string {
+    if (b.code) return b.code;
+    const taken: string[] = this.stations().filter((o) => o.id < b.id).map((o): string => this.stationCode(o));
+    return autoCode(b.name ?? 'Bahnhof', taken);
   }
 
   stations() { return [...this.grid.buildings.values()].filter((b) => isStation(b.key) && !b.decor); }
@@ -531,7 +566,7 @@ export class Game {
     if (this.upgradeBlock(id)) return false;
     const b = this.grid.buildings.get(id)!;
     const next = this.stationLevel(b.key) + 1;
-    this.money -= STATION_UPGRADE[next];
+    this.book('Bau', -(STATION_UPGRADE[next]));
     b.key = next === 2 ? 'bld_station2' : 'bld_station3';
     this.fx.push({ amount: -STATION_UPGRADE[next], x: b.x + 1, y: b.y + 1 });
     this.addLog(`${b.name ?? 'Bahnhof'} ausgebaut`, 'good');
@@ -571,11 +606,12 @@ export class Game {
     this.tickFaults();
     tickWear(this);
     this.checkDeadlock();
+    challengeTick(this);
     for (const ev of this.sim.events.splice(0)) {
       if (ev.type === 'note') { this.addLog(ev.text, 'bad'); continue; }
       if (ev.type === 'sorted') {
         const income = ev.correct * 80 + (ev.wagons - ev.correct) * 20;
-        this.money += income;
+        this.book('Unternehmen', income);
         this.stats.sortedWagons += ev.correct;
         this.addLog(`Güterzug Richtung ${SORT_DESTS[ev.dest].name} mit ${ev.wagons} Wagen fährt ab · +${income} €`, 'good');
         continue;
@@ -583,7 +619,7 @@ export class Game {
       const t = ev.train;
       if (ev.type === 'arrive') { noteArrival(this, t); continue; }
       if (ev.type === 'cancel') {
-        this.money -= CANCEL_COST;
+        this.book('Strafen', -(CANCEL_COST));
         this.stats.handled++;
         this.stats.streak = 0;
         this.stats.recent.push(false);
@@ -595,6 +631,7 @@ export class Game {
       if (ev.type === 'stop') {
         settleDeparture(this, t);
         this.stats.passengers += t.passengers;
+        inspectTrain(this, t);
         if (trafficClass(t.op) === 'regional') this.stats.stopsRegio++;
         const run = t.route[this.sim.posOnTrain(t, 0).i]?.stopRun?.id ?? t.route[t.route.length - 1]?.stopRun?.id;
         if (run && !this.stats.platformRuns.includes(run)) this.stats.platformRuns.push(run);
@@ -608,7 +645,7 @@ export class Game {
           const sum = Math.round(t.passengers * this.shopRate(key) * reach * this.shopPrices[key]);
           if (!sum) continue;
           shopSum += sum;
-          this.money += sum;
+          this.book('Läden', sum);
           const b = list[Math.floor(Math.random() * list.length)];
           this.fx.push({ amount: sum, x: b.x, y: b.y, label: SHOPS[key].name });
           // zu teuer verärgert, günstig freut
@@ -621,7 +658,7 @@ export class Game {
         const ads = Math.round(t.passengers * 0.05 * boards);
         if (ads) {
           shopSum += ads;
-          this.money += ads;
+          this.book('Läden', ads);
           this.fx.push({ amount: ads, x: 0, y: 0, train: t.id, label: 'Werbung' });
         }
         if (shopSum) { const td = this.today(); td.shop = (td.shop ?? 0) + shopSum; this.bump('shop', shopSum); }
@@ -641,14 +678,14 @@ export class Game {
         this.stats.parks++;
         const where = { siding: 'Abstellgleis', remise: 'Remise', workshop: 'Werkstatt' }[ev.kind];
         const fee = this.contracts[t.op.id]?.service ? PARK_FEE[ev.kind] : 0;
-        if (fee) { this.money += fee; this.fx.push({ amount: fee, x: 0, y: 0, train: t.id, label: 'Abstellen' }); }
+        if (fee) { this.book('Unternehmen', fee); this.fx.push({ amount: fee, x: 0, y: 0, train: t.id, label: 'Abstellen' }); }
         this.addLog(`${t.number} abgestellt (${where})${fee ? ` · +${fee} €` : ''}`, 'info');
         continue;
       }
       if (ev.type === 'service') {
         this.stats.services++;
         this.bump('services');
-        this.money += ev.fee;
+        this.book('Unternehmen', ev.fee);
         const what = { wash: 'gewaschen', repair: 'repariert', clean: 'innen gereinigt' }[ev.kind];
         this.addLog(`${t.number} ${what} · +${ev.fee} €`, 'good');
         this.satisfaction[t.op.id] = Math.min(100, this.satisfaction[t.op.id] + 1);
@@ -675,7 +712,7 @@ export class Game {
     let income: number;
     if (t.transit) {
       income = TRANSIT_FEE;
-      this.money += income;
+      this.book('Unternehmen', income);
       this.addLog(`${t.number} Durchfahrt ohne Vertrag · +${income} €`, 'info');
       this.fx.push({ amount: income, x: 0, y: 0, train: t.id, label: 'Durchfahrt' });
       return;
@@ -707,9 +744,12 @@ export class Game {
     }
     this.fx.push({ amount: income, x: 0, y: 0, train: t.id, label: missed ? 'kein Halt' : punctual ? 'pünktlich' : `+${Math.round(delayMin)} min` });
     this.satisfaction[t.op.id] = Math.max(0, Math.min(100, this.satisfaction[t.op.id]));
-    this.money += income;
+    this.book('Unternehmen', income);
     this.stats.handled++;
-    if (punctual) { this.stats.punctual++; this.stats.streak++; } else this.stats.streak = 0;
+    if (punctual) {
+      this.stats.punctual++; this.stats.streak++;
+      if ([5, 10, 25, 50, 100].includes(this.stats.streak) || (this.stats.streak > 100 && this.stats.streak % 50 === 0)) this.uiEvents.push({ type: 'streak', n: this.stats.streak });
+    } else this.stats.streak = 0;
     const os = ((this.stats.opStats ??= {})[t.op.id] ??= { handled: 0, punctual: 0 });
     os.handled++;
     if (punctual) os.punctual++;
@@ -766,7 +806,7 @@ export class Game {
   startResearch(id: ResearchId) {
     if (this.researchBlock(id)) return false;
     const r = RESEARCH_BY_ID[id];
-    this.money -= r.cost;
+    this.book('Forschung', -(r.cost));
     this.research.points -= r.fp;
     (this.research.running ??= {})[r.tree] = { id, left: r.hours * 3600 };
     this.addLog(`Forschung gestartet: ${r.name}`, 'info');
@@ -1006,7 +1046,7 @@ export class Game {
   /** Großeinsatz: halbiert die restliche Sperrzeit (einmal je Störung) */
   boostBigFault(f: Fault) {
     if (!f.cells || f.boosted || this.money < BIG_REPAIR_COST) return false;
-    this.money -= BIG_REPAIR_COST;
+    this.book('Instandhaltung', -(BIG_REPAIR_COST));
     f.boosted = true;
     f.until = this.sim.time + Math.max(5 * 60, Math.round(((f.until ?? this.sim.time) - this.sim.time) / 2));
     const p = this.grid.xy(f.k);
@@ -1029,7 +1069,7 @@ export class Game {
     const f = this.faultAt(x, y);
     if (f?.cells) return this.boostBigFault(f);
     if (!f || f.repairAt) return false;
-    this.money -= REPAIR_COST;
+    this.book('Instandhaltung', -(REPAIR_COST));
     f.repairAt = this.sim.time + this.repairMinutes * 60;
     this.addLog(`Störtrupp unterwegs (−${REPAIR_COST} €), fertig in ${this.repairMinutes} min`, 'info');
     this.fx.push({ amount: -REPAIR_COST, x, y, label: 'Störtrupp' });
@@ -1107,7 +1147,7 @@ export class Game {
       this.addLog(`Sonderzug ${tr.number} bestellt: Ankunft um ${fmtTime(d.at)}`, 'good');
     }
     if (d.id === 'sponsor' && d.cost) {
-      this.money -= d.cost;
+      this.book('Sonstiges', -(d.cost));
       this.sim.festUntil = this.sim.time + 12 * 3600;
       for (const o of this.activeOperators()) this.satisfaction[o.id] = Math.min(100, this.satisfaction[o.id] + 8);
       this.addLog('Bahnhofsfest gesponsert – 12 Stunden mehr Fahrgäste, Unternehmen zufrieden', 'good');
@@ -1179,7 +1219,8 @@ export class Game {
 
   /** Ausschreibungen und Anfragen auslösen */
   private checkOffers() {
-    if (this.offers.open) return;
+    // Herausforderung: feste Ausgangslage, keine neuen Anfragen
+    if (this.offers.open || this.mode === 'challenge') return;
     const none = (op: OperatorId) => this.contracts[op].status === 'none';
     const t = this.sim.time;
     // 1. Regionalverkehr, sobald ein Empfangsgebäude steht
@@ -1247,7 +1288,7 @@ export class Game {
       const d = BUILDINGS[b.key];
       if (!b.decor && d && (d.group === 'func' || d.group === 'facility' || d.group === 'road')) bld += d.cost * 0.01;
     }
-    const base = { Gleise: track * 2 + pieces * 10 + sig * 2 + wire, Bahnsteige: plat * 3, Gebäude: Math.round(bld), Personal: this.crew * Game.CREW_WAGE };
+    const base = { Gleise: track * 2 + pieces * 10 + sig * 2 + wire, Bahnsteige: plat * 3, Gebäude: Math.round(bld), Personal: this.crew * Game.CREW_WAGE + this.inspectors * INSPECTOR_WAGE };
     const total = base.Gleise + base.Bahnsteige + base.Gebäude + base.Personal;
     return { ...base, total, vandal: this.sim.time < this.news.stationUntil };
   }
@@ -1274,7 +1315,7 @@ export class Game {
 
   private rewardGoal(goal: Goal) {
     goal.done = true;
-    this.money += goal.reward;
+    this.book('Prämien', goal.reward);
     this.research.points += goal.fp;
     this.addLog(`Tagesziel geschafft: ${goalProgress(goal, undefined, this).label} · +${goal.reward.toLocaleString('de-AT')} € · +${goal.fp} FP`, 'good');
     this.uiEvents.push({ type: 'goal' });
@@ -1310,17 +1351,23 @@ export class Game {
   }
 
   private daily() {
+    // Tagesabschluss des vergangenen Tages (RM-FR-FEEL-01)
+    const yd = Math.floor(this.sim.time / 86400) - 1;
+    const y = this.history.find((h) => h.day === yd);
+    if (y) this.uiEvents.push({ type: 'dayEnd', day: yd + 1, income: y.income, expense: y.expense, handled: y.handled, punctual: y.punctual, pax: y.pax,
+      goalsDone: this.goals.filter((x) => x.done).length, goalsTotal: this.goals.length });
     this.rollGoals();
     const m = this.maintenance();
     const cost = (m.total - m.Personal) * (m.vandal ? 2 : 1) + m.Personal;
     if (cost) {
-      this.money -= cost;
+      this.book('Personal', -m.Personal);
+      this.book('Instandhaltung', -(cost - m.Personal));
       this.addLog(`Instandhaltung: −${cost.toLocaleString('de-AT')} €${m.vandal ? ' (doppelt wegen Vandalismus)' : ''}`, 'bad');
     }
     payLoan(this);
     const zins = this.interest;
     if (zins) {
-      this.money -= zins;
+      this.book('Zinsen', -(zins));
       this.addLog(`Kreditzinsen: −${zins.toLocaleString('de-AT')} €`, 'bad');
     }
     // Tagesbilanz (alles, was die Kasse heute bewegt hat)
@@ -1333,7 +1380,7 @@ export class Game {
     // ab und zu ein Brief vom Vorstand
     const l = dailyLetter(this);
     if (l) {
-      if (l.bonus) this.money += l.bonus;
+      if (l.bonus) this.book('Prämien', l.bonus);
       this.uiEvents.push({ type: 'letter', title: l.title, text: l.text, mood: l.mood, bonus: l.bonus });
       this.addLog(`Brief vom Vorstand: ${l.title}`, l.mood === 'bad' ? 'bad' : 'good');
     }
@@ -1403,7 +1450,7 @@ export class Game {
     if (!tierChecks(this, next).every((c) => c.ok)) return;
     this.tier = next;
     const t = TIERS[next];
-    if (t.reward) { this.money += t.reward.money; this.research.points += t.reward.fp; }
+    if (t.reward) { this.book('Prämien', t.reward.money); this.research.points += t.reward.fp; }
     this.applySwitchSpeed();
     this.updateRating();
     this.version++;
@@ -1488,16 +1535,35 @@ export class Game {
   }
 
   // ------------------------------------------------------------ Aufträge
+  /** Auftragsliste: Kapitel 2 hat eigene Aufträge, sonst Donautal/Einschulung */
+  get missions(): Mission[] {
+    return this.mode === 'campaign' && currentMap().id === 'ebene' ? CHAPTER2_MISSIONS : MISSIONS;
+  }
+
   get mission(): Mission | null {
-    return MISSIONS[this.missionIdx] ?? null;
+    return this.missions[this.missionIdx] ?? null;
+  }
+
+  /** Kapitel 2 starten: alle Werkzeuge aus dem Donautal frei, eigene Aufträge */
+  startChapter2() {
+    MISSIONS.forEach((m) => m.unlock.forEach((u) => this.unlocked.add(u)));
+    this.unlocked.add('research');
+    this.research.points += 12;
+    this.sim.setLevel(CHAPTER2_MISSIONS[0].level);
+    this.missionIdx = 0;
+    this.missionBase = structuredClone(this.stats);
+    this.startMission();
+    const l = chapter2Letter(this.salutation());
+    this.uiEvents.push({ type: 'letter', mood: 'info', title: l.title, text: l.text });
   }
 
   missionInfo() {
     const m = this.mission;
     // nach der Kampagne bzw. im freien Spiel: Langzeitziele
+    if (this.mode === 'challenge' && this.challenge) return challengeInfo(this);
     if (!m) return freeInfo(this);
     const p = m.progress(this.stats, this.missionBase, this);
-    return { title: m.title, short: m.short, reward: m.reward, ...p, index: this.missionIdx, total: MISSIONS.length, checks: m.checks?.(this, this.stats, this.missionBase) };
+    return { title: m.title, short: m.short, reward: m.reward, ...p, index: this.missionIdx, total: this.missions.length, checks: m.checks?.(this, this.stats, this.missionBase) };
   }
 
   /** hervorgehobenes Werkzeug für den aktuellen Auftrag */
@@ -1549,10 +1615,12 @@ export class Game {
   private finishChapter() {
     const id = currentMap().id;
     const i = CHAPTERS.findIndex((c) => c.map === id);
-    const fresh = completeChapter(this.profileId, id);
+    const r = chapterRating(this);
+    const fresh = completeChapter(this.profileId, id, r.stars);
     const next = CHAPTERS[i + 1];
     this.uiEvents.push({ type: 'letter', mood: 'good', open: true, title: `Kapitel ${i + 1} geschafft: ${CHAPTERS[i]?.title ?? currentMap().name}`,
       text: `<p>${this.salutation()}</p><p>alle Aufträge dieses Kapitels sind erfüllt – der Vorstand ist begeistert.</p>`
+        + `<p class="lt-stars">${'★'.repeat(r.stars)}${'☆'.repeat(3 - r.stars)}</p><ul class="lt-checks">${r.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'} ${c.label}</li>`).join('')}</ul>`
         + (next && fresh ? `<p>Damit ist <b>Kapitel ${i + 2}: ${next.title}</b> freigeschaltet${next.ready ? '' : ' (wird gerade noch vorbereitet)'} – und die Karte ist ab sofort auch im <b>freien Spiel</b> wählbar.</p>` : '')
         + '<p>Sie können hier gerne weiterbauen: ab jetzt gelten die Langzeitziele.</p>' });
   }
@@ -1582,7 +1650,7 @@ export class Game {
   private checkMission() {
     const m = this.mission;
     if (!m || m.progress(this.stats, this.missionBase, this).value < 1) return;
-    this.money += m.reward;
+    this.book('Prämien', m.reward);
     this.research.points += m.fp;
     m.unlock.forEach((u) => this.unlocked.add(u));
     if (m.level !== this.sim.level) this.sim.setLevel(m.level);
@@ -1595,7 +1663,7 @@ export class Game {
     if (this.mode === 'campaign' && !this.mission) this.finishChapter();
     const freeNow = this.mode === 'free' && this.missionIdx === TUTORIAL_MISSIONS;
     if (freeNow) enterFreePlay(this);
-    if (this.missionIdx === TUTORIAL_MISSIONS || freeNow) this.uiEvents.push({ type: 'letter', mood: 'good', title: 'Einschulung abgeschlossen!',
+    if ((this.missionIdx === TUTORIAL_MISSIONS && this.missions === MISSIONS) || freeNow) this.uiEvents.push({ type: 'letter', mood: 'good', title: 'Einschulung abgeschlossen!',
       text: `<p>${this.salutation()}</p><p>die Einschulung ist geschafft – herzlichen Glückwunsch! Sie haben einen Bahnhof eröffnet, Signale gesetzt, geforscht, Land gekauft, ein zweites Bahnsteiggleis gebaut und Wendezüge abgefertigt.</p>${freeNow ? '<p>Ab jetzt ist es <b>Ihr Bahnhof</b>: keine Aufträge mehr, nur noch große Ziele (oben rechts). Mehr Unternehmen melden sich, sobald der Bahnhof wächst.' : '<p>Ab jetzt läuft der <b>richtige Betrieb</b>: mehr Züge, größere Aufträge, eigene Entscheidungen.'} Der Vorstand traut Ihnen das zu. Enttäuschen Sie uns nicht – und vergessen Sie die Pünktlichkeit nicht.</p>` });
     this.stats.streak = 0;
     this.stats.maxDwellSince = 0;
@@ -1972,7 +2040,7 @@ export class Game {
     const q = this.sim.queue.find((t) => t.id === id);
     if (!q) return false;
     this.sim.queue = this.sim.queue.filter((t) => t !== q);
-    this.money -= CANCEL_COST;
+    this.book('Strafen', -(CANCEL_COST));
     this.satisfaction[q.op.id] = Math.max(0, this.satisfaction[q.op.id] - 10);
     this.addLog(`${q.number} gestrichen (−${CANCEL_COST} €)`, 'bad');
     return true;
@@ -2148,7 +2216,7 @@ export class Game {
         break;
       }
     }
-    this.money -= p.cost;
+    this.book('Bau', -(p.cost));
     const c = p.cells[Math.floor(p.cells.length / 2)];
     if (p.cost !== 0 && c) this.fx.push({ amount: -p.cost, x: c.x, y: c.y });
     this.rebuild();

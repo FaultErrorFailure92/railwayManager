@@ -731,14 +731,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-OPS-12
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Disposition
 STATEMENT: >>>
 Es muss einen Dispositions-Editor geben, in dem der Spieler für die nächsten Stunden Gleisbelegung, Reihenfolge und Wartezeiten einzelner Züge ändern kann, direkt im Weg-Zeit-Diagramm per Ziehen. Konflikte müssen markiert werden.
 <<<
+SOURCE: src/game/Disposition.ts, src/sim/Simulation.ts, src/ui/Timetable.ts, src/ui/Hud.ts, test/disposition.test.ts
 COMMENT: >>>
-Der heutige Fahrplan-Editor kann nur Abfahrten je Unternehmen verschieben und Bahnsteige je Richtung festlegen.
+Im Fahrplan (F) ist der Hauptbahnhof breiter gezeichnet: eine Spalte je Bahnsteig plus „A“ (automatisch), Halte der nächsten 2 Stunden als Balken (Ankunft bis Abfahrt; automatische Züge hohl im voraussichtlichen Bahnsteig). Zug anklicken; waagrecht ziehen = Bahnsteig nur für diesen Zug, senkrecht ziehen = Abfahrt zurückhalten (1-min-Raster, höchstens 30 min, schraffiert). Seitenleiste „Disposition“ mit Gleis Auto/1..n, Abfahrt ±1/±5 min, Plan, „Folgezüge vorlassen“ (Reihenfolge, verspätete Züge). Konflikte: zwei Züge gleichzeitig am selben Bahnsteig oder kein Bahnsteig frei – rot umrandet, rotes Kreuz, Liste anklickbar. Bahnsteig eines Zugs, der schon hinfährt oder steht, ist fest.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -873,14 +874,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-ECO-09
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Finanz-Diagramme
 STATEMENT: >>>
 Es muss Diagramme der Einnahmen und Ausgaben über mehrere Wochen geben, aufgeschlüsselt nach Unternehmen, Läden, Instandhaltung, Personal und Zinsen.
 <<<
+SOURCE: src/game/Game.ts, src/ui/Screens.ts, test/challenges.test.ts
 COMMENT: >>>
-Erweitert die Statistik (RM-FR-ECO-07).
+Statistik-Reiter Finanzen: Kennzahlen der letzten 14 Tage, Kontostand-Kurve, Einnahmen und Ausgaben nach Art (Unternehmen, Läden, Kontrolle, Prämien / Bau, Instandhaltung, Personal, Zinsen, Forschung, Strafen), Tagesbilanz der letzten 7 Tage. Reiter Betrieb: Pünktlichkeit und Fahrgäste als Kurve, Pünktlichkeit je Unternehmen, Anschlüsse. Buchungen über Game.book(Kategorie, Betrag). Nach Unternehmen einzeln: noch nicht.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -931,14 +933,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-ECO-13
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Schwarzfahrer und Kontrolle
 STATEMENT: >>>
 Nach der Forschung „Schwarzkappler“ müssen Kontrolleure eingestellt werden können, die in Zügen und am Bahnsteig kontrollieren. Erst ab dieser Forschung gibt es Schwarzfahrer. Erwischte Schwarzfahrer bringen eine Belohnung. Kontrolleure kosten Lohn.
 <<<
+SOURCE: src/game/FareDodgers.ts, src/game/Research.ts, src/ui/Screens.ts, test/challenges.test.ts
 COMMENT: >>>
-Schwarzfahrer können optisch erkennbar sein (z. B. Kapuze), damit man die Kontrolle gezielt schicken kann.
+Forschung „Schwarzkappler“ (Kaufmännische Abteilung). Danach fahren ca. 4 % der Fahrgäste schwarz; 0–4 Kontrolleure (200 €/Tag) unter Verträge erwischen je 25 % (max. 90 %), 60 € je Erwischtem (Kategorie Kontrolle). Zähler in der Dienstakte.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1079,7 +1082,7 @@ Das Hauptmenü muss Kampagne und freies Spiel gleichwertig als eigene Einträge 
 <<<
 SOURCE: index.html, src/ui/Menus.ts, src/ui/Hud.ts
 COMMENT: >>>
-Hauptmenü: Weiterspielen, Kampagne, Freies Spiel (gleich große Knöpfe), Laden, Statistik, Hilfe, Einstellungen, Was ist neu. Kapitel 1 startet immer mit der Einschulung.
+Hauptmenü: Weiterspielen, Kampagne, Freies Spiel (gleich große Knöpfe), Laden, Statistik, Hilfe, Einstellungen, Was ist neu. Kapitel 1 startet immer mit der Einschulung. In der Vollversion statt DEV-Knopf „Beenden“: speichert, schließt das Fenster oder zeigt „Feierabend!“.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1093,9 +1096,9 @@ TITLE: Kampagne
 STATEMENT: >>>
 Die Kampagne muss aus sieben Kapiteln bestehen, eines pro Karte, mit eigener Ausgangslage und eigenen Aufträgen, nach steigender Schwierigkeit: 1. Donautal (Einstieg), 2. Pannonische Ebene (Güter, Takt), 3. Industrierevier (Betriebe, Rangieren), 4. Schneeland (Wetter, Störungen), 5. Alpenbahn (Berge, Tunnel), 6. Wüstenbahn (Schnellverkehr, lange Strecken), 7. Großstadt (Finale). Der Fortschritt wird im Spielerprofil gespeichert. Spielbar sind nur freigeschaltete Kapitel: ein abgeschlossenes Kapitel schaltet das nächste frei (wie in Age of Empires 2); abgeschlossene Kapitel können erneut gespielt werden.
 <<<
-SOURCE: src/game/Profiles.ts, src/ui/Menus.ts
+SOURCE: src/game/Profiles.ts, src/game/Chapter2.ts, src/game/Game.ts, src/ui/Menus.ts, test/chapter2.test.ts
 COMMENT: >>>
-Teilweise umgesetzt (Gerüst): Kapitelkarten mit Kartenbild, Teaser und Stempel „ERLEDIGT“, Sperren und Fortschritt im Profil; Kapitel 1 Donautal = bisherige Auftragsreihe; geschafft → nächstes Kapitel und dessen Karte frei. Offen: Inhalte der Kapitel 2–7, Großstadt-Karte (RM-FR-MAP-11).
+Teilweise umgesetzt: Kapitelkarten mit Kartenbild und Stempel, gesperrte Kapitel als kleine Kacheln (Details im Tooltip), Fortschritt im Profil. Kapitel 1 Donautal = Einschulung + Auftragsreihe. Kapitel 2 Pannonische Ebene spielbar: alle Donautal-Werkzeuge frei, Forschung neu, 5 Aufträge (Ankommen: Bahnhof + Personen- und Güterunternehmen; 15 Güterzüge; zweigleisig und 2 Unternehmen im 30-min-Takt; 15 Anschlüsse; 18 von 20 pünktlich). Offen: Kapitel 3–7, Großstadt-Karte (RM-FR-MAP-11).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1179,11 +1182,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MODE-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Kapitel bewerten
 STATEMENT: >>>
 Jedes Kapitel muss am Ende mit Sternen bewertet werden (z. B. nach Zeit, Pünktlichkeit, Kontostand). Kapitel müssen wiederholt werden können, um mehr Sterne zu holen.
+<<<
+SOURCE: src/game/ChapterRating.ts, src/game/Profiles.ts, src/ui/Menus.ts, test/chapter2.test.ts
+COMMENT: >>>
+1 Stern fürs Schaffen, +1 bei mindestens 85 % Pünktlichkeit, +1 innerhalb der Richtzeit (Donautal 8, Ebene 6 Tage). Ergebnis im Abschlussbrief mit Haken, beste Wertung je Kapitel im Profil, Sterne in der Kampagnenübersicht; „Nochmal“ verbessert die Wertung.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1235,11 +1242,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MODE-08
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Herausforderungen
 STATEMENT: >>>
 Es muss einzelne Herausforderungen mit festen Regeln und Zeitlimit geben (z. B. „Übernimm einen verspäteten Knoten und bring ihn in 3 Tagen auf 95 % Pünktlichkeit“).
+<<<
+SOURCE: src/game/Challenges.ts, src/game/FreePlay.ts, src/ui/Menus.ts, test/challenges.test.ts
+COMMENT: >>>
+Hauptmenü → Herausforderungen. Fertiger Bahnhof (Demobahnhof, alles erforscht), eigenes Startgeld, Ziel als Checkliste oben rechts mit Restzeit, keine neuen Anfragen. Morgenspitze (4 h: 20 Züge, 90 % pünktlich), Sturmtief (8 h, Baum auf der Strecke: 25 Züge, 80 %), Sparkurs (24 h, 5 000 €: 15 000 € Gewinn). Bestzeit im Profil.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1361,7 +1372,7 @@ Selten müssen größere Störungen auftreten (z. B. Baum auf der Strecke, Oberl
 <<<
 SOURCE: src/game/Game.ts
 COMMENT: >>>
-Selten (ca. 1,5 %/Stunde ab Tag 2): 5 Felder Streckengleis gesperrt – Baum (60–120 min) oder Oberleitungsschaden (90–150 min). Zeitung, Warnzeichen auf jedem Feld, rot in „Was ist los?“. Großeinsatz (1 500 €) halbiert die Restzeit. Umdisponieren derzeit über zweites Gleis/Züge ausfallen lassen; Disposition (RM-FR-OPS-12) fehlt noch.
+Selten (ca. 1,5 %/Stunde ab Tag 2): 5 Felder Streckengleis gesperrt – Baum (60–120 min) oder Oberleitungsschaden (90–150 min). Zeitung, Warnzeichen auf jedem Feld, rot in „Was ist los?“. Großeinsatz (1 500 €) halbiert die Restzeit. Umdisponieren über zweites Gleis, Züge ausfallen lassen oder die Disposition im Fahrplan (RM-FR-OPS-12).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1530,7 +1541,7 @@ Es muss eine Minimap mit gekauftem Land, Gleisnetz und Zügen geben. Ein Klick d
 <<<
 SOURCE: src/ui/Minimap.ts
 COMMENT: >>>
-Fest links unten im gerahmten Feld (Stil Age of Empires 2): isometrisch wie das Spielfeld, fremdes Land abgedunkelt, Gleise, Bahnsteige, Gebäude, Züge in Unternehmensfarbe, sichtbarer Ausschnitt als weißes Rechteck. Klicken/Ziehen springt (auch Touch), M blendet aus. Baumenü weicht bei wenig Platz nach rechts aus.
+Links in der unteren Leiste (RM-FR-UI-16, Stil Age of Empires 2): isometrisch wie das Spielfeld, fremdes Land abgedunkelt, Gleise, Bahnsteige, Gebäude, Züge in Unternehmensfarbe, sichtbarer Ausschnitt als weißes Rechteck. Klicken/Ziehen springt (auch Touch). Immer sichtbar. Mausrad oder Knöpfe +/− zoomen (1–4×, Standard 2×); im Zoom folgt der Ausschnitt der Kamera. Daneben die Ebenen-Knöpfe.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1546,7 +1557,7 @@ Per Taste müssen Ebenen eingeblendet werden können: Gleisbelegung, Fahrgaststr
 <<<
 SOURCE: src/render/GameScene.ts, src/game/Wear.ts, src/ui/Hud.ts, test/wear.test.ts
 COMMENT: >>>
-Taste E schaltet weiter (Belegung → Fahrgäste → Stimmung → Instandhaltung → aus), dazu Knöpfe über der Übersichtskarte mit Legende. Für die Ebene Instandhaltung neu: Abnutzung von Weichen/Signalen (0,4 % je Zugfahrt), abgenutzte fallen öfter aus (Faktor 0,3 bis 1,7), Instandhalter warten stündlich, von Hand 120 €; Züge mit Werkstatt-/Putzbedarf werden markiert.
+Taste Ü schaltet weiter (Belegung → Fahrgäste → Stimmung → Instandhaltung → aus), dazu Symbol-Knöpfe neben der Übersichtskarte; die Legende liegt unten über der Karte. Für die Ebene Instandhaltung neu: Abnutzung von Weichen/Signalen (0,4 % je Zugfahrt), abgenutzte fallen öfter aus (Faktor 0,3 bis 1,7), Instandhalter warten stündlich, von Hand 120 €; Züge mit Werkstatt-/Putzbedarf werden markiert.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1595,6 +1606,54 @@ RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-08
 
+[FR]
+UID: RM-FR-UI-16
+STATUS: Ist
+PRIORITY: 1.0
+TITLE: Untere Leiste
+STATEMENT: >>>
+Unten muss eine durchgehende, immer sichtbare Leiste liegen (keine drei einzelnen Bedienelemente): links die Übersichtskarte, in der Mitte das Baumenü, rechts die Infos: links in der Spalte die Details zum angeklickten Eintrag (Zug, Meldung, Partner – was früher beim Hovern erschien), rechts die Tabs Zugverkehr, Meldungen und Vertragspartner. Zoom-Knöpfe und Ebenen gehören zur Übersichtskarte. Das Baumenü zeigt oben die Gruppen 1–9 und darunter im Freiraum die Typen der aktiven Gruppe; Varianten eines Typs stehen als erkennbar untergeordnete Ebene darunter. Drehungen sind keine eigenen Einträge: R dreht, T schaltet die Varianten eines Typs durch. Name und Hinweise zum Werkzeug (inkl. ob es drehbar ist) erscheinen am Mauszeiger.
+<<<
+SOURCE: src/ui/BuildMenu.ts, src/ui/Hud.ts, index.html, src/style.css
+COMMENT: >>>
+Änderungswunsch 17.11.2026. Baumenü zweigeteilt: links Vorschau (großes Bild, Pfad, Name, Beschreibung, Preis bzw. Sperrgrund – für das Teil unter der Maus, sonst die Auswahl), rechts nur Symbole: Gruppe (große Kacheln) → Typ (mittlere) → Variante (kleine, eingerückt mit Verbindungsstrich); Name beim Drüberfahren. Drehung nur mit R, Hinweis am Mauszeiger („R drehen 2/4“). Neue Tasten: F = Fahrplan, E = Entwickeln (Forschung), Ü = Ebenen; M entfällt (Karte immer sichtbar). Die Tabs sind immer sichtbar; ohne Inhalt zeigen sie einen kurzen Hinweis. Fahrplan-Knopf im Tab Zugverkehr, Verträge-Knopf im Tab Partner. Neue Meldungen bekommen einen roten Punkt. Leiste ca. 60 px höher als die Karte, Übersichtskarte startet in Zoomstufe 3.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-07
+
+[FR]
+UID: RM-FR-UI-17
+STATUS: Ist
+PRIORITY: 1.0
+TITLE: Zugstatus mit Ort und Bahnhofs-Kürzel
+STATEMENT: >>>
+Der Zugstatus muss sagen, wo der Zug gerade ein-, aus- oder durchfährt (Perspektive des Bahnhofs). Jeder Bahnhof muss dafür ein Kürzel haben, das der Spieler beim Anlegen (und Umbenennen) selbst vergeben kann; sonst wird es aus 2–3 Buchstaben des Namens gebildet.
+<<<
+SOURCE: src/game/TrainStatus.ts, src/game/StationCode.ts, src/game/Game.ts, src/game/saveCodec.ts, src/ui/Hud.ts, test/trainStatus.test.ts
+COMMENT: >>>
+Fehlermeldung 17.11.2026 („fährt aus“ stimmte je nach Perspektive nicht). Status z. B. „kommt aus Linz · 06:12“, „unterwegs nach Dmh“, „fährt in Dmh ein“ (bis 12 Felder vor dem Bahnhof), „hält in Dmh“, „fährt aus Dmh aus“ (nach Halt), „fährt durch Dmh“ (ohne Halt), „fährt Richtung Wien“, „wartet am Signal vor Dmh“. Kürzel automatisch: ein Wort = Anfangsbuchstabe + zwei Mitlaute (Demohausen → Dmh), mehrere Wörter = Anfangsbuchstaben (Oase Nord → ON), bei Gleichstand Ziffer. Eigenes Kürzel max. 4 Zeichen, wird gespeichert; sichtbar auf der Bahnhofskarte und im Fahrplan.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-07
+
+[FR]
+UID: RM-FR-UI-18
+STATUS: Ist
+PRIORITY: 1.0
+TITLE: Tempo und Tagesabschluss
+STATEMENT: >>>
+Wenn gerade nichts passiert, muss man bis zum nächsten Halt vorspulen können. Um Mitternacht muss eine kurze Karte den vergangenen Tag zusammenfassen (Bilanz, Pünktlichkeit, Fahrgäste, Tagesziele). Pünktlichkeits-Serien müssen gefeiert werden.
+<<<
+SOURCE: src/ui/Hud.ts, src/game/Game.ts, index.html, src/style.css
+COMMENT: >>>
+UI/UX-Durchgang 17.11.2026. Knopf ⏭ bzw. Taste N: Tempo ×16 bis ein Zug am Bahnsteig hält, etwas Dringendes passiert, ein Brief aufgeht oder 3 Stunden vergangen sind. Tagesabschluss unten mittig, verschwindet nach 12 s oder per Klick. Serien 5/10/25/50/100 (dann alle 50) mit Gong. Weitere Punkte aus dem Durchgang: Hauptmenü ohne Spieloberfläche im Hintergrund, Firmenname länger (ganzer Name im Tooltip), Pause-Menü mit 4 Kennzahlen und Fehlerbericht als Symbol, Verträge in einer kompakten Zeile mit Spaltenköpfen, Detailfeld zeigt ohne Auswahl die nächsten Halte.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-07
+
 [[/SECTION]]
 
 [[SECTION]]
@@ -1639,7 +1698,7 @@ Es muss eine Liste aller aktuellen Probleme mit Ampel geben, nach Dringlichkeit 
 <<<
 SOURCE: src/game/Problems.ts
 COMMENT: >>>
-Ampel-Knopf in der Titelleiste (Taste L) öffnet ein Panel links, präsentiert von Alois Weichensteller (Fahrdienstleiter i. R.). Erkennt: Blockade, Störungen, Schulden, drohende Kündigung, unzufriedene Unternehmen, lange wartende Züge, zu teure Läden, offene Anfragen, ungelesene Post, startbare Forschung. Lösungen: Zug aufgeben, Störtrupp, fairer Preis, Ladenpreis auf Richtwert, Fenster öffnen.
+Ampel-Knopf in der Titelleiste (Taste L) öffnet ein Panel links, präsentiert von Alois Weichensteller (Fahrdienstleiter i. R.). Erkennt: Blockade, Störungen, Schulden, drohende Kündigung, unzufriedene Unternehmen, lange wartende Züge, zu teure Läden, offene Anfragen, ungelesene Post, startbare Forschung. Lösungen: Zug aufgeben, Störtrupp, fairer Preis, Ladenpreis auf Richtwert, Fenster öffnen. Seit 17.11.2026 festes Panel oben links, ein-/ausklappbar wie die anderen Panels (Ampel und Anzahl im Kopf, L = auf/zu); der Knopf in der Titelleiste entfällt.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1647,11 +1706,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-CPX-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Einheitliche Objektkarte
 STATEMENT: >>>
 Jedes Objekt (Zug, Gleis, Gebäude, Fahrgast, Laden, Personal) muss beim Anklicken dieselbe Art Karte öffnen: oben Zustand, darunter Zahlen, unten Aktionen.
+<<<
+SOURCE: src/ui/Hud.ts (oc, card, renderDetail), src/render/GameScene.ts
+COMMENT: >>>
+Eine Karte für Zug, Empfangsgebäude, Laden, Fahrgast, Partner und Meldung – in der Detailspalte der unteren Leiste (Klick auf der Karte oder in den Listen): Kopf (Bild/Farbe, Name, Art), Zustand mit Ampel, Zahlen, Aktionen. Das Hover-Kärtchen auf dem Spielfeld nutzt denselben Aufbau. Gleis und Personal haben noch keine eigene Karte.
 <<<
 RELATIONS:
 - TYPE: Parent

@@ -32,8 +32,9 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 
 - **Profile:** Firma und Spieler werden einmal angelegt (Onboarding mit Dienstausweis). Spielstände, Kampagnen-Fortschritt,
   freigespielte Karten und die **Dienstakte** (Statistik über alle Spiele) gehören zum Profil. Verwaltung rechts oben im Hauptmenü.
-- **Kampagne:** 7 Kapitel, eines je Karte, nur freigeschaltete sind spielbar. Kapitel 1 (Donautal, mit Einschulung) ist fertig,
-  die weiteren sind vorbereitet.
+- **Kampagne:** 7 Kapitel, eines je Karte, nur freigeschaltete sind spielbar. Kapitel 1 (Donautal, mit Einschulung) und
+  Kapitel 2 (Pannonische Ebene: Güter und Takt) sind fertig, die weiteren vorbereitet. Jedes Kapitel bekommt 1–3 Sterne.
+- **Herausforderungen:** Morgenspitze, Sturmtief, Sparkurs – fertiger Bahnhof, Ziel, Zeitlimit, Bestzeit im Profil.
 - **Freies Spiel:** Einstellseite mit Karte (nur freigespielte), Startkapital, Fahrgastaufkommen, Störungen, Verspätungen von außen,
   Pleite-Grenze und Verkehrswachstum; sieben Langzeitziele mit Prämie.
 - **Karten:** Donautal, Alpenbahn, Pannonische Ebene, Industrierevier, Wüstenbahn und Schneeland –
@@ -43,12 +44,13 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 - **Zugverkehr:** Regional-, Fern-, S-Bahn-, Nacht-, Museums-, Hochgeschwindigkeits- und Güterzüge, Wendezüge,
   Linksverkehr auf zweigleisiger Strecke, Sonderzüge, Stoßzeiten mit Verstärkerzügen, Verspätungen von außen.
 - **Betrieb:** Blocksignale mit Fahrstraßenreservierung, Abstellgleise, Remise, Werkstatt, Waschanlage, Abrollberg,
-  Privatbahnen, **Anschlüsse** zwischen Zügen (auch abwarten lassen), Weg-Zeit-Diagramm.
+  Privatbahnen, **Anschlüsse** zwischen Zügen (auch abwarten lassen), Weg-Zeit-Diagramm mit **Disposition** (Bahnsteig und Abfahrt je Zug per Ziehen, Konflikte rot). Bahnhöfe mit Kürzel, Zugstatus mit Ort („fährt in Dmh ein“).
 - **Ereignisse:** Tag und Nacht, Wetter, Störungen und Großstörungen, Abnutzung von Weichen und Signalen,
   besondere Tage (Feiertag, Heimspiel, Streik …), Zeitung, Briefe vom Vorstand und von der Bank.
 - **Wirtschaft:** Ausschreibungen, Verträge mit Preis und Takt, Läden, Personal, Bank mit Kredit, Pleite-Grenze.
 - **Fortschritt:** Aufträge, Forschungsbaum, Tagesziele, Bahnhofsstufen (Haltepunkt bis Hauptbahnhof), Bewertung, Erfolge.
-- **Übersicht:** „Was ist los?“ mit Lösungen per Klick, Übersichtskarte, Ebenen (Belegung, Fahrgäste, Stimmung, Instandhaltung),
+- **Oberfläche:** untere Leiste mit Übersichtskarte (Zoom, Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung), Baumenü
+  (Gruppe → Typ → Variante, drehen mit R) und Infos (Zugverkehr, Meldungen, Partner – Details per Klick); „Was ist los?“ mit Lösungen per Klick,
   Bahn-ABC, Musik und Geräusche.
 
 ## Steuerung
@@ -57,15 +59,16 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 | --- | --- |
 | Maus ziehen / WASD | Karte verschieben |
 | Mausrad | Zoom |
-| 1–9, B, X | Werkzeug-Gruppen |
-| R / Q | Variante wechseln / Gebäude drehen |
+| 1–9, B, X | Baumenü-Gruppen, danach Ziffer = Typ |
+| R | drehen |
+| T | nächste Variante des Typs |
 | Leertaste | Pause |
 | + / − | Spieltempo |
 | Strg+Z / Strg+Y | Rückgängig / Wiederholen |
 | L | Was ist los? |
-| E | Ebenen weiterschalten |
-| M | Übersichtskarte ein/aus |
-| T / F / V / P | Fahrplan / Forschung / Verträge / Postfach |
+| Ü | Ebenen weiterschalten |
+| F / E / V / P | Fahrplan / Entwickeln (Forschung) / Verträge / Postfach |
+| N | Vorspulen bis zum nächsten Halt |
 | H / F1 | Hilfe |
 | F5 / Strg+S | Schnellspeichern |
 | Esc | Werkzeug weglegen, sonst Pause/Hauptmenü |
@@ -86,7 +89,7 @@ src/
   config.ts          Konstanten (Kartengröße, Preise, Zeit)
   main.ts            Einstieg (Profil-Übernahme, neues Spiel einrichten)
   game/              Spielstand, Aufträge, Forschung, Verträge, Ziele, Profile, freies Spiel,
-                     Anschlüsse, Abnutzung, Statistik, Speichern
+                     Anschlüsse, Disposition, Abnutzung, Statistik, Speichern
   dev/               Demobahnhof und Balance-Werkzeug (nur Entwicklung)
   sim/               Zugsimulation, Bahnunternehmen, Nachfrage nach Tageszeit
   world/             Karten, Raster, Gleisteile, Gebäude, Betriebe, Gleisnetz

@@ -31,7 +31,7 @@ export function encodeSave(s: GameSave): object {
   const keys = [...new Set(s.buildings.map((b) => b.key))];
   const out: Compact = {
     ...s, c: CODEC, n: s.cells.length, cells: runs, sortDest: sd,
-    buildings: [keys, ...s.buildings.map((b) => [b.id, keys.indexOf(b.key), b.x, b.y, +b.decor, b.name ?? 0, +!!b.rot])],
+    buildings: [keys, ...s.buildings.map((b) => [b.id, keys.indexOf(b.key), b.x, b.y, +b.decor, b.name ?? 0, +!!b.rot, b.code ?? 0])],
   };
   return out;
 }
@@ -57,6 +57,7 @@ export function decodeSave(x: unknown): unknown {
     const b: GameSave['buildings'][number] = { id: r[0] as number, key: Array.isArray(keys) ? keys[r[1] as number] : '', x: r[2] as number, y: r[3] as number, decor: !!r[4] };
     if (r[5]) b.name = r[5] as string;
     if (r[6]) b.rot = true;
+    if (r[7]) b.code = r[7] as string;
     return b;
   });
   const { c: _c, n: _n, ...rest } = c;

@@ -78,7 +78,7 @@ export const wornElements = (g: Game) => elements(g).filter((e) => wearOf(g, e.k
 /** von Hand vorbeugend warten */
 export function maintain(g: Game, k: number) {
   if (g.money < MAINT_COST) return false;
-  g.money -= MAINT_COST;
+  g.book('Instandhaltung', -(MAINT_COST));
   g.wear[k] = 0;
   return true;
 }

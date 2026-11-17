@@ -1,8 +1,9 @@
 /**
  * Fenster aus dem Hauptmenü: Profile (RM-FR-PROF-02), Kampagne (RM-FR-MODE-02), freies Spiel einrichten (RM-FR-MODE-06).
  */
+import { CHALLENGES } from '../game/Challenges';
 import { FREE_SLIDERS, freeDefaults, type FreeCfg, type NewGameSetup } from '../game/FreePlay';
-import { activeProfile, chapterOpen, CHAPTERS, createProfile, listProfiles, mapOpen, updateProfile, type Player, type Profile } from '../game/Profiles';
+import { activeProfile, chapterOpen, CHAPTERS, createProfile, listProfiles, mapOpen, updateProfile, type Player, type Profile, chapterStars } from '../game/Profiles';
 import { lifeLines } from '../game/Lifetime';
 import { listSlots } from '../game/storage';
 import { MAPS, type MapDef } from '../world/maps';
@@ -58,6 +59,14 @@ export class Menus {
       if (t.closest('[data-use]')) hooks.switchProfile(p.id);
       else if (t.closest('[data-edit]')) this.editDoc(p, () => { hooks.changed(); this.renderProfiles(); });
       else if (t.closest('[data-del]')) this.deleteDoc(p);
+    });
+    $('ch-close').onclick = () => $('challenges').classList.add('hidden');
+    $('ch-list').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-chal]') as HTMLElement | null;
+      const p = activeProfile();
+      if (!b || !p) return;
+      $('challenges').classList.add('hidden');
+      hooks.start(setupFor(p, { mode: 'challenge', map: 'donau', challenge: b.dataset.chal }));
     });
     $('cp-list').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-chapter]') as HTMLElement | null;
@@ -122,18 +131,38 @@ export class Menus {
     const quote = done === 0 ? '„Jede große Bahn beginnt mit einem kleinen Bahnsteig. Und einer noch kleineren Bank.“'
       : done < 3 ? '„Ausgezeichnet! Der Vorstand hat sich erlaubt, Ihnen mehr Arbeit zu geben.“'
         : '„Sie sind eine Legende. Die Kantine hat ein Schnitzel nach Ihnen benannt.“';
-    $('cp-list').innerHTML = `<p class="cp-quote">${quote} – Hofrat Dr. Ferdinand Fahrplan</p>` + CHAPTERS.map((c, i) => {
+    const rows: string[] = [], tiles: string[] = [];
+    CHAPTERS.forEach((c, i) => {
       const ok = !!p?.chapters.includes(c.map);
       const open = chapterOpen(p, i);
       const playable = open && c.ready;
       const map = MAPS.find((m) => m.id === c.map);
-      const state = ok ? '' : !open ? `Betreten verboten – erst Kapitel ${i} schaffen` : !c.ready ? 'Gleise werden noch verlegt (in Arbeit)' : 'Abfahrbereit!';
-      return `<div class="cp-row${ok ? ' done' : ''}${open ? '' : ' locked'}"><div class="cp-pic">${map ? mapPic(map) : '<i style="inset:0;width:auto;height:auto;background:#3a3a44"></i>'}${open ? '<span class="cp-train"></span>' : ''}</div>
-        <div><b>Kapitel ${i + 1}: ${esc(c.title)}</b><small>${esc(c.topic)}${state ? ` · ${state}` : ''}</small><span class="cp-tease">${TEASE[i] ?? ''}</span></div>
+      const pic = map ? mapPic(map) : '<i style="inset:0;width:auto;height:auto;background:#3a3a44"></i>';
+      if (!open) {
+        // gesperrt: nur kleine Kachel, Details beim Drüberfahren
+        tiles.push(`<div class="cp-tile" title="${esc(c.topic)} – erst Kapitel ${i} schaffen&#10;${(TEASE[i] ?? '').replace(/"/g, '&quot;')}"><div class="cp-pic">${pic}</div><b>${i + 1} · ${esc(c.title)}</b></div>`);
+        return;
+      }
+      const state = ok ? '' : !c.ready ? 'in Arbeit' : '';
+      rows.push(`<div class="cp-row${ok ? ' done' : ''}"><div class="cp-pic">${pic}<span class="cp-train"></span></div>
+        <div title="${(TEASE[i] ?? '').replace(/"/g, '&quot;')}"><b>Kapitel ${i + 1}: ${esc(c.title)}</b><small>${esc(c.topic)}${state ? ` · ${state}` : ''}</small>${chapterStars(p, c.map)}</div>
         <div class="cp-btns">${playable ? `<button class="btn big" data-chapter="${i}">${ok ? 'Nochmal' : i === 0 && !ok ? 'Los geht’s' : 'Spielen'}</button>` : ''}</div>
-        ${ok ? '<span class="cp-done-stamp">ERLEDIGT</span>' : ''}</div>`;
-    }).join('');
+        ${ok ? '<span class="cp-done-stamp">ERLEDIGT</span>' : ''}</div>`);
+    });
+    $('cp-list').innerHTML = `<p class="cp-quote">${quote}</p>` + rows.join('') + (tiles.length ? `<div class="cp-tiles">${tiles.join('')}</div>` : '');
     $('campaign').classList.remove('hidden');
+  }
+
+  /** Herausforderungen (RM-FR-MODE-08) */
+  openChallenges() {
+    const p = activeProfile();
+    $('ch-list').innerHTML = CHALLENGES.map((c) => {
+      const best = p?.challenges?.[c.id];
+      return `<div class="cp-row ch-row${best ? ' done' : ''}"><div class="ch-time">${c.hours} h</div>
+        <div><b>${esc(c.title)}</b><small>${esc(c.short)}</small>${best ? `<small class="ok">Bestzeit ${Math.floor(best / 60)}:${String(best % 60).padStart(2, '0')} h</small>` : ''}</div>
+        <div class="cp-btns"><button class="btn big" data-chal="${c.id}">${best ? 'Nochmal' : 'Start'}</button></div></div>`;
+    }).join('');
+    $('challenges').classList.remove('hidden');
   }
 
   // ------------------------------------------------------------ Account rechts oben
@@ -300,7 +329,7 @@ export class Menus {
       return `<button class="btn fs-map${m.id === cfg.map ? ' on' : ''}" data-map="${m.id}"${open ? '' : ' disabled'}
         title="${open ? esc(m.info) : `Freispielen: Kapitel ${ch} der Kampagne schaffen`}"><b>${open ? '' : '🔒 '}${esc(m.name)}</b><small>${esc(m.theme)} · ${m.difficulty}</small></button>`;
     }).join('');
-    $('fs-sliders').innerHTML = FREE_SLIDERS.map((s) => `<div class="fs-row"><label>${s.label}<b>${s.fmt(cfg[s.key])}</b><small>${s.hint}</small></label>
+    $('fs-sliders').innerHTML = FREE_SLIDERS.map((s) => `<div class="fs-row" title="${s.hint}"><label>${s.label}<b>${s.fmt(cfg[s.key])}</b></label>
       <input type="range" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${cfg[s.key]}" /></div>`).join('');
     $('fs-growth').innerHTML = `<button class="btn${cfg.growth === 'tier' ? ' on' : ''}" data-growth="tier" title="Neue Unternehmen erst, wenn der Bahnhof wächst">mit dem Bahnhof</button>
       <button class="btn${cfg.growth === 'instant' ? ' on' : ''}" data-growth="instant" title="Alle Unternehmen melden sich von Anfang an">sofort voll</button>`;

@@ -6,6 +6,7 @@ import type { Train } from '../sim/Simulation';
 import { BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
 import { connectionsAtRisk, plannedConnections } from '../game/Connections';
+import { baseDeparture, dispoConflicts, dispoSlots } from '../game/Disposition';
 
 /** Weg-Zeit-Diagramm: Strecke waagrecht (West → Ost), Zeit senkrecht (oben früher, unten später) */
 const PAST = 60 * 60, FUTURE = 120 * 60;
@@ -53,6 +54,40 @@ export class Timetable {
 
   private off?: HTMLCanvasElement;
 
+  /** Disposition (RM-FR-OPS-12): gewählter Zug und Vorschau beim Ziehen */
+  sel?: number;
+  drag?: { id: number; lane?: string | null; dep?: number };
+  private hits: { id: number; x: number; ya: number; yb: number; locked: boolean }[] = [];
+  private geo?: { T: number; B: number; H: number; t0: number; t1: number; lanes: { id?: string; x: number }[]; lw: number };
+
+  /** Zug an dieser Stelle (Canvas-Pixel) */
+  pick(px: number, py: number) {
+    const x = px / 2, y = py / 2;
+    let best: { id: number; d: number } | undefined;
+    for (const h of this.hits) {
+      const d = Math.abs(h.x - x);
+      if (d <= 4 && y >= h.ya - 3 && y <= h.yb + 3 && (!best || d < best.d)) best = { id: h.id, d };
+    }
+    return best?.id;
+  }
+
+  /** Bahnsteig-Spalte (null = automatisch) unter dieser Stelle */
+  laneAt(px: number): string | null | undefined {
+    const g = this.geo;
+    if (!g) return undefined;
+    const x = px / 2;
+    const l = g.lanes.find((ln) => Math.abs(ln.x - x) <= g.lw / 2);
+    return l ? l.id ?? null : undefined;
+  }
+
+  /** Spielzeit an dieser Höhe */
+  timeAt(py: number) {
+    const g = this.geo!;
+    return g.t0 + ((py / 2 - g.T) / (g.H - g.T - g.B)) * (g.t1 - g.t0);
+  }
+
+  isLocked(id: number) { return !!this.hits.find((h) => h.id === id)?.locked; }
+
   /** gezeichneter Look: Papier, Bleistift-Raster, wackelige Tintenlinien – halbe Auflösung, pixelig hochskaliert */
   draw(canvas: HTMLCanvasElement) {
     const S = 2;
@@ -61,7 +96,13 @@ export class Timetable {
     const ctx = this.off.getContext('2d')!;
     const L = 34, T = 18, R = 8, B = 8;
     const now = this.g.sim.time, t0 = now - PAST, t1 = now + FUTURE;
-    const X = (x: number) => L + (x / MAP_W) * (W - L - R);
+    // Hauptbahnhof breiter zeichnen, damit die Gleisbelegung (eine Spalte je Bahnsteig) Platz hat
+    const stA = this.g.stations()[0];
+    const sa = stA ? Math.max(0, stA.x - 2) : MAP_W / 2, sb = stA ? Math.min(MAP_W, stA.x + BUILDINGS[stA.key].w + 2) : MAP_W / 2;
+    const span = W - L - R;
+    const ws = stA ? Math.max(span * (sb - sa) / MAP_W, Math.min(span * 0.4, 20 * (this.g.platformRuns().length + 1))) : 0;
+    const k = (span - ws) / Math.max(1, MAP_W - (sb - sa));
+    const X = (x: number) => x <= sa ? L + x * k : x >= sb ? L + sa * k + ws + (x - sb) * k : L + sa * k + ((x - sa) / Math.max(0.01, sb - sa)) * ws;
     const Y = (t: number) => T + ((t - t0) / (t1 - t0)) * (H - T - B);
     // fester Zufall je Linie, damit nichts flackert
     const jit = (seed: number) => { let s2 = seed * 9301 + 49297; return () => { s2 = (s2 * 9301 + 49297) % 233280; return s2 / 233280 - 0.5; }; };
@@ -98,7 +139,7 @@ export class Timetable {
       for (let y = T; y < H - B; y += 4) { ctx.beginPath(); ctx.moveTo(xa, y); ctx.lineTo(xb, y + 3); ctx.stroke(); }
       ctx.fillStyle = '#2a3f6e';
       ctx.textAlign = 'center';
-      ctx.fillText(st.name ?? 'Bahnhof', (xa + xb) / 2, T - 8);
+      ctx.fillText(`${st.name ?? 'Bahnhof'} (${this.g.stationCode(st)})`, (xa + xb) / 2, T - 8);
     }
     ctx.fillStyle = '#6b5a3c';
     ctx.textAlign = 'left'; ctx.fillText(`← ${currentMap().ends[0]} (West)`, L, T - 8);
@@ -155,6 +196,67 @@ export class Timetable {
         ctx.fillStyle = m.col;
         ctx.fillRect(x - 1, yb - 1, 3, 3);
         if (m.label.length <= 2) { ctx.textAlign = 'left'; ctx.fillText(m.label, x + 3, (ya + yb) / 2); }
+      }
+    }
+    // Disposition: Gleisbelegung am Bahnhof, eine Spalte je Bahnsteig (+ automatisch)
+    this.hits = [];
+    if (st0) {
+      const runs = this.g.platformRuns();
+      const xa = X(st0.x - 2), xb = X(st0.x + BUILDINGS[st0.key].w + 2);
+      const ids: (string | undefined)[] = [undefined, ...runs.map((r) => r.id)];
+      const lw = (xb - xa) / ids.length;
+      const lanes = ids.map((id, i) => ({ id, x: xa + (i + 0.5) * lw }));
+      this.geo = { T, B, H, t0, t1, lanes, lw };
+      ctx.fillStyle = 'rgba(239,228,200,0.85)';
+      ctx.fillRect(xa + 1, T, xb - xa - 2, H - B - T);
+      ctx.strokeStyle = 'rgba(60,90,150,0.25)'; ctx.lineWidth = 1;
+      lanes.forEach((ln) => { ctx.beginPath(); ctx.moveTo(Math.round(ln.x) + 0.5, T); ctx.lineTo(Math.round(ln.x) + 0.5, H - B - 9); ctx.stroke(); });
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#2a3f6e';
+      lanes.forEach((ln, i) => ctx.fillText(i ? String(i) : 'A', ln.x, H - B - 4));
+      const slots = dispoSlots(this.g);
+      const bad = new Set<number>();
+      const conf = dispoConflicts(this.g, slots);
+      conf.forEach((c) => { bad.add(c.a.id); bad.add(c.b.id); });
+      for (const sl of slots) {
+        const dr = this.drag?.id === sl.t.id ? this.drag : undefined;
+        const auto = dr?.lane !== undefined && !sl.alight ? dr.lane === null : !sl.platform;
+        const pl = dr?.lane !== undefined && !sl.alight ? dr.lane ?? undefined : sl.platform ?? sl.guess;
+        const ln = lanes.find((l) => l.id === pl) ?? lanes[0];
+        const dep = (!sl.alight && dr?.dep) || sl.dep;
+        if (dep < t0 || sl.arr > t1) continue;
+        const x = Math.round(ln.x), ya = Y(sl.arr), yb = Y(dep);
+        if (!sl.alight) this.hits.push({ id: sl.t.id, x, ya, yb, locked: sl.locked });
+        const on = this.sel === sl.t.id;
+        if (on) { ctx.fillStyle = '#3a2e1c'; ctx.fillRect(x - 3, ya - 1, 7, yb - ya + 2); }
+        ctx.fillStyle = sl.t.op.color;
+        if (sl.alight) ctx.globalAlpha = 0.45;
+        if (auto && !dr) {
+          // automatisch: nur voraussichtlich – hohl gezeichnet
+          ctx.globalAlpha = 0.35;
+          ctx.fillRect(x - 2, ya, 5, Math.max(2, yb - ya));
+          ctx.globalAlpha = 1;
+          ctx.fillRect(x - 2, ya, 1, Math.max(2, yb - ya)); ctx.fillRect(x + 2, ya, 1, Math.max(2, yb - ya)); ctx.fillRect(x - 2, ya, 5, 1);
+        } else ctx.fillRect(x - 2, ya, 5, Math.max(2, yb - ya));
+        ctx.globalAlpha = 1;
+        // zurückgehalten: Wartezeit schraffiert
+        const base = baseDeparture(this.g, sl.t);
+        if (dep > base + 30) {
+          ctx.fillStyle = 'rgba(255,255,255,0.6)';
+          for (let y = Y(Math.max(base, sl.arr)); y < yb; y += 3) ctx.fillRect(x - 2, y, 5, 1);
+        }
+        if (bad.has(sl.t.id)) { ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, ya - 1.5, 8, yb - ya + 3); }
+        ctx.fillStyle = '#3a2e1c';
+        ctx.fillRect(x - 3, yb, 7, 1);
+        if (on || dr) { ctx.textAlign = 'left'; ctx.fillText(`${sl.t.number} ${fmtTime(dep)}`, x + 5, yb); }
+      }
+      // Konflikte: rote Kreuze
+      ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1.5;
+      for (const c of conf) {
+        const h = this.hits.find((x) => x.id === c.b.id);
+        if (!h) continue;
+        const y = Y(c.at);
+        ctx.beginPath(); ctx.moveTo(h.x - 6, y - 3); ctx.lineTo(h.x - 12, y + 3); ctx.moveTo(h.x - 12, y - 3); ctx.lineTo(h.x - 6, y + 3); ctx.stroke();
       }
     }
     // tatsächlich gefahren: kräftige Tinte

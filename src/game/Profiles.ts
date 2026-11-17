@@ -13,6 +13,10 @@ export interface Profile {
   created: number;
   /** Lebenszeit-Statistik über alle Spiele (RM-FR-PROF-03) */
   stats?: Record<string, number>;
+  /** beste Bewertung je Kapitel, 1–3 Sterne (RM-FR-MODE-04) */
+  stars?: Record<string, number>;
+  /** Herausforderungen: Bestzeit in Minuten (RM-FR-MODE-08) */
+  challenges?: Record<string, number>;
 }
 
 const KEY = 'rm_profiles';
@@ -21,7 +25,7 @@ const ACTIVE = 'rm_profile';
 /** Kampagnen-Kapitel in fester Reihenfolge (RM-FR-MODE-02); ready = spielbare Inhalte vorhanden */
 export const CHAPTERS: { map: string; title: string; topic: string; ready: boolean }[] = [
   { map: 'donau', title: 'Donautal', topic: 'Einstieg: der erste Bahnhof', ready: true },
-  { map: 'ebene', title: 'Pannonische Ebene', topic: 'Güter und Takt', ready: false },
+  { map: 'ebene', title: 'Pannonische Ebene', topic: 'Güter und Takt', ready: true },
   { map: 'revier', title: 'Industrierevier', topic: 'Betriebe und Rangieren', ready: false },
   { map: 'schnee', title: 'Schneeland', topic: 'Wetter und Störungen', ready: false },
   { map: 'alpen', title: 'Alpenbahn', topic: 'Berge und Tunnel', ready: false },
@@ -56,7 +60,7 @@ export function createProfile(company: string, player: Player): Profile {
   return p;
 }
 
-export function updateProfile(id: string, patch: Partial<Pick<Profile, 'company' | 'player' | 'chapters'>>) {
+export function updateProfile(id: string, patch: Partial<Pick<Profile, 'company' | 'player' | 'chapters' | 'stars' | 'challenges'>>) {
   const list = read();
   const p = list.find((x) => x.id === id);
   if (!p) return;
@@ -84,12 +88,21 @@ export function mapOpen(p: Profile | undefined, mapId: string) {
 }
 
 /** Kapitel abgeschlossen: im Profil merken (schaltet das nächste Kapitel und dessen Karte frei) */
-export function completeChapter(profileId: string | undefined, mapId: string) {
+export function completeChapter(profileId: string | undefined, mapId: string, stars = 1) {
   if (!profileId) return false;
   const p = read().find((x) => x.id === profileId);
-  if (!p || p.chapters.includes(mapId)) return false;
-  updateProfile(profileId, { chapters: [...p.chapters, mapId] });
-  return true;
+  if (!p) return false;
+  const best = Math.max(stars, p.stars?.[mapId] ?? 0);
+  const fresh = !p.chapters.includes(mapId);
+  updateProfile(profileId, { chapters: fresh ? [...p.chapters, mapId] : p.chapters, stars: { ...(p.stars ?? {}), [mapId]: best } });
+  return fresh;
+}
+
+/** Sterne eines Kapitels als HTML (leer, wenn noch nicht geschafft) */
+export function chapterStars(p: Profile | undefined, mapId: string) {
+  const n = p?.stars?.[mapId] ?? (p?.chapters.includes(mapId) ? 1 : 0);
+  if (!n) return '';
+  return `<span class="cp-stars" title="${n}/3 Sterne – mehr Sterne: pünktlicher und schneller">${'★'.repeat(n)}<i>${'★'.repeat(3 - n)}</i></span>`;
 }
 
 /** Zähler eines Spiels ins Profil übernehmen (Summen; maxMoney/minMoney als Rekorde) */

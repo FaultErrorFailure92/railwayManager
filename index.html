@@ -24,7 +24,7 @@
   <div id="game"></div>
 
   <header id="topbar" class="panel">
-    <button id="company" class="company" title="Namen ändern">
+    <button id="company" class="company">
       <img src="assets/gen/ui/train.png" alt="" /><span id="company-name">Bahn</span>
     </button>
     <div class="sep"></div>
@@ -35,6 +35,7 @@
       <button class="btn" data-speed="2" title="Schnell">▶▶</button>
       <button class="btn" data-speed="4" title="Sehr schnell">▶▶▶</button>
       <button class="btn" data-speed="8" title="Maximal">×8</button>
+      <button class="btn" id="btn-skip" title="Vorspulen bis zum nächsten Halt (N)">⏭</button>
     </div>
     <div class="sep"></div>
     <div class="tb-group">
@@ -49,12 +50,9 @@
     </div>
     <div class="grow"></div>
     <div class="tb-group btns">
-      <button class="btn small tb" id="btn-issues" title="Was ist los? (L)"><i class="amp" id="amp"></i><span id="issue-count">0</span></button>
       <button class="btn small tb" id="btn-research" title="Forschung (F)"><img src="assets/gen/ui/flask.png" alt="" /><span id="fp">0</span><i class="tb-bar" id="rs-mini"></i></button>
-      <button class="btn small tb" id="btn-timetable" title="Fahrplan (T)"><img src="assets/gen/ui/clock.png" alt="" /></button>
       <button class="btn small tb" id="btn-stats" title="Statistik und Erfolge"><img src="assets/gen/ui/check.png" alt="" /></button>
       <button class="btn small tb" id="btn-mail" title="Postfach (P)"><svg viewBox="0 0 12 12" width="20" height="20" shape-rendering="crispEdges" fill="currentColor"><path d="M1 3h10v7H1zM2 4v1l4 3 4-3V4L6 7z" fill-rule="evenodd"/></svg><span class="tb-count hidden" id="mail-count">0</span></button>
-      <button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" /><span class="tb-warn" id="ct-warn"></span></button>
     </div>
     <div class="tb-group btns">
       <button class="btn small tb" id="btn-sound" title="Geräusche an/aus">Ton an</button>
@@ -65,8 +63,8 @@
     </div>
   </header>
 
-  <!-- Layout: oben rechts Fortschritt (Auftrag, Bahnhof, Tagesziele), unten rechts Betrieb (Züge, Meldungen, Unternehmen),
-       unten links Übersichtskarte, unten Mitte Baumenü. Abschnitte ohne Inhalt werden ausgeblendet. -->
+  <!-- Layout: oben rechts Fortschritt (Auftrag, Bahnhof, Tagesziele); unten eine durchgehende Leiste
+       (Übersichtskarte · Baumenü · Infos in Tabs). Abschnitte ohne Inhalt werden ausgeblendet. -->
   <aside id="right">
     <section id="quest" class="panel">
       <div class="q-ribbon" id="q-ribbon">NEUER AUFTRAG!</div>
@@ -91,28 +89,38 @@
     </section>
   </aside>
 
-  <aside id="dock">
-    <section class="panel fold" id="p-trains">
-      <h3 data-fold="p-trains">Zugverkehr</h3>
-      <ul id="trains"></ul>
-    </section>
-    <section class="panel fold closed" id="p-log">
-      <h3 data-fold="p-log">Meldungen</h3>
-      <ul id="log"></ul>
-    </section>
-    <section class="panel fold closed" id="p-sat">
-      <h3 data-fold="p-sat">Bahnunternehmen</h3>
-      <div id="sat"></div>
-    </section>
-  </aside>
-
-  <div id="minimap-box" class="panel"><div id="layer-btns" title="Ebenen (E: weiterschalten)"></div><canvas id="minimap" title="Übersicht: klicken oder ziehen springt dorthin (M: ein/aus)"></canvas><div id="layer-legend" class="hidden"></div></div>
-
-  <div id="bottom">
-    <div id="tooltip" class="panel"></div>
-    <div id="variants" class="panel"></div>
-    <nav id="hotbar" class="panel"></nav>
+  <!-- Untere Leiste: links Übersichtskarte, Mitte Baumenü, rechts Infos (Tabs) -->
+  <div id="bar">
+    <div id="bar-map" class="bar-sec">
+      <div class="mm-wrap"><canvas id="minimap" title="Übersicht: klicken oder ziehen springt dorthin · Mausrad zoomt"></canvas><div id="layer-legend" class="hidden"></div></div>
+      <div id="mm-tools">
+        <button id="mm-zin" title="Karte hineinzoomen">+</button><button id="mm-zout" title="Karte herauszoomen">−</button>
+        <div id="layer-btns"></div>
+      </div>
+    </div>
+    <div id="bar-build" class="bar-sec">
+      <div id="bm-preview"></div>
+      <div id="bm-menu">
+        <nav id="hotbar"></nav>
+        <div id="variants"></div>
+      </div>
+    </div>
+    <div id="bar-info" class="bar-sec">
+      <div id="bar-detail"><div class="bd-body"></div><div class="bd-acts"></div></div>
+      <div id="bar-lists">
+        <div class="bar-tabs" id="bar-tabs">
+          <button data-tab="trains" id="tab-trains">Zugverkehr</button>
+          <button data-tab="log" id="tab-log">Meldungen</button>
+          <button data-tab="sat" id="tab-sat">Partner</button>
+        </div>
+        <section class="bar-pane" id="p-trains" data-pane="trains"><div class="pane-acts"><button class="btn small tb" id="btn-timetable" title="Fahrplan (F)"><img src="assets/gen/ui/clock.png" alt="" />Fahrplan</button></div><ul id="trains"></ul></section>
+        <section class="bar-pane" id="p-log" data-pane="log"><ul id="log"></ul></section>
+        <section class="bar-pane" id="p-sat" data-pane="sat"><div class="pane-acts"><button class="btn small tb" id="btn-contracts" title="Verträge (V)"><img src="assets/gen/ui/contract.png" alt="" />Verträge<span class="tb-warn" id="ct-warn"></span></button></div><div id="sat"></div></section>
+      </div>
+    </div>
   </div>
+  <!-- Infozeile zum Werkzeug: folgt dem Mauszeiger -->
+  <div id="tooltip" class="panel"></div>
 
   <div id="research" class="screen hidden">
     <div class="panel sc-box">
@@ -130,10 +138,10 @@
     <div class="panel sc-box">
       <div class="sc-head">
         <h2>Verträge</h2>
-        <div class="sc-stats"><span>Preis je Zug bei pünktlicher Abfertigung</span></div>
+        <span class="sc-info" title="Preis je Zug bei pünktlicher Abfertigung. Zu hohe Preise machen Unternehmen unzufrieden – dann kündigen sie und fahren nur noch für 40 € durch.&#10;Pflege = Züge werden hier abgestellt und gepflegt. Verstärker = Zusatzzüge in der Stoßzeit.">?</span><span id="ct-transit" hidden>40</span>
+        <div class="grow"></div>
         <button class="btn" data-close="contracts">✕</button>
       </div>
-      <div class="sc-hint">Zu hohe Preise machen Unternehmen unzufrieden – dann kündigen sie und fahren nur noch für <span id="ct-transit">40</span> € durch.</div>
       <div id="ct-table"></div>
     </div>
   </div>
@@ -142,7 +150,7 @@
     <div class="panel sc-box">
       <div class="sc-head">
         <h2>Statistik</h2>
-        <div class="sc-stats"><span>Einnahmen und Ausgaben der letzten Tage, Pünktlichkeit, Erfolge</span></div>
+        <div class="grow"></div>
         <button class="btn" data-close="stats">✕</button>
       </div>
       <div id="st-body"></div>
@@ -153,16 +161,15 @@
     <div class="panel sc-box">
       <div class="sc-head">
         <h2>Fahrplan</h2>
-        <div class="sc-stats"><span>gestrichelt = Plan · durchgezogen = tatsächlich · Klammer rechts = Anschluss (grün ok · orange Gefahr · ✗ verpasst)</span></div>
+        <span class="sc-info" title="Weg-Zeit-Diagramm: Strecke von West nach Ost, Zeit nach unten. Flache Linie = schneller Zug, senkrecht = Halt.&#10;Gestrichelt = Plan, durchgezogen = tatsächlich.&#10;Klammer rechts = Anschluss (grün ok, orange Gefahr, ✗ verpasst).&#10;Am Bahnhof: eine Spalte je Bahnsteig (A = automatisch). Zug anklicken, ↔ ziehen = Bahnsteig, ↕ ziehen = Abfahrt zurückhalten. Rot = Konflikt.">?</span>
+        <div class="grow"></div>
         <button class="btn" data-close="timetable">✕</button>
       </div>
-      <div class="sc-hint">Weg-Zeit-Diagramm: Strecke von West nach Ost, Zeit nach unten. Je flacher eine Linie, desto schneller der Zug; senkrechte Stücke = Halt oder Warten.</div>
       <div class="tt-main"><canvas id="tt-canvas" width="960" height="620"></canvas>
-        <div class="tt-ops"><h3>Zeiten &amp; Gleise</h3><div id="tt-ops"></div></div></div>
+        <div class="tt-ops"><h3 title="Zug im Diagramm anklicken: Bahnsteig und Abfahrt ändern">Disposition</h3><div id="tt-dispo"></div><h3 title="Ganzer Fahrplan je Unternehmen: verschieben, Bahnsteig je Richtung">Unternehmen</h3><div id="tt-ops"></div></div></div>
     </div>
   </div>
 
-  <div id="bpanel" class="panel hidden"></div>
 
   <div id="offer" class="hidden">
     <div class="panel ev-box of-box"><div id="of-body"></div></div>
@@ -204,8 +211,8 @@
         <button class="btn" id="p-settings">Einstellungen</button>
         <button class="btn" id="p-help">Hilfe</button>
         <button class="btn" id="p-main">Hauptmenü</button>
-        <button class="btn" id="p-report" title="Fehler und Spielstand als Datei, z. B. für eine Fehlermeldung">Fehlerbericht</button>
       </div>
+      <button class="btn p-report" id="p-report" title="Fehlerbericht: Fehler und Spielstand als Datei, z. B. für eine Fehlermeldung"><svg viewBox="0 0 12 12" width="18" height="18" shape-rendering="crispEdges" fill="currentColor"><path d="M4 1h1v1h2V1h1v1h1v1H8v1h2v1H9v1h2v1H9v1h1v1H9v1H8v1H4v-1H3V9H2V8h1V7H1V6h2V5H2V4h2V3H3V2h1z"/></svg></button>
     </div>
   </div>
 
@@ -230,11 +237,13 @@
     </div>
   </div>
 
-  <aside id="issues" class="panel hidden">
-    <div class="is-head"><span id="is-face"></span><div><b>Was ist los?</b><small id="is-who"></small></div><button class="btn" id="is-close">✕</button></div>
+  <!-- „Was ist los?“: ein-/ausklappbar wie die Panels rechts (Taste L) -->
+  <section id="issues" class="panel fold closed">
+    <h3 data-fold="issues"><i class="amp" id="amp"></i> Was ist los? <span id="issue-count" class="is-count hidden">0</span></h3>
+    <div class="is-head"><span id="is-face"></span><small id="is-who"></small></div>
     <div class="is-say" id="is-say"></div>
     <ul class="is-list" id="is-list"></ul>
-  </aside>
+  </section>
 
   <div id="settings" class="hidden">
     <div class="panel dialog set-box">
@@ -265,6 +274,7 @@
     </div>
   </div>
   <div id="toasts"></div>
+  <div id="dayend" class="panel hidden"></div>
   <div id="flash" class="hidden"></div>
 
   <div id="changelog" class="hidden">
@@ -311,6 +321,7 @@
         <div class="mb-head"><span>Abfahrt nach</span><span class="mb-clock" id="mb-clock"></span></div>
         <button class="mb-row" id="m-continue"><span class="mb-to"><img src="assets/gen/icons/track.png" alt="" /><b>Weiterspielen</b></span><span class="mb-note" id="m-continue-sub"></span></button>
         <button class="mb-row" id="m-campaign"><span class="mb-to"><img src="assets/gen/icons/bld_station3.png" alt="" /><b>Kampagne</b></span><span class="mb-note" id="m-campaign-sub">Kapitel 1 von 7</span></button>
+        <button class="mb-row" id="m-chal"><span class="mb-to"><img src="assets/gen/icons/bld_clock.png" alt="" /><b>Herausforderungen</b></span><span class="mb-note">kurz, knapp, gegen die Uhr</span></button>
         <button class="mb-row" id="m-free"><span class="mb-to"><img src="assets/gen/icons/tool_flag.png" alt="" /><b>Freies Spiel</b></span><span class="mb-note">eigene Regeln, große Ziele</span></button>
         <button class="mb-row" id="m-load"><span class="mb-to"><img src="assets/gen/icons/bld_lockers.png" alt="" /><b>Spielstand laden</b></span><span class="mb-note">aus dem Depot holen</span></button>
         <button class="mb-row" id="m-stats"><span class="mb-to"><img src="assets/gen/icons/bld_statue.png" alt="" /><b>Dienstakte</b></span><span class="mb-note">deine Statistik</span></button>
@@ -320,7 +331,8 @@
         <button class="m-ico" id="m-settings" title="Einstellungen"><svg viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor"><path d="M5 0h2v2h1v1h1V2h1v2H9v1h3v2H9v1h1v2H9v-1H8v1H7v2H5v-2H4v1H3V9H2V8h1V7H0V5h3V4H2V2h1v1h1V2h1zM5 4v1H4v2h1v1h2V7h1V5H7V4z"/></svg></button>
         <button class="m-ico" id="m-help" title="Hilfe (H)"><svg viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor"><path d="M3 1h6v1h1v4H9v1H7v2H5V6h1V5h2V3H4v2H2V2h1zM5 10h2v2H5z"/></svg></button>
         <button class="m-ico" id="m-news" title="Was ist neu?"><svg viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor"><path d="M1 1h9v1H2v8h8V3h1v8H1zM3 3h6v2H3zM3 6h3v1H3zM3 8h3v1H3zM7 6h2v3H7z"/></svg></button>
-        <button class="m-ico m-dev hidden" id="m-demo" title="Demobahnhof (nur Entwicklung)">DEV</button>
+        <button class="m-ico m-dev hidden" id="m-demo" title="Demobahnhof (nur Entwicklung)"><svg viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor"><path d="M7 0h3v1H8v2h2V1h1v3h-1v1H8v1H7v1H6v1H5v1H4v1H3v1H2v1H1v-1H0V9h1V8h1V7h1V6h1V5h1V4h1V1h1z"/></svg></button>
+        <button class="m-ico hidden" id="m-quit" title="Beenden"><svg viewBox="0 0 12 12" shape-rendering="crispEdges" fill="currentColor"><path d="M5 0h2v6H5zM2 2h2v2H3v4h1v1h4V8h1V4H8V2h2v1h1v6h-1v1H9v1H3v-1H2V9H1V3h1z"/></svg></button>
       </div>
       <div class="panel slots hidden" id="m-slots"></div>
       <div class="m-legal"><a href="impressum.html" target="_blank" rel="noopener">Impressum</a> · <a href="datenschutz.html" target="_blank" rel="noopener">Datenschutz</a> · keine Cookies, kein Tracking</div>
@@ -350,6 +362,13 @@
     </div>
   </div>
 
+  <div id="challenges" class="hidden">
+    <div class="panel cl-box cp-box">
+      <div class="cl-head"><h2>HERAUSFORDERUNGEN</h2><button class="btn" id="ch-close">✕</button></div>
+      <div class="cp-list" id="ch-list"></div>
+    </div>
+  </div>
+
   <!-- Freies Spiel einrichten (RM-FR-MODE-06) -->
   <div id="freesetup" class="hidden">
     <div class="panel cl-box fs-box">
@@ -376,11 +395,13 @@
     </div>
   </div>
 
+  <div id="quit" class="hidden"><div class="panel doc quit-doc"><h2>Feierabend!</h2><p>Dein Spielstand ist gespeichert. Du kannst dieses Fenster jetzt schließen.</p><button class="btn" id="quit-back">Doch noch eine Schicht</button></div></div>
   <div id="modal" class="hidden">
     <div class="panel dialog">
       <h2>Deine Bahngesellschaft</h2>
       <p>Wie soll dein Unternehmen heißen?</p>
       <input id="name-input" maxlength="28" placeholder="z.B. Donaubahn AG" />
+      <div id="code-row" class="hidden"><label for="code-input">Kürzel</label><input id="code-input" maxlength="4" /><small>für Zuganzeigen, z.B. „fährt in Dmh ein“ – leer lassen für automatisch</small></div>
       <button class="btn big" id="name-ok">Los geht's!</button>
     </div>
   </div>

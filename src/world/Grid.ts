@@ -63,6 +63,8 @@ export interface Building {
   decor: boolean;
   /** Bahnhofsname (Empfangsgebäude) */
   name?: string;
+  /** Bahnhofs-Kürzel (selbst vergeben) */
+  code?: string;
   /** gespiegelt/gedreht (nur quadratische Gebäude) */
   rot?: boolean;
 }

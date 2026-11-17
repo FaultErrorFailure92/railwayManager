@@ -4,7 +4,7 @@ import type { ToolId } from './Missions';
 export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump' | 'shunt' | 'switchHeat' | 'crew' | 'crew2'
   | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco' | 'dwell' | 'estw' | 'diagSwitch'
   | 'bench' | 'light' | 'green' | 'clock' | 'water' | 'monument' | 'art' | 'season' | 'cat'
-  | 'kiosk' | 'cafe' | 'wc' | 'inn' | 'ads' | 'lockers' | 'souvenir' | 'haggle' | 'specials';
+  | 'kiosk' | 'cafe' | 'wc' | 'inn' | 'ads' | 'lockers' | 'souvenir' | 'haggle' | 'specials' | 'ticket';
 
 /** drei Forschungsbäume */
 export type ResearchTree = 'ops' | 'deco' | 'biz';
@@ -88,6 +88,7 @@ export const RESEARCH: ResearchDef[] = [
   R('biz', 'haggle', 'Verhandlungsgeschick', 'höhere Preise', 'Ein Seminar „Feilschen für Fortgeschrittene“: Unternehmen akzeptieren 10 % höhere Preise', 'ri_haggle', 2, 2, 5000, 7, 4, ['ads']),
   R('biz', 'inn', 'Wirtshauskultur', 'Gasthaus', 'Wirtshaus am Bahnhof – gutes Essen, gutes Geld', 'bld_inn', 3, 0, 5000, 7, 4, ['wc']),
   R('biz', 'souvenir', 'Andenken-Wahnsinn', 'Souvenirladen', 'Kitsch verkauft sich – bei Volksfesten dreimal so gut', 'bld_souvenir', 3, 1, 4000, 6, 3, ['lockers']),
+  R('biz', 'ticket', 'Schwarzkappler', 'Kontrolleure', 'Wo kontrolliert wird, gibt es Schwarzfahrer – und Strafgeld. Kontrolleure stellst du unter Verträge ein', 'bld_statue', 2, 3, 3500, 3, 5, ['lockers']),
   R('biz', 'specials', 'Sonderzug-Agentur', 'mehr Sonderzüge', 'Öfter Anfragen für Sonderzüge, und die Prämien sind 50 % höher', 'ri_specials', 3, 2, 4000, 6, 3, ['haggle']),
   // alt
   R('deco', 'deco', 'Mehr Deko', '', 'alter Spielstand', 'bld_fountain', 0, 0, 0, 0, 0, [], { hidden: true }),

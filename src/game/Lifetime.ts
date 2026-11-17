@@ -36,6 +36,7 @@ export function lifeLines(p: Profile): LifeLine[] {
     { icon: 'bld_cafe', label: 'Umsatz der Läden', value: eur(v('shop')), quip: `≈ ${n(v('shop') / 4.2)} Wiener Melange` },
     { icon: 'signal_E', label: 'Störungen erlebt', value: n(v('faults')), quip: `${n(v('repairs'))} davon selbst repariert` },
     { icon: 'bld_remise', label: 'Züge gewaschen und gepflegt', value: n(v('services')) },
+    { icon: 'bld_statue', label: 'Schwarzfahrer erwischt', value: n(v('caught')), quip: v('caught') ? 'die Ausrede „Automat war kaputt“ zählt nicht' : 'alle haben brav gezahlt – angeblich' },
     { icon: 'bld_station', label: 'Anschlüsse erreicht', value: n(v('connOk')), quip: v('connMissed') ? `${n(v('connMissed'))} Umsteiger haben nur noch die Rücklichter gesehen` : 'niemand musste rennen' },
     { icon: 'bld_statue', label: 'Tage im Dienst', value: n(v('days')), quip: `${n(v('games'))} ${v('games') === 1 ? 'Spiel' : 'Spiele'} begonnen` },
   ];

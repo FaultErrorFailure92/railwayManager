@@ -136,7 +136,7 @@ export function problems(g: Game): Problem[] {
     const w = worn[0], { x, y } = g.grid.xy(w.k);
     const what = w.kind === 'switch' ? 'Weiche' : 'Signal';
     out.push({ id: 'wear', level: 'gelb', at: { x, y },
-      text: `${worn.length > 1 ? `${worn.length} Weichen/Signale sind` : `Ein${w.kind === 'switch' ? 'e Weiche ist' : ' Signal ist'}`} stark abgenutzt und fallen bald aus (Ebene „Instandhaltung“: Taste E).`,
+      text: `${worn.length > 1 ? `${worn.length} Weichen/Signale sind` : `Ein${w.kind === 'switch' ? 'e Weiche ist' : ' Signal ist'}`} stark abgenutzt und fallen bald aus (Ebene „Instandhaltung“: Taste Ü).`,
       fix: g.money >= MAINT_COST ? { label: `${what} (${Math.round(wearOf(g, w.k))} %) warten (−${eur(MAINT_COST)} €)`, run: (gg) => { maintain(gg, w.k); gg.addLog(`${what} gewartet (−${MAINT_COST} €)`, 'info'); } } : undefined });
   }
 

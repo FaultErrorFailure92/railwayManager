@@ -1,6 +1,7 @@
 /**
  * Übersichtskarte (RM-FR-UI-11) im Stil von Age of Empires 2: isometrisch wie das Spielfeld,
- * fest links unten, sichtbarer Ausschnitt als Rechteck. Klicken oder Ziehen springt dorthin.
+ * links in der unteren Leiste, sichtbarer Ausschnitt als Rechteck. Klicken oder Ziehen springt dorthin.
+ * Mausrad zoomt (Standard 2×); im Zoom folgt der Kartenausschnitt der Kamera.
  */
 import type { Game } from '../game/Game';
 import type { GameScene } from '../render/GameScene';
@@ -17,10 +18,17 @@ const C: Record<string, RGB> = {
 };
 /** fremdes Land ist abgedunkelt (wie unerkundetes Gebiet) */
 const FOREIGN = 0.62;
+/** Zoomstufen der Übersichtskarte */
+const ZOOMS = [1, 1.5, 2, 3, 4];
 
 export class Minimap {
   private ctx: CanvasRenderingContext2D;
-  private base: ImageData | null = null;
+  /** ganze Karte in der aktuellen Zoomstufe (Hintergrund, nur nach Änderungen neu) */
+  private base: HTMLCanvasElement | null = null;
+  /** Zoomstufe und sichtbarer Ausschnitt (Karteneinheiten, oben links) */
+  private z = 2;
+  private ou = 0;
+  private ov = 0;
   private builtKey = '';
   private dragging = false;
   /** Pixel je Karteneinheit (Gerätepixel) */
@@ -39,13 +47,24 @@ export class Minimap {
     canvas.addEventListener('pointermove', (e) => { if (this.dragging) jump(e); });
     canvas.addEventListener('pointerup', () => { this.dragging = false; });
     canvas.addEventListener('pointercancel', () => { this.dragging = false; });
+    try { this.z = Number(localStorage.getItem('rm_mmzoom2')) || 3; } catch { /* egal */ }
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); this.zoom(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+  }
+
+  /** eine Zoomstufe hinein (+1) oder heraus (−1) */
+  zoom(d: number) {
+    const i = ZOOMS.indexOf(this.z);
+    this.z = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, (i < 0 ? 3 : i) + d))];
+    try { localStorage.setItem('rm_mmzoom2', String(this.z)); } catch { /* egal */ }
+    this.base = null;
+    this.draw();
   }
 
   /** Karteneinheiten: u = x − y + h (0 … w+h), v = (x + y) / 2 (0 … (w+h)/2) */
   private get span() { return this.g.grid.w + this.g.grid.h; }
-  private toPx(x: number, y: number) { return { px: (x - y + this.g.grid.h) * this.k, py: ((x + y) / 2) * this.k }; }
+  private toPx(x: number, y: number) { return { px: (x - y + this.g.grid.h - this.ou) * this.k, py: ((x + y) / 2 - this.ov) * this.k }; }
   private toCell(px: number, py: number) {
-    const u = px / this.k - this.g.grid.h, v = py / this.k;
+    const u = px / this.k + this.ou - this.g.grid.h, v = py / this.k + this.ov;
     return { x: v + u / 2, y: v - u / 2 };
   }
 
@@ -54,19 +73,20 @@ export class Minimap {
     const cssW = this.canvas.clientWidth;
     if (!cssW) return false;
     const w = Math.round(cssW * uiScale() * (window.devicePixelRatio || 1));
-    const h = Math.round(w / 2);
+    const h = Math.round((this.canvas.clientHeight || cssW / 2) * uiScale() * (window.devicePixelRatio || 1));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
       this.base = null;
     }
-    this.k = w / this.span;
+    const k = (w / this.span) * this.z;
+    if (k !== this.k) { this.k = k; this.base = null; }
     return true;
   }
 
   /** Gelände, Land, Gleise und Gebäude malen (nur nach Änderungen) */
   private buildBase() {
-    const g = this.g.grid, W = this.canvas.width, H = this.canvas.height;
+    const g = this.g.grid, W = Math.ceil(this.span * this.k), H = Math.ceil((this.span / 2) * this.k);
     // Farbe je Feld vorberechnen
     const col: RGB[] = new Array(g.cells.length);
     for (let k = 0; k < g.cells.length; k++) {
@@ -83,10 +103,15 @@ export class Minimap {
       if (c.platform) col[k] = C.platform;
       if (c.track || c.piece !== null) col[k] = c.fixed ? C.fixed : C.track;
     });
-    const img = this.ctx.createImageData(W, H), d = img.data;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const cx = cv.getContext('2d')!;
+    const img = cx.createImageData(W, H), d = img.data;
     for (let py = 0; py < H; py++) {
       for (let px = 0; px < W; px++) {
-        const c = this.toCell(px + 0.5, py + 0.5);
+        // ganze Karte: ohne Ausschnitt-Verschiebung
+        const u = (px + 0.5) / this.k - g.h, v = (py + 0.5) / this.k;
+        const c = { x: v + u / 2, y: v - u / 2 };
         const x = Math.floor(c.x), y = Math.floor(c.y);
         if (x < 0 || y < 0 || x >= g.w || y >= g.h) continue; // außerhalb: durchsichtig (schwarzer Rahmen)
         const k = y * g.w + x;
@@ -95,20 +120,30 @@ export class Minimap {
         d[o] = col[k][0] * f; d[o + 1] = col[k][1] * f; d[o + 2] = col[k][2] * f; d[o + 3] = 255;
       }
     }
-    this.base = img;
+    cx.putImageData(img, 0, 0);
+    this.base = cv;
   }
 
   /** aufrufen, wenn sichtbar (z. B. alle 120 ms) */
   draw() {
     if (this.canvas.offsetParent === null || !this.fit()) return;
-    const key = `${this.g.version}|${this.canvas.width}`;
+    const key = `${this.g.version}|${this.canvas.width}|${this.canvas.height}|${this.z}`;
     if (!this.base || key !== this.builtKey) { this.buildBase(); this.builtKey = key; }
-    const ctx = this.ctx;
-    ctx.putImageData(this.base!, 0, 0);
+    const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     const sc = this.scene();
+    // Ausschnitt folgt der Kamera (beim Ziehen festhalten, sonst springt er unter der Maus weg)
+    if (sc && !this.dragging) {
+      const v = sc.viewRect();
+      const cu = (v.x + v.width / 2) / TILE + this.g.grid.h, cv = (v.y + v.height / 2) / TILE;
+      this.ou = Math.max(0, Math.min(this.span - W / this.k, cu - W / (2 * this.k)));
+      this.ov = Math.max(0, Math.min(this.span / 2 - H / this.k, cv - H / (2 * this.k)));
+    }
+    ctx.fillStyle = '#0b0a08';
+    ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(this.base!, Math.round(this.ou * this.k), Math.round(this.ov * this.k), W, H, 0, 0, W, H);
     if (!sc) return;
     // Züge als Punkte in Unternehmensfarbe
-    const s = Math.max(3, Math.round(this.k * 2.2));
+    const s = Math.max(3, Math.min(9, Math.round(this.k * 1.4)));
     for (const t of sc.trainHeads()) {
       const p = this.toPx(t.x, t.y);
       ctx.fillStyle = '#000';
@@ -118,7 +153,7 @@ export class Minimap {
     }
     // sichtbarer Ausschnitt: auf der isometrischen Karte ein Rechteck
     const v = sc.viewRect();
-    const x0 = (v.x / TILE + this.g.grid.h) * this.k, y0 = (v.y / TILE) * this.k;
+    const x0 = (v.x / TILE + this.g.grid.h - this.ou) * this.k, y0 = (v.y / TILE - this.ov) * this.k;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = Math.max(1, Math.round(this.k * 0.6));
     ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y0) + 0.5, Math.round((v.width / TILE) * this.k), Math.round((v.height / TILE) * this.k));

@@ -81,7 +81,7 @@ export function settleDeparture(g: Game, b: Train) {
       // erreicht
       const n = Math.max(1, Math.round(a.passengers * TRANSFER_SHARE));
       const fee = n * TRANSFER_FEE;
-      g.money += fee;
+      g.book('Unternehmen', fee);
       g.stats.connOk = (g.stats.connOk ?? 0) + 1;
       const td = g.today(); td.conn = (td.conn ?? 0) + 1;
       g.bump('connOk');
@@ -91,7 +91,7 @@ export function settleDeparture(g: Game, b: Train) {
       g.addLog(`Anschluss ${a.number} → ${b.number}: ${n} Umsteiger · +${fee} €`, 'good');
     } else {
       // Zubringer noch nicht da oder zu knapp: Anschluss verpasst
-      g.money -= MISSED_PENALTY;
+      g.book('Strafen', -(MISSED_PENALTY));
       g.stats.connMissed = (g.stats.connMissed ?? 0) + 1; g.bump('connMissed');
       g.satisfaction[b.op.id] = Math.max(0, g.satisfaction[b.op.id] - 3);
       g.connResults.set(key, { ok: false, at: sim.time, arr: a.arr, dep, fromNo: a.number, toNo: b.number });

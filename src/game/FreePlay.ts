@@ -4,10 +4,12 @@
  */
 import type { Game } from './Game';
 import { MISSIONS, TUTORIAL_MISSIONS } from './Missions';
+import { buildDemo } from '../dev/demo';
+import { startChallenge } from './Challenges';
 import { RESEARCH } from './Research';
 import { TIERS } from './StationTiers';
 
-export type GameMode = 'campaign' | 'free';
+export type GameMode = 'campaign' | 'free' | 'challenge';
 
 /** Einstellungen des freien Spiels (RM-FR-MODE-06) */
 export interface FreeCfg {
@@ -104,7 +106,7 @@ export function freeTick(g: Game) {
   for (const goal of LONG_GOALS) {
     if (g.longGoals.includes(goal.id) || goal.check(g).value < 1) continue;
     g.longGoals.push(goal.id);
-    g.money += goal.reward;
+    g.book('Prämien', goal.reward);
     g.research.points += goal.fp;
     g.addLog(`Langzeitziel erreicht: ${goal.label}${goal.reward ? ` · +${eur(goal.reward)} €` : ''}${goal.fp ? ` · +${goal.fp} FP` : ''}`, 'good');
     g.uiEvents.push({ type: 'letter', mood: 'good', open: true, bonus: goal.reward || undefined, title: `Ziel erreicht: ${goal.label}`,
@@ -132,6 +134,8 @@ export interface NewGameSetup {
   player: Game['player'];
   /** Kampagne: mit Einschulung (Tutorial) */
   tutorial?: boolean;
+  /** Herausforderung (RM-FR-MODE-08) */
+  challenge?: string;
   cfg?: FreeCfg;
 }
 
@@ -141,15 +145,29 @@ export function applySetup(g: Game, s: NewGameSetup) {
   g.company = s.company;
   g.player = { ...s.player };
   g.startMission();
+  if (s.mode === 'challenge' && s.challenge) {
+    buildDemo(g);
+    g.company = s.company;
+    g.player = { ...s.player };
+    g.missionIdx = MISSIONS.length;
+    startChallenge(g, s.challenge);
+    g.history = [];
+    g.life = { games: 1 };
+    g.lifeMax = g.money;
+    g.lifeMin = g.money;
+    return;
+  }
   if (s.mode === 'free') {
     g.freeCfg = s.cfg ?? freeDefaults(s.map, g.money);
     g.money = g.freeCfg.money;
     applyFreeCfg(g);
     g.sim.paxFactor *= paxCfg(g);
     g.startFreePlay(false);
-  } else if (s.tutorial === false) g.skipTutorial();
-  g.welcome();
-  // Profil-Statistik: Startgeld zählt nicht als verdient
+  } else if (s.map === 'ebene') g.startChapter2();
+  else if (s.tutorial === false) g.skipTutorial();
+  if (!(s.mode === 'campaign' && s.map === 'ebene')) g.welcome();
+  // Profil-Statistik und Finanzen: Startgeld zählt nicht als verdient
+  g.history = [];
   g.life = { games: 1 };
   g.lifeMax = g.money;
   g.lifeMin = g.money;

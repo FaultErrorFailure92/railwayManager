@@ -1,5 +1,5 @@
 import { COST, STATION_UPGRADE } from '../config';
-import { BIG_REPAIR_COST, CANCEL_COST, Game, fmtTime, REPAIR_COST } from '../game/Game';
+import { BIG_REPAIR_COST, CANCEL_COST, Game, fmtTime, REPAIR_COST, type LogEntry, type UiEvent } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
 import { ACHIEVEMENTS } from '../game/Achievements';
 import { goalProgress } from '../game/Goals';
@@ -18,16 +18,21 @@ import { firstPayment, loanLimit, loanOffers, repayLoan, takeLoan, totalInterest
 import { TIERS, tierChecks } from '../game/StationTiers';
 import { MENTOR, mentorLine, problems, type Problem } from '../game/Problems';
 import { fromUi, maxUiScale, setSettings, settings, toUi, UI_SCALES } from '../game/settings';
-import { OPERATORS } from '../sim/Operators';
-import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
+import { OPERATORS, type OperatorId } from '../sim/Operators';
+import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
+import { trainStatus } from '../game/TrainStatus';
+import { setInspectors } from '../game/FareDodgers';
+import { autoCode, cleanCode } from '../game/StationCode';
+import { letPass } from '../game/Connections';
+import { baseDeparture, dispoConflicts, dispoSlots, setHold, setTrainPlatform, shiftHold } from '../game/Disposition';
 import { TitleShow } from '../render/TitleShow';
 import { author, newsPhoto, paperName } from './press';
 import { BOARD } from '../game/Board';
 import { avatar, portrait } from './portrait';
-import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
-import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, TRANSIT_FEE } from './Screens';
+import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
+import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, statsView, TRANSIT_FEE, type StatsTab } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { PersonCard } from '../render/People';
 
@@ -35,6 +40,7 @@ import type { PersonCard } from '../render/People';
 const esc = (s: string) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 import type { GameScene, Layer, UiState } from '../render/GameScene';
 import { LAYERS, VARIANTS, typing, variantOf } from '../render/GameScene';
+import { BUILD_MENU_TREE, curKey, locate, needOf, nextVariant, pickVariant, rotate, rotation, typeLocked, variantLocked, variantOn, type BGroup, type BType, type BVariant } from './BuildMenu';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -74,45 +80,21 @@ const TOOLS: ToolDef[] = [
   { id: 'platform', label: 'Bahnsteig', key: '3', icon: 'platform', cost: COST.platform, help: 'Neben dem Gleis ziehen' },
   { id: 'track', label: 'Gleis', key: '4', icon: 'track', cost: COST.track,
     help: 'Ziehen: waagrecht = gerade, schräg = Diagonale (kreuzt Gleise automatisch)' },
-  { id: 'curve', label: 'Kurve', key: '5', cost: COST.curve, help: 'Klicken · R = nächste Variante' },
-  { id: 'switch', label: 'Weiche', key: '6', cost: COST.switch, help: 'Gleiswechsel und Abzweige · R = nächste Variante' },
-  { id: 'signal', label: 'Signal', key: '7', cost: COST.signal, help: 'Auf Gleis klicken · R = Fahrtrichtung' },
+  { id: 'curve', label: 'Kurve', key: '5', cost: COST.curve, help: 'Klicken · R = drehen' },
+  { id: 'switch', label: 'Weiche', key: '6', cost: COST.switch, help: 'Gleiswechsel und Abzweige · R = drehen · T = nächste Variante' },
+  { id: 'signal', label: 'Signal', key: '7', cost: COST.signal, help: 'Auf Gleis klicken · R = Fahrtrichtung · T = Haupt-/Rangiersignal' },
   { id: 'wire', label: 'Oberleitung', key: '8', icon: 'tool_wire', cost: COST.wire, help: 'Über Gleise ziehen · ohne Oberleitung halten nur Dieselzüge' },
   { id: 'access', label: 'Zugang', key: '9', help: 'Von Bahnsteig zu Bahnsteig quer über die Gleise ziehen' },
   { id: 'road', label: 'Straße', key: '0', icon: 'tool_road', cost: COST.road, help: 'Ziehen · verbindet Empfangsgebäude mit Parkplatz und Busterminal' },
-  { id: 'building', label: 'Gebäude', key: 'B', help: 'Klicken zum Bauen · R = nächstes Gebäude' },
-  { id: 'facility', label: 'Anlagen', key: 'N', help: 'Auf Gleise setzen bzw. Gleise markieren · R = nächste' },
+  { id: 'building', label: 'Gebäude', key: 'B', help: 'Klicken zum Bauen · R = drehen · T = nächstes Gebäude' },
+  { id: 'facility', label: 'Anlagen', key: 'N', help: 'Auf Gleise setzen bzw. Gleise markieren · T = nächste' },
   { id: 'remove', label: 'Abriss', key: 'X', icon: 'tool_shovel', help: 'Klicken oder Fläche aufziehen · je Feld das oberste Teil: Signal → Gebäude → Zugang → Bahnsteig → Markierung → Gleis' },
 ];
 
-/** Baumenü: Gruppen (Leiste unten) mit Einträgen (Reihen darüber) */
-interface MenuItem { tool: ToolId; variant?: string; icon: string; label: string; cost?: number; info?: string }
-interface MenuGroup { id: string; label: string; key: string; alt?: string; icon: string; help: string; items: MenuItem[] }
+/** Baumenü (untere Leiste): Gruppe → Typ → Variante → Drehung (siehe BuildMenu.ts) */
+const MENU = BUILD_MENU_TREE;
+type MenuGroup = BGroup;
 
-const vItems = (tool: ToolId, filter: (key: string) => boolean = () => true): MenuItem[] =>
-  (VARIANTS[tool] ?? []).filter((v) => filter(v.key)).map((v) => ({ tool, variant: v.key, icon: v.icon, label: v.label, cost: v.cost, info: v.info }));
-const tItem = (id: ToolId): MenuItem => { const t = TOOLS.find((x) => x.id === id)!; return { tool: id, icon: t.icon ?? 'track', label: t.label, cost: t.cost, info: t.help }; };
-
-const MENU: MenuGroup[] = [
-  { id: 'select', label: 'Ansehen', key: '1', icon: 'tool_cursor', help: TOOLS[0].help, items: [tItem('select')] },
-  { id: 'land', label: 'Land kaufen', key: '2', icon: 'tool_flag', help: 'Gelbe Parzelle anklicken', items: [tItem('land')] },
-  { id: 'platform', label: 'Bahnsteig & Zugänge', key: '3', icon: 'platform', help: 'Bahnsteige neben dem Gleis ziehen · Unterführung/Brücke von Bahnsteig zu Bahnsteig',
-    items: [tItem('platform'), ...vItems('access')] },
-  { id: 'tracks', label: 'Gleisbau', key: '4', icon: 'track', help: 'Gleise ziehen (schräg = Diagonale), Kurven und Weichen klicken',
-    items: [tItem('track'), ...vItems('curve'), ...vItems('switch')] },
-  { id: 'ops', label: 'Bahnbetrieb', key: '5', icon: 'signal_E', help: 'Signale, Oberleitung, Rangierbereiche und Gleismarkierungen',
-    items: [...vItems('signal'), tItem('wire'), ...vItems('facility', (k) => k.startsWith('mark_'))] },
-  { id: 'facility', label: 'Unterstützungsanlagen', key: '6', icon: 'bld_remise', help: 'Remise, Werkstatt, Waschanlage und Abrollberg auf Gleise setzen',
-    items: vItems('facility', (k) => !k.startsWith('mark_')) },
-  { id: 'road', label: 'Straße & Bahnübergang', key: '7', icon: 'tool_road', help: 'Straßen ziehen · verbindet Empfangsgebäude mit Parkplatz und Busterminal', items: [tItem('road')] },
-  { id: 'building', label: 'Gebäude', key: '8', alt: 'B', icon: 'bld_station', help: 'Klicken zum Bauen · R = nächstes Gebäude · Q = drehen', items: vItems('building') },
-  { id: 'remove', label: 'Abriss', key: '9', alt: 'X', icon: 'tool_shovel', help: TOOLS.find((t) => t.id === 'remove')!.help, items: [tItem('remove')] },
-];
-
-const STATE_TEXT: Record<string, string> = {
-  queued: 'angekündigt', running: 'fährt', dwell: 'hält am Bahnsteig', parked: 'abgestellt',
-  rolling: 'rollt ab', stored: 'im Richtungsgleis', done: 'fertig',
-};
 
 export class Hud {
   private ribbonUntil = 0;
@@ -120,22 +102,32 @@ export class Hud {
   private fresh = new Set<ToolId>();
   private lastVariantsKey = '';
   private lastQuest = -1;
-  /** Zug unter der Maus in der Zugliste */
-  private listHover: { id: number; el: HTMLElement } | null = null;
   private pausedBeforeMenu = false;
 
   constructor(private g: Game, private ui: UiState, private scene: () => GameScene | undefined, private hadSave: boolean, freshStart = false) {
     this.buildHotbar();
     this.minimap = new Minimap($('minimap') as HTMLCanvasElement, g, scene);
-    $('layer-btns').innerHTML = LAYERS.map((l) => `<button data-layer="${l.id}" title="${l.name}">${l.name}</button>`).join('');
+    $('bar-tabs').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-tab]') as HTMLElement | null;
+      if (b) this.setTab(b.dataset.tab!);
+    });
+    let tab0 = 'trains';
+    try { tab0 = localStorage.getItem('rm_tab') ?? 'trains'; } catch { /* egal */ }
+    this.setTab(tab0);
+    $('mm-zin').onclick = () => this.minimap.zoom(1);
+    $('mm-zout').onclick = () => this.minimap.zoom(-1);
+    const LAYER_ICON: Record<string, string> = { occupancy: 'signal_E', pax: 'bld_bench', mood: 'bld_cafe', wear: 'tool_shovel' };
+    $('layer-btns').innerHTML = LAYERS.map((l) => `<button data-layer="${l.id}" data-tt="Ebene: ${l.name} (Ü)"><img src="${ICON(LAYER_ICON[l.id])}" alt="" /></button>`).join('');
     $('layer-btns').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-layer]') as HTMLElement | null;
       if (b) this.setLayer(this.ui.layer === b.dataset.layer ? undefined : b.dataset.layer as Layer);
     });
 
-    $('speed').querySelectorAll('button').forEach((b) => {
-      b.addEventListener('click', () => this.setSpeed(Number((b as HTMLElement).dataset.speed)));
+    $('speed').querySelectorAll('button[data-speed]').forEach((b) => {
+      b.addEventListener('click', () => { this.skip = undefined; this.setSpeed(Number((b as HTMLElement).dataset.speed)); });
     });
+    $('btn-skip').onclick = () => this.toggleSkip();
+    $('dayend').addEventListener('click', () => $('dayend').classList.add('hidden'));
     $('btn-save').onclick = () => {
       const s = this.g.save();
       if (writeSave(s) && writeSlot(`${this.g.company || 'Spiel'} · ${fmtTime(this.g.sim.time)}`, false, s)) this.savedFlash = performance.now() + 1500;
@@ -178,6 +170,9 @@ export class Hud {
     $('company').onclick = () => { const p = listProfiles().find((x) => x.id === this.g.profileId); if (p) this.menus.openStats(p, true); };
     $('name-ok').onclick = () => this.confirmName();
     ($('name-input') as HTMLInputElement).addEventListener('keydown', (e) => { if (e.key === 'Enter') this.confirmName(); });
+    ($('code-input') as HTMLInputElement).addEventListener('keydown', (e) => { if (e.key === 'Enter') this.confirmName(); e.stopPropagation(); });
+    // Kürzel-Vorschlag folgt dem Namen
+    $('name-input').addEventListener('input', () => { ($('code-input') as HTMLInputElement).placeholder = autoCode(($('name-input') as HTMLInputElement).value || 'Bahnhof'); });
     // Ein-/Ausklappen, Zustand bleibt gespeichert
     let folds: Record<string, boolean> = {};
     try { folds = JSON.parse(localStorage.getItem('rm_folds') ?? '{}'); } catch { /* egal */ }
@@ -192,22 +187,46 @@ export class Hud {
     });
     $('q-show').onclick = () => this.showQuest();
 
-    // Zugliste: Hover = Vorschau, Klick = hinschwenken
-    const list = $('trains');
-    list.addEventListener('mouseover', (e) => {
+    // Listen rechts: Klick zeigt die Details in der linken Spalte (statt Hover-Kärtchen)
+    $('trains').addEventListener('click', (e) => {
       const li = (e.target as HTMLElement).closest('li[data-id]') as HTMLElement | null;
-      this.listHover = li ? { id: Number(li.dataset.id), el: li } : null;
+      if (!li) return;
+      const id = Number(li.dataset.id);
+      this.detail = { kind: 'train', id };
+      const t = this.g.sim.trains.find((x) => x.id === id);
+      if (t) this.scene()?.focusTrain(id);
     });
-    list.addEventListener('mouseleave', () => { this.listHover = null; });
-    // Klick in der Zugliste: kleines Menü (zeigen / aus dem Verkehr nehmen)
-    list.addEventListener('click', (e) => {
-      const li = (e.target as HTMLElement).closest('li[data-id]') as HTMLElement | null;
-      if (li) this.openTrainMenu(Number(li.dataset.id), li);
+    $('log').addEventListener('click', (e) => {
+      const li = (e.target as HTMLElement).closest('li[data-i]') as HTMLElement | null;
+      if (li) this.detail = { kind: 'log', entry: this.g.log[Number(li.dataset.i)] };
+    });
+    $('sat').addEventListener('click', (e) => {
+      const r = (e.target as HTMLElement).closest('[data-op]') as HTMLElement | null;
+      if (r) this.detail = { kind: 'op', id: r.dataset.op as OperatorId };
+    });
+    $('bar-detail').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-tm],[data-dt],[data-bp]') as HTMLElement | null;
+      if (!b) return;
+      if (b.dataset.dt === 'contracts') { this.openScreen('contracts'); return; }
+      if (b.dataset.dt === 'close') { this.detail = null; return; }
+      if (b.dataset.bp && this.detail?.kind === 'bld') {
+        const bl = this.g.grid.buildings.get(this.detail.id);
+        if (!bl) return;
+        if (b.dataset.bp === 'rename') this.askStation(bl.id, true);
+        if (b.dataset.bp === 'upgrade') this.g.upgradeStation(bl.id);
+        if (b.dataset.bp === 'price') this.g.setShopPrice(bl.key, this.g.shopPrices[bl.key] + Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 2 : 1));
+        this.detailActKey = '';
+        return;
+      }
+      if (this.detail?.kind === 'train') this.trainAction(b, this.detail.id);
     });
     $('train-menu').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-tm]') as HTMLElement | null;
       if (!b) return;
-      const id = Number($('train-menu').dataset.id);
+      this.trainAction(b, Number($('train-menu').dataset.id));
+    });
+    const trainAction = (b: HTMLElement, id: number) => {
+      const box = b.closest('#train-menu, #bar-detail') as HTMLElement;
       if (b.dataset.tm === 'focus') this.scene()?.focusTrain(id);
       if (b.dataset.tm === 'plat') {
         const sim = this.g.sim;
@@ -217,15 +236,18 @@ export class Hud {
           if (b.dataset.run) sim.platformPref[k] = b.dataset.run; else delete sim.platformPref[k];
           this.g.version++;
         }
-        $('train-menu').querySelectorAll('[data-tm="plat"]').forEach((x) => x.classList.toggle('on', x === b));
+        box.querySelectorAll('[data-tm="plat"]').forEach((x) => x.classList.toggle('on', x === b));
+        this.detailKey = '';
         return;
       }
       if (b.dataset.tm === 'remove') {
         if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Wirklich? Nochmal klicken'; return; }
         this.g.removeTrain(id);
+        if (this.detail?.kind === 'train' && this.detail.id === id) this.detail = null;
       }
       $('train-menu').classList.add('hidden');
-    });
+    };
+    this.trainAction = trainAction;
     document.addEventListener('mousedown', (e) => {
       if (!(e.target as HTMLElement).closest('#train-menu, #trains')) $('train-menu').classList.add('hidden');
     });
@@ -234,6 +256,7 @@ export class Hud {
     $('m-continue').onclick = () => this.closeMenu();
     $('m-campaign').onclick = () => this.withProfile(() => this.menus.openCampaign());
     $('m-free').onclick = () => this.withProfile(() => this.menus.openFree());
+    $('m-chal').onclick = () => this.withProfile(() => this.menus.openChallenges());
     $('m-stats').onclick = () => this.withProfile(() => this.menus.openStats(activeProfile()!));
     $('btn-mail').onclick = () => this.openInbox();
     $('ib-close').onclick = () => $('inbox').classList.add('hidden');
@@ -258,6 +281,16 @@ export class Hud {
         try { sessionStorage.setItem('rm_new', '1'); sessionStorage.setItem('rm_map', 'donau'); sessionStorage.setItem('rm_demo', '1'); } catch { /* egal */ }
         location.reload();
       };
+    }
+    else {
+      // Vollversion: Beenden statt Entwickler-Knopf
+      $('m-quit').classList.remove('hidden');
+      $('m-quit').onclick = () => {
+        if (this.g.company) writeSave(this.g.save());
+        window.close();
+        setTimeout(() => $('quit').classList.remove('hidden'), 200);
+      };
+      $('quit-back').onclick = () => $('quit').classList.add('hidden');
     }
     $('m-help').onclick = () => this.openHelp();
     $('p-help').onclick = () => this.openHelp();
@@ -303,7 +336,6 @@ export class Hud {
       if (t.closest('[data-decline]')) { this.g.declineOffer(); this.closeOffer(); }
     });
     $('btn-research').onclick = () => this.openScreen('research');
-    $('btn-issues').onclick = () => this.toggleIssues();
     $('money-wrap').onclick = () => { if (this.g.company) this.openBank(); };
     $('bank-close').onclick = () => $('bank').classList.add('hidden');
     $('bank-body').addEventListener('click', (e) => {
@@ -313,7 +345,6 @@ export class Hud {
       else { const [amount, days] = b.dataset.loan!.split(':').map(Number); takeLoan(this.g, { amount, days, rate: 0 }); }
       this.openBank();
     });
-    $('is-close').onclick = () => $('issues').classList.add('hidden');
     $('is-face').innerHTML = avatar(MENTOR.avatar, 36);
     $('is-who').textContent = `${MENTOR.name}, ${MENTOR.role}`;
     $('is-list').addEventListener('click', (e) => {
@@ -354,7 +385,11 @@ export class Hud {
       }
       this.ttKey = '';
     });
-    $('bpanel').addEventListener('click', (e) => this.onPanelClick(e as MouseEvent));
+    this.initDispo();
+    $('st-body').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-sttab]') as HTMLElement | null;
+      if (b) { statsView.tab = b.dataset.sttab as StatsTab; this.renderScreen(true); }
+    });
     document.querySelectorAll('[data-close]').forEach((b) => {
       (b as HTMLElement).onclick = () => this.closeScreen();
     });
@@ -395,6 +430,8 @@ export class Hud {
       if (bo) this.g.toggleBoost(bo.dataset.boost as keyof typeof OPERATORS);
       const cr = t.closest('[data-crew]') as HTMLElement | null;
       if (cr) this.g.setCrew(this.g.crew + Number(cr.dataset.crew));
+      const ip = t.closest('[data-insp]') as HTMLElement | null;
+      if (ip) setInspectors(this.g, this.g.inspectors + Number(ip.dataset.insp));
       const tk = t.closest('[data-takt]') as HTMLElement | null;
       if (tk) this.g.stepTakt(tk.dataset.takt as keyof typeof OPERATORS, Number(tk.dataset.d));
       const o = t.closest('[data-offer]') as HTMLElement | null;
@@ -434,18 +471,19 @@ export class Hud {
       }
       if (this.screen) {
         const k = e.key.toLowerCase();
-        if (e.key === 'Escape' || (k === 'f' && this.screen === 'research') || (k === 'v' && this.screen === 'contracts') || (k === 't' && this.screen === 'timetable')) this.closeScreen();
+        if (e.key === 'Escape' || (k === 'e' && this.screen === 'research') || (k === 'v' && this.screen === 'contracts') || (k === 'f' && this.screen === 'timetable')) this.closeScreen();
         return;
       }
-      if (!this.ui.menu && e.key.toLowerCase() === 'f') { this.openScreen('research'); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) { this.openScreen('research'); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'v') { this.openScreen('contracts'); return; }
       if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey) { this.openHelp(); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'l' && !e.ctrlKey && !e.metaKey) { this.toggleIssues(); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) { this.cycleLayer(); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) { $('minimap-box').classList.toggle('hidden'); this.minimap.draw(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'ü') { this.cycleLayer(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey) { rotate(this.ui, this.g); return; }
       if (!this.ui.menu && e.key.toLowerCase() === 'p') { if ($('inbox').classList.contains('hidden')) this.openInbox(); else $('inbox').classList.add('hidden'); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 't') { this.openScreen('timetable'); return; }
-      if (e.key === 'Escape' && !$('bpanel').classList.contains('hidden')) { this.closePanel(); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey) { nextVariant(this.ui, this.g); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) { this.openScreen('timetable'); return; }
+      if (!this.ui.menu && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey) { this.toggleSkip(); return; }
       if (e.key === 'Escape') {
         if (!$('pause').classList.contains('hidden')) { this.closePause(); return; }
         if (!$('inbox').classList.contains('hidden')) { $('inbox').classList.add('hidden'); return; }
@@ -463,7 +501,7 @@ export class Hud {
       if (/^[0-9]$/.test(k) && performance.now() < this.groupKeyUntil) {
         const grp = MENU.find((m) => m.id === this.group);
         const idx = k === '0' ? 9 : Number(k) - 1;
-        if (grp && grp.items.length > 1 && grp.items[idx]) { this.pickItem(grp.items[idx]); this.groupKeyUntil = 0; return; }
+        if (grp && grp.types.length > 1 && grp.types[idx]) { this.pickType(grp.types[idx], grp); this.groupKeyUntil = 0; return; }
       }
       const grp = MENU.find((m) => m.key === k || m.alt?.toLowerCase() === k);
       if (grp) { this.pickGroup(grp); this.groupKeyUntil = performance.now() + 2000; }
@@ -476,6 +514,10 @@ export class Hud {
       this.g.paused = false;
     } else this.openMenu();
     this.setupTooltips();
+    document.addEventListener('mousemove', (e) => {
+      const t = e.target as HTMLElement;
+      this.mouse = { x: e.clientX, y: e.clientY, onMap: t.tagName === 'CANVAS' && !t.closest('#bar') };
+    });
     $('fault-pop').addEventListener('mouseenter', () => { this.faultHold = true; });
     $('fault-pop').addEventListener('mouseleave', () => { this.faultHold = false; this.faultUntil = performance.now() + 400; });
     $('fault-pop').addEventListener('click', (e) => {
@@ -536,23 +578,11 @@ export class Hud {
     if ($('pause').classList.contains('hidden')) this.pausedBeforePause = g.paused;
     g.paused = true;
     const day = Math.floor(g.sim.time / 86400) + 1;
-    const prev = g.history.find((h) => h.day === day - 2);
-    const contracts = Object.values(g.contracts).filter((c) => c.status === 'active').length;
-    const row = (l: string, v: string, cls = '') => `<span>${l}</span><span class="${cls}">${v}</span>`;
-    $('p-body').innerHTML = `<div class="fin">
-      <span class="h">${g.company} · ${currentMap().name}</span>
-      ${row('Spielzeit', `Tag ${day}, ${fmtTime(g.sim.time)} Uhr`)}
-      ${row('Kasse', `${eur(g.money)} €`, g.money < 0 ? 'no' : 'ok')}
-      ${prev ? row('Bilanz gestern', `${prev.income - prev.expense >= 0 ? '+' : '−'}${eur(Math.abs(prev.income - prev.expense))} €`, prev.income - prev.expense >= 0 ? 'ok' : 'no') : ''}
-      ${row('Bewertung', '★'.repeat(g.rating.stars) + '☆'.repeat(5 - g.rating.stars), 'gold')}
-      ${row('Pünktlichkeit', g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–')}
-      ${row('Züge abgefertigt', g.stats.handled.toLocaleString('de-AT'))}
-      ${row('Fahrgäste gesamt', g.stats.passengers.toLocaleString('de-AT'))}
-      ${row('Bahnhöfe', String(g.stations().length))}
-      ${row('Verträge', String(contracts))}
-      ${row('Forschungen', String(g.research.done.length))}
-      ${row('Erfolge', `${g.achievements.length}/${ACHIEVEMENTS.length}`)}
-      ${row('Auftrag', g.mission ? `${g.missionIdx + 1}/${MISSIONS.length}: ${g.mission.title}` : 'alle erledigt')}
+    $('p-body').innerHTML = `<div class="p-kpis" title="${g.company} · ${currentMap().name} · Tag ${day}, ${fmtTime(g.sim.time)} Uhr">
+      <div><b class="${g.money < 0 ? 'no' : ''}">${eur(g.money)} €</b><small>Kasse</small></div>
+      <div><b class="gold">${'★'.repeat(g.rating.stars)}${'☆'.repeat(5 - g.rating.stars)}</b><small>Bewertung</small></div>
+      <div><b>${g.stats.handled ? `${Math.round(g.punctuality * 100)} %` : '–'}</b><small>pünktlich</small></div>
+      <div><b>${g.stats.handled.toLocaleString('de-AT')}</b><small>Züge</small></div>
     </div>`;
     $('p-save').textContent = 'Speichern';
     $('pause').classList.remove('hidden');
@@ -694,17 +724,22 @@ export class Hud {
     setTimeout(() => { inp.focus(); inp.select(); }, 50);
   }
 
-  private askStation(id: number) {
+  private askStation(id: number, rename = false) {
     const b = this.g.grid.buildings.get(id);
     if (!b) return;
     this.naming = { kind: 'station', id };
-    this.openNameDialog('Neuer Bahnhof', 'Wie soll dieser Bahnhof heißen?', b.name ?? '', 'z.B. Donaufeld');
+    this.openNameDialog(rename ? 'Bahnhof umbenennen' : 'Neuer Bahnhof', 'Wie soll dieser Bahnhof heißen?', b.name ?? '', 'z.B. Donaufeld');
+    const ci = $('code-input') as HTMLInputElement;
+    ci.value = b.code ?? '';
+    ci.placeholder = autoCode(b.name || 'Bahnhof');
+    $('code-row').classList.remove('hidden');
     $('name-ok').textContent = 'Taufen!';
   }
 
   private confirmName() {
     const v = ($('name-input') as HTMLInputElement).value.trim();
-    this.g.stationName(this.naming.id, v || this.g.suggestStationName());
+    this.g.stationName(this.naming.id, v || this.g.suggestStationName(), cleanCode(($('code-input') as HTMLInputElement).value));
+    $('code-row').classList.add('hidden');
     ($('name-input') as HTMLInputElement).blur();
     $('modal').classList.add('hidden');
     this.g.paused = this.pausedBeforeDialog;
@@ -752,7 +787,7 @@ export class Hud {
 
   private renderScreen(force = false) {
     if (!this.screen) return;
-    if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); this.renderTtOps(); return; }
+    if (this.screen === 'timetable') { this.timetable.draw($('tt-canvas') as HTMLCanvasElement); this.renderDispo(); this.renderTtOps(); return; }
     const mt = this.g.missionTool();
     const quest = mt?.tool === 'research' ? mt.variant : undefined;
     const key = this.screen === 'research' ? researchKey(this.g, this.rsTree, quest) : this.screen === 'stats' ? statsKey(this.g) : contractsKey(this.g);
@@ -768,57 +803,6 @@ export class Hud {
   }
 
   // ------------------------------------------------------------ Infofenster für Bahnhof / Laden
-  private panelId: number | null = null;
-  private panelKey = '';
-
-  private closePanel() { this.panelId = null; $('bpanel').classList.add('hidden'); }
-
-  private renderPanel() {
-    const box = $('bpanel');
-    const b = this.panelId !== null ? this.g.grid.buildings.get(this.panelId) : undefined;
-    if (!b) { box.classList.add('hidden'); this.panelId = null; return; }
-    const g = this.g;
-    let key: string, html: string;
-    if (isStation(b.key)) {
-      const lvl = g.stationLevel(b.key), c = g.connections(b.id), bonus = Math.round(g.stationBonus(b.id) * 100);
-      const block = g.upgradeBlock(b.id);
-      key = `s${b.id}${b.key}${b.name}${c.parking}${c.bus}${block}`;
-      html = `<div class="bp-head"><img src="assets/gen/icons/${b.key}.png" alt="" /><div><b>${b.name ?? 'Bahnhof'}</b><small>${BUILDINGS[b.key].label} · Stufe ${lvl}</small></div><button class="btn" data-bp="close">✕</button></div>
-        <div class="bp-row"><span>Einnahmen</span><span class="ok">+${bonus} %</span></div>
-        <div class="bp-row"><span>Parkplatz</span><span class="${c.parking ? 'ok' : 'no'}">${c.parking ? '✓ über Straße angebunden (+10 %)' : '✗ nicht angebunden'}</span></div>
-        <div class="bp-row"><span>Busterminal</span><span class="${c.bus ? 'ok' : 'no'}">${c.bus ? '✓ über Straße angebunden (+15 %)' : '✗ nicht angebunden'}</span></div>
-        <div class="bp-btns"><button class="btn" data-bp="rename">Umbenennen</button>
-        ${lvl < 3 ? `<button class="btn${block ? ' off' : ''}" data-bp="upgrade" title="${block ?? ''}">Ausbauen · ${eur(STATION_UPGRADE[lvl + 1])} €</button>` : ''}</div>
-        ${lvl < 3 && block ? `<div class="bp-note no">${block}</div>` : ''}`;
-    } else if (SHOPS[b.key]) {
-      const sh = SHOPS[b.key], price = g.shopPrices[b.key], rate = g.shopRate(b.key);
-      const r = price / sh.ref;
-      key = `p${b.key}${price}`;
-      html = `<div class="bp-head"><img src="assets/gen/icons/${b.key}.png" alt="" /><div><b>${sh.name}</b><small>Preis gilt für alle ${sh.name === 'Café' ? 'Cafés' : sh.name === 'Kiosk' ? 'Kioske' : 'Automaten'}</small></div><button class="btn" data-bp="close">✕</button></div>
-        <div class="bp-row"><span>Preis</span><span class="ct-price"><button class="btn" data-bp="price" data-d="-0.5">−</button><b>${price.toFixed(2).replace('.', ',')} €</b><button class="btn" data-bp="price" data-d="0.5">+</button></span></div>
-        <div class="bp-row"><span>üblich</span><span>${sh.ref.toFixed(2).replace('.', ',')} €</span></div>
-        <div class="bp-row"><span>Kunden</span><span>${Math.round(rate * 100)} von 100 Fahrgästen</span></div>
-        <div class="bp-row"><span>Umsatz</span><span>${(rate * price * 100).toFixed(0)} € je 100 Fahrgäste</span></div>
-        <div class="bp-note ${r > 1.3 ? 'no' : r < 0.85 ? 'ok' : ''}">${r > 1.3 ? 'Zu teuer – Fahrgäste ärgern sich' : r < 0.85 ? 'Günstig – Fahrgäste freuen sich' : 'Fairer Preis'}</div>`;
-    } else { this.closePanel(); return; }
-    if (key !== this.panelKey) { this.panelKey = key; box.innerHTML = html; }
-    box.classList.remove('hidden');
-  }
-
-  private onPanelClick(e: MouseEvent) {
-    const t = (e.target as HTMLElement).closest('[data-bp]') as HTMLElement | null;
-    if (!t || this.panelId === null) return;
-    const b = this.g.grid.buildings.get(this.panelId);
-    if (!b) return;
-    const act = t.dataset.bp;
-    if (act === 'close') this.closePanel();
-    if (act === 'rename') this.askStation(b.id);
-    if (act === 'upgrade') this.g.upgradeStation(b.id);
-    if (act === 'price') this.g.setShopPrice(b.key, this.g.shopPrices[b.key] + Number(t.dataset.d) * (e.shiftKey ? 2 : 1));
-    this.panelKey = '';
-    this.renderPanel();
-  }
-
   // ------------------------------------------------------------ Spielstände
   // ------------------------------------------------------------ Einstellungen (RM-FR-UI-09, RM-FR-UI-14)
   private openSettings() {
@@ -854,7 +838,7 @@ export class Hud {
     const leg = $('layer-legend');
     leg.classList.toggle('hidden', !def);
     leg.innerHTML = def ? def.legend.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') : '';
-    if (def) $('minimap-box').classList.remove('hidden');
+
   }
 
   private cycleLayer() {
@@ -865,16 +849,30 @@ export class Hud {
   // ------------------------------------------------------------ Bahnhofsstufen (RM-FR-PROG-08)
   private tierKey = '';
   /** Abschnitte ohne Verwendung ganz ausblenden; rechte Spalte macht dem Dock unten Platz */
+  private tab = 'trains';
+  private logSeen = 0;
+
+  private setTab(t: string) {
+    this.tab = t;
+    document.querySelectorAll<HTMLElement>('#bar-tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    document.querySelectorAll<HTMLElement>('#bar-info [data-pane]').forEach((p) => p.classList.toggle('on', p.dataset.pane === t));
+    if (t === 'log') $('tab-log').classList.remove('new');
+    try { localStorage.setItem('rm_tab', t); } catch { /* egal */ }
+  }
+
   private updateLayout() {
-    const g = this.g, sim = g.sim;
+    const g = this.g;
     const show = (id: string, on: boolean) => $(id).classList.toggle('hidden', !on);
     show('p-goals', g.goals.length > 0);
     show('p-tier', g.stations().length > 0);
-    show('p-trains', sim.trains.length + sim.queue.length > 0);
-    show('p-log', g.log.length > 0);
-    show('p-sat', Object.values(g.contracts).some((c) => c.status !== 'none'));
-    const dock = $('dock');
-    document.documentElement.style.setProperty('--dock-h', `${dock.offsetHeight}px`);
+    // Tabs der unteren Leiste sind immer da (leer: Hinweis im Tab)
+    if (!document.getElementById(`tab-${this.tab}`) || $(`tab-${this.tab}`).classList.contains('hidden')) {
+      const first = ['trains', 'log', 'sat'].find((t) => !$(`tab-${t}`).classList.contains('hidden'));
+      if (first) this.setTab(first);
+    }
+    // neue Meldung: kleiner roter Punkt am Tab
+    if (g.log.length !== this.logSeen) { if (this.tab !== 'log' && g.log.length > this.logSeen) $('tab-log').classList.add('new'); this.logSeen = g.log.length; }
+    document.documentElement.style.setProperty('--dock-h', `${$('bar').offsetHeight}px`);
   }
 
   private updateTier() {
@@ -923,19 +921,20 @@ export class Hud {
     if (tab === 'keys') {
       const keys: [string, string][] = [
         ['Maus ziehen', 'Karte verschieben'], ['W A S D / Pfeile', 'Karte verschieben'], ['Mausrad', 'Zoom'],
-        ['1–9', 'Baumenüs, danach Ziffer = Eintrag'], ['B', 'Gebäude'], ['R', 'Variante / Richtung wechseln'], ['Q', 'Gebäude drehen'],
+        ['1–9', 'Baumenüs, danach Ziffer = Typ'], ['B', 'Gebäude'], ['R', 'drehen'], ['T', 'nächste Variante des Typs'],
         ['Abriss', 'Fläche aufziehen'], ['Rechtsklick', 'Abbrechen'], ['Esc', 'Werkzeug weg · Menü'],
         ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen (am Mac ⌘)'], ['F5 / Strg+S', 'Speichern'],
         ['Leertaste', 'Pause'], ['+ / −', 'Tempo'],
-        ['L', 'Was ist los?'], ['M', 'Übersichtskarte ein/aus'], ['E', 'Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung'], ['T', 'Fahrplan'], ['F', 'Forschung'], ['V', 'Verträge'], ['P', 'Postfach'],
+        ['L', 'Was ist los?'], ['Ü', 'Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung'], ['F', 'Fahrplan'], ['E', 'Entwickeln (Forschung)'], ['V', 'Verträge'], ['P', 'Postfach'],
         ['H / F1', 'Diese Hilfe'], ['?', 'Bahn-ABC zum Begriff im Tooltip'], ['Zug anfahren', 'Infos zum Zug, anklicken für Menü'],
       ];
       $('help-body').innerHTML = `<div class="hp-keys">${keys.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('')}</div>`;
     } else {
       $('help-body').innerHTML = MENU.filter((g) => g.id !== 'select').map((grp) => `<div class="hp-grp"><h3>${grp.key} · ${grp.label}<small>${grp.help}</small></h3>
-        ${grp.items.map((it) => {
-          const locked = !!this.itemLocked(it);
-          return `<div class="hp-item${locked ? ' locked' : ''}"><img src="${ICON(it.icon)}" alt="" /><span>${it.label}${it.info ? `<small>${it.info}</small>` : ''}${locked ? '<small>noch gesperrt</small>' : ''}</span><span class="cost">${it.cost ? `${eur(it.cost)} €` : ''}</span></div>`;
+        ${grp.types.flatMap((t) => t.variants.map((it) => ({ t, it }))).map(({ t, it }) => {
+          const locked = variantLocked(this.g, it);
+          const name = t.variants.length > 1 ? `${t.label}: ${it.label}` : it.label;
+          return `<div class="hp-item${locked ? ' locked' : ''}"><img src="${ICON(it.icon)}" alt="" /><span>${name}${it.info ? `<small>${it.info}</small>` : ''}${locked ? '<small>noch gesperrt</small>' : ''}</span><span class="cost">${it.cost ? `${eur(it.cost)} €` : ''}</span></div>`;
         }).join('')}</div>`).join('');
     }
     $('help').classList.remove('hidden');
@@ -946,8 +945,9 @@ export class Hud {
   private issueList: Problem[] = [];
   private issueKey = '';
 
+  /** L: wie ein Klick auf den Kopf (Zustand bleibt gespeichert) */
   private toggleIssues() {
-    $('issues').classList.toggle('hidden');
+    (document.querySelector('[data-fold="issues"]') as HTMLElement).click();
     this.issueKey = '';
     this.updateIssues();
   }
@@ -967,8 +967,8 @@ export class Hud {
     $('amp').className = `amp${red ? ' rot' : yellow ? ' gelb' : ''}`;
     $('issue-count').textContent = String(red + yellow);
     $('issue-count').classList.toggle('hidden', !(red + yellow));
-    $('btn-issues').dataset.tt = red || yellow ? `Was ist los? ${red ? `${red} dringend` : ''}${red && yellow ? ', ' : ''}${yellow ? `${yellow} zum Anschauen` : ''} (L)` : 'Was ist los? Alles in Ordnung (L)';
-    if ($('issues').classList.contains('hidden')) return;
+    (document.querySelector('[data-fold="issues"]') as HTMLElement).dataset.tt = red || yellow ? `${red ? `${red} dringend` : ''}${red && yellow ? ', ' : ''}${yellow ? `${yellow} zum Anschauen` : ''} · L = auf/zu` : 'Alles in Ordnung · L = auf/zu';
+    if ($('issues').classList.contains('closed')) return;
     const key = list.map((p) => `${p.id}|${p.level}|${p.text}|${p.fix?.label ?? ''}`).join('\n');
     if (key === this.issueKey) return;
     this.issueKey = key;
@@ -1099,54 +1099,69 @@ export class Hud {
   // ------------------------------------------------------------ Baumenü (Gruppen + Einträge)
   private group = 'select';
   private groupKeyUntil = 0;
-  /** zuletzt gewählter Eintrag je Gruppe */
-  private lastItem: Record<string, number> = {};
-  private hoverItem: MenuItem | null = null;
+  /** Mausposition (Bildschirm) und ob sie über dem Spielfeld ist – für die Infozeile am Mauszeiger */
+  private mouse = { x: 0, y: 0, onMap: false };
 
-  /** Forschung, die ein Eintrag braucht */
-  private needOf(it: MenuItem): ResearchId | undefined {
-    const k = it.variant ?? '';
-    if (it.tool === 'facility') return FACILITY_RESEARCH[k];
-    if (it.tool === 'switch') return k.endsWith('_fast') ? 'fastSwitch' : k.startsWith('dsw') ? 'diagSwitch' : k.startsWith('xover') ? 'double' : undefined;
-    if (it.tool === 'signal' && k.startsWith('S')) return 'shunt';
-    if (it.tool === 'building') return BUILDING_RESEARCH[k] as ResearchId | undefined;
-    return undefined;
+  /** Infozeile zum Werkzeug am Mauszeiger: Name, Fehler, R/T-Hinweise */
+  private renderCursorInfo() {
+    const tip = $('tooltip');
+    const at = locate(this.ui, this.group);
+    if (this.ui.menu || this.ui.tool === 'select' || !this.mouse.onMap || !at) { tip.style.display = 'none'; return; }
+    const rot = rotation(this.ui, this.g);
+    const name = at.type.variants.length > 1 ? `${at.type.label} · ${at.variant.label}` : at.variant.label;
+    let html = `<b>${name}</b>`;
+    const msg = this.ui.message;
+    // Kosten zeigt das Spielfeld selbst – hier nur Probleme
+    if (msg && (!/€$/.test(msg) || msg.startsWith('Zu wenig Geld'))) html += `<br><span class="no">${msg}</span>`;
+    const keys = [rot.n > 1 ? `R drehen ${rot.i + 1}/${rot.n}` : '', at.type.variants.length > 1 ? 'T nächste Variante' : ''].filter(Boolean);
+    if (keys.length) html += `<br><small>${keys.join(' · ')}</small>`;
+    if (tip.innerHTML !== html) tip.innerHTML = html;
+    tip.style.display = 'block';
+    // über dem Mauszeiger: Teile wachsen in der Iso-Ansicht nach unten (Kurven, Weichen) – dort nichts verdecken
+    const w = fromUi(tip.offsetWidth), h = fromUi(tip.offsetHeight);
+    const above = this.mouse.y - h - 44;
+    tip.style.left = `${toUi(Math.max(6, Math.min(window.innerWidth - w - 8, this.mouse.x - w / 2)))}px`;
+    tip.style.top = `${toUi(above > 64 ? above : this.mouse.y + 60)}px`;
   }
 
-  private itemLocked(it: MenuItem) {
-    const need = this.needOf(it);
-    return !this.g.unlocked.has(it.tool) || (!!need && !this.g.researched(need));
+  /** zuletzt gewählter Typ je Gruppe und Variante je Typ */
+  private lastType: Record<string, string> = {};
+  private lastVar: Record<string, number> = {};
+
+  private lockText(v: BVariant) {
+    const need = needOf(v);
+    return need && !this.g.researched(need) ? `erst erforschen: ${RESEARCH_BY_ID[need].name}` : 'kommt mit einem späteren Auftrag';
   }
 
-  private itemOn(it: MenuItem) {
-    return this.ui.tool === it.tool && (!it.variant || variantOf(this.ui, it.tool)?.key === it.variant);
+  private pickVar(v: BVariant, t: BType, grp: BGroup) {
+    if (!this.g.unlocked.has(v.tool)) return;
+    pickVariant(this.ui, v, 0);
+    this.fresh.delete(v.tool);
+    this.group = grp.id;
+    this.lastType[grp.id] = t.id;
+    this.lastVar[t.id] = t.variants.indexOf(v);
   }
 
-  private pickItem(it: MenuItem) {
-    if (!this.g.unlocked.has(it.tool)) return;
-    this.ui.tool = it.tool;
-    if (it.variant) {
-      const idx = VARIANTS[it.tool]?.findIndex((v) => v.key === it.variant) ?? -1;
-      if (idx >= 0) this.ui.variant[it.tool] = idx;
-    }
-    this.fresh.delete(it.tool);
-    const grp = MENU.find((m) => m.items.includes(it));
-    if (grp) { this.group = grp.id; this.lastItem[grp.id] = grp.items.indexOf(it); }
+  private pickType(t: BType, grp: BGroup) {
+    const last = t.variants[this.lastVar[t.id] ?? -1];
+    const v = last && !variantLocked(this.g, last) ? last : t.variants.find((x) => !variantLocked(this.g, x)) ?? t.variants.find((x) => this.g.unlocked.has(x.tool));
+    if (v) this.pickVar(v, t, grp);
   }
 
   private pickGroup(grp: MenuGroup) {
     this.group = grp.id;
-    const last = grp.items[this.lastItem[grp.id] ?? -1];
-    const it = last && !this.itemLocked(last) ? last : grp.items.find((x) => !this.itemLocked(x)) ?? grp.items.find((x) => this.g.unlocked.has(x.tool));
-    if (it) this.pickItem(it);
+    const last = grp.types.find((x) => x.id === this.lastType[grp.id]);
+    const t = last && !typeLocked(this.g, last) ? last : grp.types.find((x) => !typeLocked(this.g, x)) ?? grp.types.find((x) => x.variants.some((v) => this.g.unlocked.has(v.tool)));
+    if (t) this.pickType(t, grp);
   }
 
-  /** Gruppe passend zum aktuellen Werkzeug (z. B. nach Esc oder „Zeig mir wo“) */
+  /** Gruppe/Typ passend zum aktuellen Werkzeug (z. B. nach Esc oder „Zeig mir wo“) */
   private syncGroup() {
-    const cur = MENU.find((m) => m.id === this.group);
-    if (cur?.items.some((it) => this.itemOn(it))) return;
-    const g2 = MENU.find((m) => m.items.some((it) => this.itemOn(it))) ?? MENU.find((m) => m.items.some((it) => it.tool === this.ui.tool));
-    if (g2) this.group = g2.id;
+    const at = locate(this.ui, this.group);
+    if (!at) return;
+    this.group = at.grp.id;
+    this.lastType[at.grp.id] = at.type.id;
+    this.lastVar[at.type.id] = at.type.variants.indexOf(at.variant);
   }
 
   private buildHotbar() {
@@ -1155,47 +1170,130 @@ export class Hud {
       const b = document.createElement('button');
       b.className = 'slot';
       b.dataset.group = grp.id;
-      b.innerHTML = `<img alt="" src="${ICON(grp.icon)}" /><span class="key">${grp.key}</span>${grp.items.length > 1 ? '<span class="more">▴</span>' : ''}`;
+      b.dataset.tt = grp.label;
+      b.innerHTML = `<img alt="" src="${ICON(grp.icon)}" /><span class="key">${grp.key}</span>`;
       b.onclick = () => this.pickGroup(grp);
-      b.onmouseenter = () => (b.dataset.hover = '1');
-      b.onmouseleave = () => delete b.dataset.hover;
       bar.appendChild(b);
     }
+    // Hover im Baumenü → Vorschaufeld
+    $('bm-menu').addEventListener('mouseover', (e) => {
+      const el = (e.target as HTMLElement).closest('[data-group],[data-type],[data-var]') as HTMLElement | null;
+      this.hoverBm = el ? { group: el.dataset.group, type: el.dataset.type, var: el.dataset.var !== undefined ? Number(el.dataset.var) : undefined } : null;
+    });
+    $('bm-menu').addEventListener('mouseleave', () => { this.hoverBm = null; });
+    // Freiraum: Typen und Varianten
+    $('variants').addEventListener('click', (e) => {
+      const el = (e.target as HTMLElement).closest('[data-type],[data-var]') as HTMLElement | null;
+      const grp = MENU.find((m) => m.id === this.group);
+      if (!el || !grp) return;
+      if (el.dataset.type) { const t = grp.types.find((x) => x.id === el.dataset.type); if (t) this.pickType(t, grp); return; }
+      const at = locate(this.ui, this.group);
+      const v = at?.type.variants[Number(el.dataset.var)];
+      if (at && v && !variantLocked(this.g, v)) this.pickVar(v, at.type, at.grp);
+    });
   }
 
-  /** Einträge der aktiven Gruppe in Reihen (Nummern = Kurztasten) */
+  /** Vorschau links im Baumenü: großes Bild und Beschreibung (Maus darüber, sonst die Auswahl) */
+  private hoverBm: { group?: string; type?: string; var?: number } | null = null;
+  private lastPreviewKey = '';
+
+  private renderPreview() {
+    const g = this.g, h = this.hoverBm;
+    const at = locate(this.ui, this.group);
+    let icon = 'tool_cursor', title = '', path = '', info = '', cost: number | undefined, lock = '';
+    const hg = h?.group ? MENU.find((m) => m.id === h.group) : MENU.find((m) => m.id === this.group);
+    const ht = h?.type ? hg?.types.find((t) => t.id === h.type) : undefined;
+    const hv = h?.var !== undefined ? at?.type.variants[h.var] : undefined;
+    if (hv && at) {
+      icon = hv.icon; title = hv.label; path = `${at.grp.label} › ${at.type.label}`; info = hv.info ?? ''; cost = hv.cost;
+      if (variantLocked(g, hv)) lock = this.lockText(hv);
+    } else if (ht && hg) {
+      const v = ht.variants.length === 1 ? ht.variants[0] : undefined;
+      icon = ht.icon; title = ht.label; path = hg.label; info = ht.info ?? v?.info ?? (ht.variants.length > 1 ? `${ht.variants.length} Varianten` : ''); cost = v?.cost;
+      if (typeLocked(g, ht)) lock = this.lockText(ht.variants[0]);
+    } else if (h?.group && hg) {
+      icon = hg.icon; title = hg.label; path = `Taste ${hg.key}${hg.alt ? ` / ${hg.alt}` : ''}`; info = hg.help;
+      if (!hg.types.some((t) => t.variants.some((v) => g.unlocked.has(v.tool)))) lock = this.lockText(hg.types[0].variants[0]);
+    } else if (at) {
+      const multi = at.type.variants.length > 1;
+      icon = at.variant.icon; title = multi ? at.variant.label : at.type.label; path = multi ? `${at.grp.label} › ${at.type.label}` : at.grp.label;
+      info = at.variant.info ?? at.type.info ?? at.grp.help; cost = at.variant.cost;
+    }
+    if (info === 'Deko') info = '';
+    const key = `${icon}|${title}|${path}|${info}|${cost}|${lock}`;
+    if (key === this.lastPreviewKey) return;
+    this.lastPreviewKey = key;
+    $('bm-preview').innerHTML = `<div class="bp-pic"><img src="${ICON(icon)}" alt="" /></div><div class="bp-txt"><small>${path}</small><b>${title}</b>
+      ${info ? `<p>${info}</p>` : ''}${lock ? `<p class="no">${lock}</p>` : cost ? `<span class="bp-cost">${eur(cost)} €</span>` : ''}</div>`;
+  }
+
+  /** Freiraum unter den Gruppen: Typen der Gruppe, darunter die Varianten des gewählten Typs (eingerückt) */
   private renderVariants() {
     this.syncGroup();
+    const g = this.g;
     const grp = MENU.find((m) => m.id === this.group)!;
-    const mt = this.g.missionTool();
-    const key = `${grp.id}|${this.ui.tool}|${this.ui.variant[this.ui.tool] ?? 0}|${mt?.tool}${mt?.variant}|${this.g.research.done.length}|${[...this.g.unlocked].length}`;
+    const at = locate(this.ui, this.group);
+    const mt = g.missionTool();
+    const key = `${grp.id}|${this.ui.tool}|${curKey(this.ui)}|${g.buildRot}|${mt?.tool}${mt?.variant}|${g.research.done.length}|${[...g.unlocked].length}`;
     if (key === this.lastVariantsKey) return;
     this.lastVariantsKey = key;
-    const box = $('variants');
-    box.innerHTML = '';
-    this.hoverItem = null;
-    if (grp.items.length < 2) return;
-    box.style.setProperty('--cols', String(Math.min(grp.items.length, grp.items.length > 20 ? 11 : 10)));
-    grp.items.forEach((it, i) => {
-      const b = document.createElement('button');
-      const locked = this.itemLocked(it);
-      const on = this.itemOn(it);
-      const quest = !!mt && mt.tool === it.tool && (!mt.variant || mt.variant === it.variant) && !on;
-      b.className = `slot${on ? ' on' : ''}${quest ? ' quest' : ''}${locked ? ' locked' : ''}`;
-      const need = this.needOf(it);
-      b.dataset.tt = locked ? `${it.label} – ${need && !this.g.researched(need) ? `erst erforschen: ${RESEARCH_BY_ID[need].name}` : 'kommt mit einem späteren Auftrag'}` : `${it.label}${it.info && it.info !== 'Deko' ? `\n${it.info}` : ''}`;
-      b.innerHTML = `<img src="${ICON(it.icon)}" alt="" />${i < 10 ? `<span class="key">${(i + 1) % 10}</span>` : ''}${it.cost ? `<span class="cost">${it.cost}</span>` : ''}`;
-      b.onclick = () => { if (!locked || this.g.unlocked.has(it.tool)) this.pickItem(it); };
-      b.onmouseenter = () => { this.hoverItem = it; };
-      b.onmouseleave = () => { this.hoverItem = null; };
-      box.appendChild(b);
-    });
+    const isQuest = (v: BVariant) => !!mt && mt.tool === v.tool && (!mt.variant || v.keys.includes(mt.variant)) && !variantOn(this.ui, v);
+    // nur Symbole – den Namen zeigt der Tooltip, die Details das Vorschaufeld links
+    const types = grp.types.length > 1 || grp.types[0].variants.length > 1
+      ? `<div class="bm-types">${grp.types.map((t, i) => {
+        const locked = typeLocked(g, t);
+        const q = t.variants.some(isQuest);
+        return `<button class="bm-type${at?.type === t ? ' on' : ''}${locked ? ' locked' : ''}${q ? ' quest' : ''}" data-type="${t.id}" data-tt="${t.label}"><span class="key">${i + 1}</span><img src="${ICON(t.icon)}" alt="" /></button>`;
+      }).join('')}</div>`
+      : '';
+    const sub = at && at.type.variants.length > 1
+      ? `<div class="bm-vars">${at.type.variants.map((v, i) => {
+        const locked = variantLocked(g, v);
+        return `<button class="bm-var${v === at.variant ? ' on' : ''}${locked ? ' locked' : ''}${isQuest(v) ? ' quest' : ''}" data-var="${i}" data-tt="${v.label}"><img src="${ICON(v.icon)}" alt="" /></button>`;
+      }).join('')}</div>`
+      : '';
+    $('variants').innerHTML = types + sub;
   }
 
   private setSpeed(s: number) {
     if (s === 0) this.g.paused = true;
     else { this.g.paused = false; this.g.speed = s; }
   }
+
+  /** Vorspulen bis zum nächsten Halt (RM-FR-FEEL-01) */
+  private skip?: { speed: number; until: number; seen: Set<number> };
+  private toggleSkip() {
+    const g = this.g;
+    if (this.skip) { g.speed = this.skip.speed; this.skip = undefined; return; }
+    const dwelling = g.sim.trains.filter((t) => t.state === 'dwell').map((t) => t.id);
+    this.skip = { speed: g.speed, until: g.sim.time + 3 * 3600, seen: new Set(dwelling) };
+    g.paused = false;
+    g.speed = 16;
+  }
+  private updateSkip() {
+    const s = this.skip, g = this.g;
+    if (!s) return;
+    const arrived = g.sim.trains.some((t) => t.state === 'dwell' && !s.seen.has(t.id));
+    const red = problems(g).some((p) => p.level === 'rot');
+    if (arrived || red || g.sim.time >= s.until || g.gameOver || !$('event').classList.contains('hidden')) {
+      g.speed = s.speed;
+      this.skip = undefined;
+    }
+  }
+
+  /** Tagesabschluss: kleine Karte um Mitternacht */
+  private showDayEnd(ev: Extract<UiEvent, { type: 'dayEnd' }>) {
+    const bal = ev.income - ev.expense;
+    $('dayend').innerHTML = `<div class="de-head"><b>Tag ${ev.day} geschafft</b><span>✕</span></div>
+      <div class="de-kpis"><div><b class="${bal >= 0 ? 'ok' : 'no'}">${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))} €</b><small>Bilanz</small></div>
+      <div><b>${ev.handled ? `${Math.round((ev.punctual / ev.handled) * 100)} %` : '–'}</b><small>pünktlich</small></div>
+      <div><b>${ev.pax.toLocaleString('de-AT')}</b><small>Fahrgäste</small></div>
+      <div><b>${ev.goalsDone}/${ev.goalsTotal}</b><small>Tagesziele</small></div></div>`;
+    $('dayend').classList.remove('hidden');
+    clearTimeout(this.dayEndTimer);
+    this.dayEndTimer = window.setTimeout(() => $('dayend').classList.add('hidden'), 12000);
+  }
+  private dayEndTimer = 0;
 
   private stepSpeed(d: number) {
     const i = Math.max(0, Math.min(SPEEDS.length - 1, SPEEDS.indexOf(this.g.speed) + d));
@@ -1221,55 +1319,10 @@ export class Hud {
   }
 
   // ------------------------------------------------------------ Zuginfo
-  private status(t: Train): string {
-    const sim = this.g.sim;
-    if (t.state === 'queued') {
-      const late = sim.time - t.plannedSpawn;
-      return late > 0 ? `wartet vor der Einfahrt +${Math.ceil(late / 60)} min` : `Einfahrt ${fmtTime(t.plannedSpawn)}`;
-    }
-    if (t.state === 'dwell') return this.g.sim.isTurn(t) && !t.turned ? (t.ends ? 'endet hier (Pflege)' : 'hält, wendet hier') : 'hält am Bahnsteig';
-    if (t.state === 'parked') {
-      const where = t.parkKind === 'remise' ? 'in der Remise' : t.parkKind === 'workshop' ? 'in der Werkstatt' : 'auf dem Abstellgleis';
-      return where;
-    }
-    if (t.state !== 'running') return STATE_TEXT[t.state];
-    if (t.waiting) return t.note ?? 'wartet am Signal';
-    const j = t.jobs[0];
-    if (!j) return 'fährt';
-    if (j.k === 'stop') return 'fährt zum Bahnsteig';
-    if (j.k === 'park') return j.wash ? 'fährt zur Pflege' : 'fährt zum Abstellen';
-    if (j.k === 'hump') return 'fährt zum Abrollberg';
-    return t.departure ? 'fährt sortiert ab' : 'fährt aus';
-  }
+  private status(t: Train): string { return trainStatus(this.g, t); }
 
-  private openTrainMenu(id: number, li: HTMLElement | null, at?: { x: number; y: number }) {
-    const sim = this.g.sim;
-    const t = sim.trains.find((x) => x.id === id) ?? sim.queue.find((x) => x.id === id);
-    if (!t) return;
-    const m = $('train-menu');
-    m.dataset.id = String(id);
-    const shown = t.state !== 'queued';
-    // Bahnsteig festlegen: gilt für alle Züge dieses Unternehmens in dieser Richtung
-    const runs = this.g.platformRuns();
-    const key = `${t.op.id}:${t.dir}`;
-    const cur = sim.platformPref[key];
-    const plat = t.op.needsStop && runs.length > 1 ? `<div class="tm-plat"><small>Bahnsteig für ${t.op.short} ${t.dir === 'E' ? '→' : '←'} (alle Züge):</small><div>
-      <button class="btn${!cur ? ' on' : ''}" data-tm="plat" data-run="">Auto</button>${runs.map((r, i) => `<button class="btn${cur === r.id ? ' on' : ''}" data-tm="plat" data-run="${r.id}" data-tt="${r.len} Felder lang">Gleis ${i + 1}</button>`).join('')}</div></div>` : '';
-    m.innerHTML = `<b>${t.number}</b>
-      ${shown ? '<button class="btn" data-tm="focus">Zug zeigen</button>' : `<small>angekündigt für ${fmtTime(t.plannedSpawn)}</small>`}${plat}
-      <button class="btn warn" data-tm="remove">Aus dem Verkehr nehmen (−${eur(CANCEL_COST)} €)</button>
-      <small>Das Unternehmen ist darüber nicht erfreut.</small>`;
-    m.classList.remove('hidden');
-    if (li) {
-      const r = li.getBoundingClientRect();
-      m.style.left = `${toUi(Math.max(8, r.left - fromUi(m.offsetWidth) - 12))}px`;
-      m.style.top = `${toUi(Math.min(window.innerHeight - fromUi(m.offsetHeight) - 8, r.top))}px`;
-      if (shown) this.scene()?.focusTrain(id);
-    } else if (at) {
-      m.style.left = `${toUi(Math.max(8, Math.min(window.innerWidth - fromUi(m.offsetWidth) - 8, at.x + 14)))}px`;
-      m.style.top = `${toUi(Math.max(60, Math.min(window.innerHeight - fromUi(m.offsetHeight) - 8, at.y + 14)))}px`;
-    }
-  }
+
+
 
   /** Fahrplan-Seitenleiste: nächste Abfahrten verschieben, Bahnsteig je Richtung festlegen */
   private ttKey = '';
@@ -1284,14 +1337,87 @@ export class Hud {
     const plat = (o: (typeof ops)[number], dir: 'E' | 'W') => {
       if (!o.needsStop || runs.length < 2) return '';
       const k = `${o.id}:${dir}`, cur = sim.platformPref[k];
-      return `<div class="tto-pl"><span>${dir === 'E' ? '→' : '←'}</span><button class="btn${!cur ? ' on' : ''}" data-plat="" data-key="${k}">Auto</button>${runs.map((r, i) =>
+      return `<div class="tto-pl" title="Bahnsteig für alle Züge Richtung ${dir === 'E' ? 'Osten' : 'Westen'}"><span>${dir === 'E' ? '→' : '←'}</span><button class="btn${!cur ? ' on' : ''}" data-plat="" data-key="${k}">A</button>${runs.map((r, i) =>
         `<button class="btn${cur === r.id ? ' on' : ''}" data-plat="${r.id}" data-key="${k}">${i + 1}</button>`).join('')}</div>`;
     };
     $('tt-ops').innerHTML = ops.length ? ops.map((o) => `<div class="tto">
-      <div class="tto-h"><span class="dot" style="background:${o.color}"></span><b>${o.short}</b><small>${o.name}</small></div>
-      <div class="tto-t"><small>nächste → ${next(o.id, 'E')} · ← ${next(o.id, 'W')}</small></div>
-      <div class="tto-b"><button class="btn" data-op="${o.id}" data-shift="-5">−5 min</button><button class="btn" data-op="${o.id}" data-shift="5">+5 min</button></div>
+      <div class="tto-h" title="${o.name} · nächste → ${next(o.id, 'E')} · ← ${next(o.id, 'W')}"><span class="dot" style="background:${o.color}"></span><b>${o.short}</b><span class="tto-sh"><button class="btn" data-op="${o.id}" data-shift="-5" title="alle Züge 5 min früher">−5</button><button class="btn" data-op="${o.id}" data-shift="5" title="alle Züge 5 min später">+5</button></span></div>
       ${plat(o, 'E')}${plat(o, 'W')}</div>`).join('') : '<small>Noch keine Verträge.</small>';
+  }
+
+  /** Disposition (RM-FR-OPS-12): Zug im Weg-Zeit-Diagramm wählen, Bahnsteig (waagrecht) und Abfahrt (senkrecht) ziehen */
+  private initDispo() {
+    const cv = $('tt-canvas') as HTMLCanvasElement, tt = this.timetable;
+    const pos = (e: MouseEvent) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; };
+    let start: { x: number; y: number; id: number; axis?: 'x' | 'y' } | undefined;
+    const find = (id: number) => [...this.g.sim.trains, ...this.g.sim.queue].find((t) => t.id === id);
+    cv.addEventListener('mousedown', (e) => {
+      const p = pos(e), id = tt.pick(p.x, p.y);
+      tt.sel = id;
+      start = id !== undefined ? { ...p, id } : undefined;
+      this.dispoKey = '';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (this.screen !== 'timetable') return;
+      const p = pos(e);
+      if (!start) { cv.style.cursor = tt.pick(p.x, p.y) !== undefined ? 'pointer' : ''; return; }
+      if (!start.axis && Math.hypot(p.x - start.x, p.y - start.y) > 8) start.axis = Math.abs(p.x - start.x) > Math.abs(p.y - start.y) && !tt.isLocked(start.id) ? 'x' : 'y';
+      if (start.axis === 'x') { const l = tt.laneAt(p.x); tt.drag = { id: start.id, lane: l === undefined ? tt.drag?.lane : l }; }
+      if (start.axis === 'y') {
+        const t = find(start.id);
+        if (t) { const base = baseDeparture(this.g, t); tt.drag = { id: start.id, dep: Math.max(base, Math.min(base + 30 * 60, Math.round(tt.timeAt(p.y) / 60) * 60)) }; }
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      const d = tt.drag, t = start && find(start.id);
+      start = undefined; tt.drag = undefined;
+      if (!d || !t) return;
+      if (d.lane !== undefined && (d.lane ?? undefined) !== t.platform) setTrainPlatform(this.g, t, d.lane ?? undefined);
+      if (d.dep !== undefined) { setHold(this.g, t, d.dep); shiftHold(this.g, t, 0); }
+      this.dispoKey = '';
+    });
+    $('tt-dispo').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-dp],[data-dsel]') as HTMLElement | null;
+      if (!b) return;
+      if (b.dataset.dsel) { tt.sel = Number(b.dataset.dsel) || undefined; this.dispoKey = ''; return; }
+      const t = tt.sel !== undefined ? find(tt.sel) : undefined;
+      if (!t) return;
+      const a = b.dataset.dp!;
+      if (a === 'plat') setTrainPlatform(this.g, t, b.dataset.run || undefined);
+      else if (a === 'hold') shiftHold(this.g, t, Number(b.dataset.min));
+      else if (a === 'plan') { setHold(this.g, t, undefined); shiftHold(this.g, t, 0); }
+      else if (a === 'pass') letPass(this.g, t);
+      this.dispoKey = '';
+    });
+  }
+
+  private dispoKey = '';
+  private renderDispo() {
+    const g = this.g, tt = this.timetable;
+    const slots = dispoSlots(g), conf = dispoConflicts(g, slots), runs = g.platformRuns();
+    const sl = slots.find((s) => s.t.id === tt.sel && !s.alight);
+    if (tt.sel !== undefined && !sl) tt.sel = undefined;
+    const key = `${tt.sel}|${sl ? `${sl.platform}${sl.locked}${Math.round(sl.arr / 60)}${Math.round(sl.dep / 60)}${sl.t.letPass}` : ''}|${conf.map((c) => `${c.a.id}-${c.b.id}`).join(',')}|${runs.length}`;
+    if (key === this.dispoKey) return;
+    this.dispoKey = key;
+    const runNo = (id?: string) => { const i = runs.findIndex((r) => r.id === id); return i < 0 ? 'auto' : `Gleis ${i + 1}`; };
+    const confHtml = (list: typeof conf) => list.map((c) => `<div class="dp-c" data-dsel="${c.b.id}" title="${c.platform ? `Beide Züge zur selben Zeit an ${runNo(c.platform)}` : 'Alle Bahnsteige belegt, wenn der Zug ankommt'} – anklicken zum Bearbeiten">✗ ${c.a.number} ↔ ${c.b.number} · ${fmtTime(c.at)}</div>`).join('');
+    if (!sl) {
+      $('tt-dispo').innerHTML = conf.length ? `<div class="dp-cl">${confHtml(conf)}</div>` : '<small class="dp-ok">✓ keine Konflikte</small>';
+      return;
+    }
+    const t = sl.t, base = baseDeparture(g, t), held = Math.max(0, Math.round((sl.dep - base) / 60));
+    const mine = conf.filter((c) => c.a === t || c.b === t);
+    const plat = runs.length > 1 ? `<div class="tto-pl"${sl.locked ? ' title="Zug fährt schon hin – Bahnsteig fest"' : ''}><span>Gleis</span><button class="btn${!t.platform ? ' on' : ''}" data-dp="plat" data-run=""${sl.locked ? ' disabled' : ''} title="automatisch${sl.guess ? `, voraussichtlich ${runNo(sl.guess)}` : ''}">A</button>${runs.map((r, i) =>
+      `<button class="btn${(t.platform ?? sl.platform) === r.id ? ' on' : ''}" data-dp="plat" data-run="${r.id}"${sl.locked ? ' disabled' : ''}>${i + 1}</button>`).join('')}</div>` : '';
+    $('tt-dispo').innerHTML = `<div class="tto">
+      <div class="tto-h"><span class="dot" style="background:${t.op.color}"></span><b>${t.number}</b><button class="btn dp-x" data-dsel="0">×</button></div>
+      <div class="tto-t"><small>${fmtTime(sl.arr)}–${fmtTime(sl.dep)}${held ? ` (+${held})` : ''}</small></div>
+      ${plat}
+      <div class="tto-b"><span>Abfahrt</span><button class="btn" data-dp="hold" data-min="-5">−5</button><button class="btn" data-dp="hold" data-min="-1">−1</button><button class="btn" data-dp="hold" data-min="1">+1</button><button class="btn" data-dp="hold" data-min="5">+5</button>${held ? '<button class="btn" data-dp="plan" title="planmäßig abfahren">↺</button>' : ''}</div>
+      ${t.state === 'queued' && t.extDelay && !t.letPass ? '<div class="tto-b"><button class="btn" data-dp="pass" title="verspätet – nachfolgende Züge dürfen vorfahren">vorlassen</button></div>' : ''}
+      ${mine.length ? `<div class="dp-cl">${confHtml(mine)}</div>` : ''}
+    </div>`;
   }
 
   /** was hilft, wenn ein Zug nicht weiterkommt */
@@ -1311,9 +1437,16 @@ export class Hud {
 
   /** Steckbrief eines Fahrgasts (RM-FR-EVT-06) */
   private personHtml(p: PersonCard) {
-    const [word, cls] = { gut: ['zufrieden', 'ok'], naja: ['ungeduldig', 'gold'], sauer: ['sauer', 'no'] }[p.mood];
-    return `<div class="tc-head"><b>${p.name}</b><span class="pc-mood ${cls}">${word}</span></div>
-      <div class="tc-sub">Fahrgast</div>${p.lines.map((l) => `<div class="pc-line ${l.cls ?? ''}">${l.text}</div>`).join('')}`;
+    const [word, level] = ({ gut: ['zufrieden', 'ok'], naja: ['ungeduldig', 'gelb'], sauer: ['sauer', 'rot'] } as const)[p.mood];
+    return this.oc({ head: `<img src="${ICON('bld_bench')}" alt="" />`, title: p.name, sub: 'Fahrgast', state: word, level,
+      rows: p.lines.map((l) => `<div class="pc-line ${l.cls ?? ''}">${l.text}</div>`).join('') });
+  }
+
+
+  /** Einheitliche Objektkarte (RM-FR-CPX-04): Kopf → Zustand (Ampel) → Zahlen; Aktionen kommen darunter */
+  private oc(o: { head: string; title: string; sub: string; state: string; level: 'ok' | 'gelb' | 'rot'; rows: string }) {
+    return `<div class="oc"><div class="oc-head">${o.head}<div><b>${o.title}</b><small>${o.sub}</small></div></div>
+      <div class="oc-state"><i class="amp${o.level === 'ok' ? '' : ` ${o.level}`}"></i><span>${o.state}</span></div><div class="oc-nums">${o.rows}</div></div>`;
   }
 
   private card(t: Train) {
@@ -1322,39 +1455,125 @@ export class Hud {
     const load = isPax ? (t.passengers / t.capacity) * 100 : 0;
     const kmh = Math.round(t.v * 15);
     const cars = t.cars.map((c, i) => `<img src="assets/gen/car_${t.op.id}_${c === 'ecab' ? (i ? 'ecabW' : 'ecabE') : c}_0.png" alt="" />`).join('');
-    const dirTxt = t.dir === 'E' ? '→ Ost' : '← West';
-    const rows = [
-      `<div class="tc-head"><span class="dot" style="background:${t.op.color}"></span><b>${t.number}</b><span class="muted">${dirTxt}</span></div>`,
-      `<div class="tc-sub">${t.op.category} · ${t.op.name}${t.boost ? ' · Verstärkerzug (Stoßzeit)' : ''}${t.extDelay ? ` · kam ${Math.round(t.extDelay / 60)} min verspätet von außen` : ''}</div>`,
-      `<div class="tc-cars">${cars}</div>`,
-      `<div class="tc-row"><span>Status</span><span>${this.status(t)}</span></div>`,
-    ];
-    if (t.state !== 'queued') rows.push(`<div class="tc-row"><span>Tempo</span><span>${kmh} km/h</span></div>`);
-    if (t.op.kind !== 'sort' && t.state !== 'rolling' && t.state !== 'stored') {
-      rows.push(`<div class="tc-row"><span>Fahrplan</span><span class="${delay > 3 ? 'no' : 'ok'}">${delay > 0 ? `+${delay} min` : 'pünktlich'}</span></div>`);
-    }
     const why = this.g.sim.waitReason(t) ?? (t.note && /kein/.test(t.note) ? t.note : null);
+    const stuck = this.g.sim.stuck(t) && !!why;
+    const timed = t.op.kind !== 'sort' && t.state !== 'rolling' && t.state !== 'stored';
+    const rows = [`<div class="tc-cars">${cars}</div>`];
+    if (t.state !== 'queued') rows.push(`<div class="tc-row"><span>Tempo</span><span>${kmh} km/h</span></div>`);
+    if (timed) rows.push(`<div class="tc-row"><span>Fahrplan</span><span class="${delay > 3 ? 'no' : 'ok'}">${delay > 0 ? `+${delay} min` : 'pünktlich'}</span></div>`);
     if (why) rows.push(`<div class="tc-row"><span>Wartet</span><span class="no">${why}</span></div>`);
-    if (this.g.sim.stuck(t) && why) rows.push(`<div class="tc-help">! ${this.fixHint(why)}</div>`);
+    if (stuck) rows.push(`<div class="tc-help">! ${this.fixHint(why!)}</div>`);
     if (isPax) rows.push(`<div class="tc-row"><span>Auslastung</span>${this.bar(load, load > 85 ? '#d9534f' : '#6cc04a')}<span>${t.passengers}/${t.capacity}</span></div>`);
     rows.push(`<div class="tc-row"><span>Antrieb</span><span>${t.op.traction === 'electric' ? '⚡ elektrisch' : '⛽ Diesel'}</span></div>`);
     rows.push(`<div class="tc-row"><span>Schmutz</span>${this.bar(t.dirt, '#9a7a4a')}<span>${Math.round(t.dirt)}</span></div>`);
     rows.push(`<div class="tc-row"><span>Verschleiß</span>${this.bar(t.wear, '#b0623a')}<span>${Math.round(t.wear)}</span></div>`);
     if (t.dest !== undefined) rows.push(`<div class="tc-row"><span>Ziel</span><span>Richtung ${['Nord', 'Süd', 'West'][t.dest]}</span></div>`);
-    return rows.join('');
+    return this.oc({
+      head: `<span class="dot" style="background:${t.op.color}"></span>`,
+      title: t.number,
+      sub: `${t.op.category} · ${t.op.name} · ${t.dir === 'E' ? '→ Ost' : '← West'}${t.boost ? ' · Verstärkerzug' : ''}${t.extDelay ? ` · kam ${Math.round(t.extDelay / 60)} min verspätet von außen` : ''}`,
+      state: this.status(t),
+      level: stuck ? 'rot' : timed && delay > 3 ? 'gelb' : 'ok',
+      rows: rows.join(''),
+    });
+  }
+
+  // ------------------------------------------------------------ Details links in der Infospalte
+  private detail: { kind: 'train'; id: number } | { kind: 'log'; entry: LogEntry } | { kind: 'op'; id: OperatorId } | { kind: 'bld'; id: number } | { kind: 'person'; id: number } | null = null;
+  private detailKey = '';
+  private detailActKey = '';
+  private trainAction: (b: HTMLElement, id: number) => void = () => undefined;
+
+  private renderDetail() {
+    const d = this.detail, g = this.g, sim = g.sim;
+    let body = '', acts = '';
+    if (d?.kind === 'train') {
+      const t = sim.trains.find((x) => x.id === d.id) ?? sim.queue.find((x) => x.id === d.id);
+      if (!t) this.detail = null;
+      else {
+        body = this.card(t);
+        const runs = g.platformRuns();
+        const cur = sim.platformPref[`${t.op.id}:${t.dir}`];
+        const plat = t.op.needsStop && runs.length > 1 ? `<div class="tm-plat"><small>Bahnsteig für ${t.op.short} ${t.dir === 'E' ? '→' : '←'} (alle Züge):</small><div>
+          <button class="btn${!cur ? ' on' : ''}" data-tm="plat" data-run="">Auto</button>${runs.map((r, i) => `<button class="btn${cur === r.id ? ' on' : ''}" data-tm="plat" data-run="${r.id}" data-tt="${r.len} Felder lang">Gleis ${i + 1}</button>`).join('')}</div></div>` : '';
+        acts = `${t.id}|${cur}|${t.state === 'queued'}` + `<div class="bd-btns">${t.state !== 'queued' ? '<button class="btn" data-tm="focus">Zeigen</button>' : ''}<button class="btn warn" data-tm="remove" data-tt="Das Unternehmen ist darüber nicht erfreut.">Aus dem Verkehr (−${eur(CANCEL_COST)} €)</button></div>${plat}`;
+      }
+    } else if (d?.kind === 'log') {
+      body = this.oc({ head: `<img src="${ICON('bld_clock')}" alt="" />`, title: `Meldung ${fmtTime(d.entry.time)}`, sub: 'aus dem Betrieb',
+        state: d.entry.text, level: d.entry.kind === 'bad' ? 'rot' : 'ok', rows: '' });
+    } else if (d?.kind === 'op') {
+      const o = OPERATORS[d.id], c = g.contracts[d.id];
+      if (o && c) {
+        const sat = Math.round(g.satisfaction[d.id]);
+        const trains = sim.trains.filter((x) => x.op === o).length + sim.queue.filter((x) => x.op === o).length;
+        body = this.oc({ head: `<span class="dot" style="background:${o.color}"></span>`, title: o.name, sub: o.category,
+          state: c.status === 'active' ? 'Vertrag läuft' : c.status === 'cancelled' ? 'Vertrag gekündigt' : 'kein Vertrag',
+          level: c.status === 'cancelled' || sat < 40 ? 'rot' : sat < 60 ? 'gelb' : 'ok',
+          rows: `<div class="tc-row"><span>Zufriedenheit</span>${this.bar(sat, o.color)}<span>${sat}</span></div>
+            ${c.status === 'active' ? `<div class="tc-row"><span>Takt</span><span>alle ${c.takt} min</span></div>
+            <div class="tc-row"><span>Preis je Zug</span><span>${(Object.values(c.price) as number[]).map((p) => `${eur(p)} €`).join(' / ')}</span></div>` : ''}
+            <div class="tc-row"><span>Züge unterwegs</span><span>${trains}</span></div>` });
+        acts = `op|${d.id}<div class="bd-btns"><button class="btn" data-dt="contracts">Verträge öffnen</button></div>`;
+      } else this.detail = null;
+    } else if (d?.kind === 'bld') {
+      const b = g.grid.buildings.get(d.id);
+      if (!b) this.detail = null;
+      else if (isStation(b.key)) {
+        const lvl = g.stationLevel(b.key), c = g.connections(b.id), bonus = Math.round(g.stationBonus(b.id) * 100);
+        const block = g.upgradeBlock(b.id);
+        body = this.oc({ head: `<img src="${ICON(b.key)}" alt="" />`, title: b.name ?? 'Bahnhof', sub: `<span class="st-code">${g.stationCode(b)}</span> ${BUILDINGS[b.key].label} · Stufe ${lvl}`,
+          state: `Einnahmen +${bonus} %`, level: c.parking && c.bus ? 'ok' : 'gelb',
+          rows: `<div class="tc-row"><span>Parkplatz</span><span class="${c.parking ? 'ok' : 'no'}">${c.parking ? '✓ angebunden (+10 %)' : '✗ nicht angebunden'}</span></div>
+            <div class="tc-row"><span>Busterminal</span><span class="${c.bus ? 'ok' : 'no'}">${c.bus ? '✓ angebunden (+15 %)' : '✗ nicht angebunden'}</span></div>
+            ${lvl < 3 && block ? `<div class="tc-help">${block}</div>` : ''}` });
+        acts = `s${b.id}|${b.name}|${b.code}|${lvl}|${block}` + `<div class="bd-btns"><button class="btn" data-bp="rename">Umbenennen</button>${lvl < 3 ? `<button class="btn${block ? ' off' : ''}" data-bp="upgrade">Ausbauen · ${eur(STATION_UPGRADE[lvl + 1])} €</button>` : ''}</div>`;
+      } else if (SHOPS[b.key]) {
+        const sh = SHOPS[b.key], price = g.shopPrices[b.key], rate = g.shopRate(b.key), r = price / sh.ref;
+        body = this.oc({ head: `<img src="${ICON(b.key)}" alt="" />`, title: sh.name, sub: `Preis gilt für alle ${sh.name === 'Café' ? 'Cafés' : sh.name === 'Kiosk' ? 'Kioske' : 'Automaten'}`,
+          state: r > 1.3 ? 'Zu teuer – Fahrgäste ärgern sich' : r < 0.85 ? 'Günstig – Fahrgäste freuen sich' : 'Fairer Preis', level: r > 1.3 ? 'rot' : 'ok',
+          rows: `<div class="tc-row"><span>Preis</span><span>${price.toFixed(2).replace('.', ',')} € (üblich ${sh.ref.toFixed(2).replace('.', ',')} €)</span></div>
+            <div class="tc-row"><span>Kunden</span><span>${Math.round(rate * 100)} von 100 Fahrgästen</span></div>
+            <div class="tc-row"><span>Umsatz</span><span>${(rate * price * 100).toFixed(0)} € je 100 Fahrgäste</span></div>` });
+        acts = `p${b.key}` + '<div class="bd-btns"><button class="btn" data-bp="price" data-d="-0.5">Preis −</button><button class="btn" data-bp="price" data-d="0.5">Preis +</button></div>';
+      } else this.detail = null;
+    } else if (d?.kind === 'person') {
+      const pc = this.scene()?.personCard(d.id);
+      if (!pc) this.detail = null;
+      else body = this.personHtml(pc);
+    }
+    if (!body) body = this.overviewHtml();
+    if (body !== this.detailKey) { this.detailKey = body; ($('bar-detail').querySelector('.bd-body') ?? $('bar-detail')).innerHTML = body; }
+    // Knöpfe nur neu, wenn sich wirklich etwas ändert (sonst geht „Wirklich?“ verloren)
+    if (acts !== this.detailActKey) {
+      this.detailActKey = acts;
+      const a = $('bar-detail').querySelector('.bd-acts') as HTMLElement;
+      a.innerHTML = acts ? acts.slice(acts.indexOf('<')) : '';
+    }
+  }
+
+  /** Detailfeld ohne Auswahl: nächste Halte am Bahnhof und Zustand (RM-FR-UI-16) */
+  private overviewHtml() {
+    const g = this.g, st = g.stations()[0];
+    if (!st) return '<div class="bd-empty">Etwas anklicken für Details</div>';
+    const runs = g.platformRuns();
+    const slots = dispoSlots(g).filter((x) => !x.alight && x.dep >= g.sim.time).slice(0, 5);
+    const gl = (id?: string) => { const i = runs.findIndex((r) => r.id === id); return i < 0 ? '–' : String(i + 1); };
+    const rows = slots.map((x) => {
+      const late = x.t.state === 'queued' ? Math.max(0, g.sim.time - x.t.plannedSpawn) : 0;
+      return `<div class="ov-row"><span class="dot" style="background:${x.t.op.color}"></span><span>${x.t.number}</span><span>${fmtTime(x.dep)}</span><span class="${late > 60 ? 'no' : ''}">${late > 60 ? `+${Math.ceil(late / 60)}` : ''}</span><span title="Bahnsteig">${gl(x.platform ?? x.guess)}</span></div>`;
+    }).join('') || '<div class="bd-empty">Keine Halte in den nächsten 2 Stunden</div>';
+    const d = g.history[g.history.length - 1];
+    const p = d?.handled ? `${Math.round((d.punctual / d.handled) * 100)} %` : '–';
+    return `<div class="ov"><div class="ov-head"><b>${st.name ?? 'Bahnhof'}</b><span class="st-code">${g.stationCode(st)}</span><span class="ov-kpi" title="heute pünktlich">${p}</span><span class="ov-kpi" title="Fahrgäste heute">${(d?.pax ?? 0).toLocaleString('de-AT')} Fahrg.</span></div>
+      <div class="ov-row ov-th"><span></span><span>Zug</span><span>ab</span><span></span><span>Gl.</span></div>${rows}</div>`;
   }
 
   private updateCard() {
     const box = $('traincard');
     const sim = this.g.sim;
     const find = (id: number) => sim.trains.find((t) => t.id === id) ?? sim.queue.find((t) => t.id === id);
-    let t: Train | undefined, x = 0, y = 0, side: 'mouse' | 'list' = 'mouse';
-    if (this.listHover && document.body.contains(this.listHover.el)) {
-      t = find(this.listHover.id);
-      const r = this.listHover.el.getBoundingClientRect();
-      x = r.left - 12; y = r.top; side = 'list';
-      this.ui.hoverTrain = t ? t.id : null;
-    } else if (this.ui.hoverTrain !== null && !this.ui.menu) {
+    let t: Train | undefined, x = 0, y = 0;
+    if (this.ui.hoverTrain !== null && !this.ui.menu) {
       t = find(this.ui.hoverTrain);
       x = this.ui.mouse.x + 18; y = this.ui.mouse.y + 18;
     }
@@ -1367,7 +1586,6 @@ export class Hud {
     box.innerHTML = t ? this.card(t) : this.personHtml(pc!);
     box.classList.remove('hidden');
     const w = fromUi(box.offsetWidth), h = fromUi(box.offsetHeight);
-    if (side === 'list') x -= w;
     x = Math.max(8, Math.min(window.innerWidth - w - 8, x));
     y = Math.max(8, Math.min(window.innerHeight - h - 8, y));
     box.style.left = `${toUi(x)}px`;
@@ -1399,7 +1617,7 @@ export class Hud {
       this.companyKey = avk;
       const img = $('company').querySelector('img, svg');
       if (img) img.outerHTML = g.company ? avatar(g.player.avatar, 22) : '<img src="assets/gen/ui/train.png" alt="" />';
-      $('company').dataset.tt = g.player.name ? `${g.player.title ? g.player.title + ' ' : ''}${g.player.name} · ${g.company} – klicken zum Ändern` : 'Namen ändern';
+      $('company').dataset.tt = g.player.name ? `${g.player.title ? g.player.title + ' ' : ''}${g.player.name} · ${g.company} · Klick: Dienstakte` : g.company;
     }
     $('clock').textContent = fmtTime(sim.time);
     $('day').textContent = `Tag ${Math.floor(sim.time / 86400) + 1}`;
@@ -1435,10 +1653,12 @@ export class Hud {
       $('mood').classList.toggle('bad', mood.angry > 0);
     }
 
-    $('speed').querySelectorAll('button').forEach((b) => {
+    this.updateSkip();
+    $('speed').querySelectorAll('button[data-speed]').forEach((b) => {
       const s = Number((b as HTMLElement).dataset.speed);
-      b.classList.toggle('on', g.paused ? s === 0 : s === g.speed);
+      b.classList.toggle('on', !this.skip && (g.paused ? s === 0 : s === g.speed));
     });
+    $('btn-skip').classList.toggle('on', !!this.skip);
     $('fp').textContent = String(g.research.points);
     // Mini-Balken: weiteste laufende Forschung; Punkt, wenn ein Baum frei ist
     const prog = TREES.map((t) => g.runningIn(t.id)).filter(Boolean).map((rc) => 100 - (rc!.left / (RESEARCH_BY_ID[rc!.id].hours * 3600)) * 100);
@@ -1459,67 +1679,41 @@ export class Hud {
     this.renderScreen();
     $('btn-save').classList.toggle('saved', now < this.savedFlash);
     // Zug auf der Karte angeklickt: gleiches Menü wie in der Zugliste
-    if (this.ui.trainClick) { const c = this.ui.trainClick; this.ui.trainClick = null; this.openTrainMenu(c.id, null, c); }
+    if (this.ui.trainClick) { const c = this.ui.trainClick; this.ui.trainClick = null; this.detail = { kind: 'train', id: c.id }; this.setTab('trains'); }
     this.updateFaultPop(now);
     this.updateStationPop();
     const unread = this.g.inbox.filter((e) => !e.read).length;
     $('mail-count').textContent = String(unread);
     $('mail-count').classList.toggle('hidden', !unread);
 
-    // Baumenü
+    // Baumenü: Gruppen-Symbole, gesperrt/neu/Auftrag
     const mt = g.missionTool();
-    let hoveredGroup: MenuGroup | undefined;
     this.syncGroup();
     $('hotbar').querySelectorAll('.slot').forEach((el) => {
       const b = el as HTMLElement;
       const grp = MENU.find((m) => m.id === b.dataset.group)!;
-      const img = b.querySelector('img')!;
-      // Symbol = gewählter Eintrag der Gruppe
-      const shown = grp.items[this.lastItem[grp.id] ?? 0] ?? grp.items[0];
-      const src = ICON(grp.items.length > 1 ? shown.icon : grp.icon);
-      if (!img.src.endsWith(src)) img.src = src;
-      const locked = !grp.items.some((it) => g.unlocked.has(it.tool));
+      const vars = grp.types.flatMap((t) => t.variants);
+      const locked = !vars.some((v) => g.unlocked.has(v.tool));
       b.classList.toggle('locked', locked);
       b.classList.toggle('on', this.group === grp.id);
-      const isQuest = !!mt && grp.items.some((it) => it.tool === mt.tool) && this.ui.tool !== mt.tool && !locked && !g.questUsed.has(`${g.missionIdx}:${mt.tool}`);
+      const isQuest = !!mt && vars.some((v) => v.tool === mt.tool) && this.ui.tool !== mt.tool && !locked && !g.questUsed.has(`${g.missionIdx}:${mt.tool}`);
       b.classList.toggle('quest', isQuest);
-      const badge = isQuest ? '!' : grp.items.some((it) => this.fresh.has(it.tool)) ? 'NEU' : '';
+      const badge = isQuest ? '!' : vars.some((v) => this.fresh.has(v.tool)) ? 'NEU' : '';
       let el2 = b.querySelector('.badge') as HTMLElement | null;
       if (badge && !el2) { el2 = document.createElement('span'); b.appendChild(el2); }
       if (el2) {
         if (!badge) el2.remove();
         else { el2.textContent = badge; el2.className = `badge${badge === 'NEU' ? ' new' : ''}`; }
       }
-      if (b.dataset.hover) hoveredGroup = grp;
     });
     this.renderVariants();
-
-    // Hinweiszeile: Gruppe · Eintrag · Kosten/Grund
-    const viaResearch: Partial<Record<ToolId, string>> = { wire: RESEARCH_BY_ID.wire.name, access: RESEARCH_BY_ID.access.name, facility: RESEARCH_BY_ID.siding.name, road: RESEARCH_BY_ID.road.name };
-    let html = '';
-    if (hoveredGroup) {
-      const locked = !hoveredGroup.items.some((it) => g.unlocked.has(it.tool));
-      const via = hoveredGroup.items.map((it) => viaResearch[it.tool]).find(Boolean);
-      html = `<b>${hoveredGroup.label}</b> <small>· Taste ${hoveredGroup.key}${hoveredGroup.alt ? `/${hoveredGroup.alt}` : ''}${hoveredGroup.items.length > 1 ? ', dann Ziffer für den Eintrag' : ''}</small>`
-        + (locked ? ` <span class="no">· ${via ? `erst erforschen: „${via}“` : 'kommt mit einem späteren Auftrag'}</span>` : ` <small>· ${hoveredGroup.help}</small>`);
-    } else if (this.ui.tool !== 'select') {
-      const grp = MENU.find((m) => m.id === this.group)!;
-      const hv = this.hoverItem && grp.items.includes(this.hoverItem) ? this.hoverItem : null;
-      const it = hv ?? grp.items.find((x) => this.itemOn(x));
-      html = `<b>${grp.label}</b>${it && grp.items.length > 1 ? ` · ${it.label}` : ''}`;
-      if (it?.info && it.info !== 'Deko' && grp.items.length > 1) html += ` <small>(${it.info})</small>`;
-      if (grp.id === 'building' && it && Game.canRotate(it.variant ?? '')) html += ` <small>· ${this.g.buildRot ? 'gedreht' : 'normal'} (Q = drehen)</small>`;
-      if (!hv && this.ui.message) {
-        const bad = !/€$/.test(this.ui.message) || this.ui.message.startsWith('Zu wenig Geld');
-        html += ` · <span class="${bad ? 'no' : 'ok'}">${this.ui.message}</span>`;
-      } else if (grp.items.length < 2) html += ` <small>· ${grp.help}</small>`;
-    }
-    $('tooltip').innerHTML = html;
+    this.renderPreview();
+    this.renderCursorInfo();
 
     // Auftrag
     const m = g.mission;
     const q = g.missionInfo();
-    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : g.mode === 'free' ? 'FREIES SPIEL' : 'ALLE AUFTRÄGE ERLEDIGT';
+    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : g.mode === 'free' ? 'FREIES SPIEL' : g.mode === 'challenge' ? 'HERAUSFORDERUNG' : 'ALLE AUFTRÄGE ERLEDIGT';
     $('q-title').textContent = q.title;
     $('q-short').textContent = q.short;
     // Checkliste: Teilschritte abhaken
@@ -1554,8 +1748,8 @@ export class Hud {
       .filter((o) => sim.queue.some((x) => x.op === o) || sim.trains.some((x) => x.op === o))
       .map((o) => {
         const val = Math.round(g.satisfaction[o.id]);
-        return `<div class="sat-row"><span>${o.name}</span><div class="bar"><div style="width:${val}%;background:${o.color}"></div></div><span>${val}</span></div>`;
-      }).join('');
+        return `<div class="sat-row" data-op="${o.id}"><span>${o.name}</span><div class="bar"><div style="width:${val}%;background:${o.color}"></div></div><span>${val}</span></div>`;
+      }).join('') || '<div class="bar-empty">Noch keine Vertragspartner – im Postfach warten Angebote.</div>';
     if ($('sat').innerHTML !== satHtml) $('sat').innerHTML = satHtml;
     const rows: string[] = [];
     let wagons = 0;
@@ -1571,24 +1765,23 @@ export class Hud {
         late > 0 ? `wartet +${Math.ceil(late / 60)} min` : fmtTime(tr.plannedSpawn), late > 60));
     }
     if (wagons) rows.push(`<li class="wag"><span class="dot" style="background:#9c4a2c"></span><span class="tnum">${wagons} Wagen</span><span class="tstat">im Rangierbahnhof</span></li>`);
-    const listHtml = rows.join('');
+    const listHtml = rows.join('') || '<li class="bar-empty">Noch kein Zugverkehr – erst mit einem Vertrag fahren Züge.</li>';
     if ($('trains').dataset.h !== listHtml) {
       $('trains').dataset.h = listHtml;
       $('trains').innerHTML = listHtml;
-      if (this.listHover) {
-        const el = $('trains').querySelector(`li[data-id="${this.listHover.id}"]`) as HTMLElement | null;
-        this.listHover = el && el.matches(':hover') ? { id: this.listHover.id, el } : null;
-      }
     }
     const logHtml = g.log.slice(0, 14)
-      .map((l) => `<li><span class="t">${fmtTime(l.time)}</span><span class="${l.kind}">${l.text}</span></li>`).join('');
+      .map((l, i) => `<li data-i="${i}"><span class="t">${fmtTime(l.time)}</span><span class="${l.kind}">${l.text}</span></li>`).join('') || '<li class="bar-empty">Noch keine Meldungen.</li>';
     if ($('log').innerHTML !== logHtml) $('log').innerHTML = logHtml;
 
     this.updateCard();
+    this.renderDetail();
 
     // Ereignisse
-    if (this.ui.stationClick !== null) { this.panelId = this.ui.stationClick; this.ui.stationClick = null; this.panelKey = ''; }
+    if (this.ui.stationClick !== null) { this.detail = { kind: 'bld', id: this.ui.stationClick }; this.ui.stationClick = null; }
+    if (this.ui.personClick != null) { this.detail = { kind: 'person', id: this.ui.personClick }; this.ui.personClick = null; }
     this.timetable.sample();
+    document.body.classList.toggle('in-menu', !$('menu').classList.contains('hidden'));
     // Stau-Warnung mit Countdown
     const dl = g.sim.deadlock && g.deadlockSince && !g.gameOver;
     $('deadlock').classList.toggle('hidden', !dl);
@@ -1597,7 +1790,6 @@ export class Hud {
       $('dl-text').textContent = `${names} · noch ${Math.ceil(g.deadlockLeft / 60)} min bis Game Over – Gleis bauen oder einen Zug aufgeben`;
     }
     if (this.g.offers.open && $('modal').classList.contains('hidden') && $('event').classList.contains('hidden') && !this.ui.menu) this.showOffer();
-    this.renderPanel();
     for (const ev of g.uiEvents.splice(0)) {
       if (ev.type === 'station') { this.askStation(ev.id); continue; }
       if (ev.type === 'offer' || ev.type === 'deadlock') continue;
@@ -1626,6 +1818,8 @@ export class Hud {
         continue;
       }
       if (ev.type === 'goal') { Sound.coin(); continue; }
+      if (ev.type === 'dayEnd') { if (g.stations().length) this.showDayEnd(ev); continue; }
+      if (ev.type === 'streak') { Sound.gong(); this.flash(`★ ${ev.n} pünktlich in Folge!`); continue; }
       if (ev.type === 'letter') {
         const day = Math.floor(g.sim.time / 86400) + 1;
         const from = ev.from ?? BOARD(g.company || 'Bahngesellschaft');

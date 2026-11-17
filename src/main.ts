@@ -96,13 +96,13 @@ async function start() {
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     scene,
   });
-  new Hud(game, ui, () => (scene.sys?.isActive() ? scene : undefined), !!saved || demo, freshStart && !demo);
+  const hud = new Hud(game, ui, () => (scene.sys?.isActive() ? scene : undefined), !!saved || demo, freshStart && !demo);
 
   // automatisch speichern
   setInterval(() => { if (game.company) writeSave(game.save()); flushLife(game); }, 30_000);
   window.addEventListener('beforeunload', () => { if (game.company) writeSave(game.save()); flushLife(game); });
 
   // Für Tests/Debugging in der Konsole
-  (window as unknown as { rm: unknown }).rm = { game, ui, phaser, scene };
+  (window as unknown as { rm: unknown }).rm = { game, ui, phaser, scene, hud };
 }
 start();

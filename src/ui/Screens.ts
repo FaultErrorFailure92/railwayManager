@@ -1,3 +1,4 @@
+import { catchRate, FINE, INSPECTOR_MAX, INSPECTOR_WAGE } from '../game/FareDodgers';
 import { acceptChance, cancelRisk, fairPrice, PARK_FEE, TRANSIT_FEE } from '../game/Contracts';
 import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
@@ -75,39 +76,85 @@ export function researchHtml(g: Game, tree: ResearchTree, quest?: string) {
 }
 
 /** Statistik: Tagesbilanz, Pünktlichkeit je Unternehmen, Erfolge */
+/** Statistik-Reiter (RM-FR-ECO-09) */
+export type StatsTab = 'money' | 'ops' | 'ach';
+export const statsView: { tab: StatsTab } = { tab: 'money' };
+
 export function statsKey(g: Game) {
   const h = g.history[g.history.length - 1];
-  return `${g.history.length}|${h ? Math.round(h.income / 50) + ',' + Math.round(h.expense / 50) + ',' + h.handled : ''}|${g.achievements.length}|${g.stats.handled}`;
+  return `${statsView.tab}|${g.history.length}|${h ? Math.round(h.income / 50) + ',' + Math.round(h.expense / 50) + ',' + h.handled : ''}|${g.achievements.length}|${g.stats.handled}`;
+}
+
+/** kleines Liniendiagramm (SVG) */
+function lineChart(vals: number[], labels: string[], fmt: (v: number) => string, color: string, zero = false) {
+  if (vals.length < 2) return '<div class="ct-empty">Ab dem zweiten Tag gibt es hier eine Kurve.</div>';
+  const W = 520, H = 120, P = 6;
+  const lo = Math.min(zero ? 0 : Infinity, ...vals), hi = Math.max(...vals, lo + 1);
+  const x = (i: number) => P + (i / (vals.length - 1)) * (W - 2 * P), y = (v: number) => H - P - ((v - lo) / (hi - lo)) * (H - 2 * P);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const z = lo < 0 && hi > 0 ? `<line x1="${P}" x2="${W - P}" y1="${y(0)}" y2="${y(0)}" class="ch-zero" />` : '';
+  const dots = vals.map((v, i) => `<rect x="${x(i) - 3}" y="${y(v) - 3}" width="6" height="6" fill="${color}"><title>${labels[i]}: ${fmt(v)}</title></rect>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${z}<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" />${dots}</svg>
+    <div class="ch-axis"><span>${labels[0]}</span><span>${fmt(vals[vals.length - 1])}</span><span>${labels[labels.length - 1]}</span></div>`;
+}
+
+/** Einnahmen und Ausgaben nach Kategorie als Balken (RM-FR-ECO-09) */
+function catsHtml(days: Game['history']) {
+  const tot: Record<string, number> = {};
+  for (const d of days) for (const [k, v] of Object.entries(d.cats ?? {})) tot[k] = (tot[k] ?? 0) + v;
+  const ins = Object.entries(tot).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const outs = Object.entries(tot).filter(([, v]) => v < 0).sort((a, b) => a[1] - b[1]);
+  if (!ins.length && !outs.length) return '';
+  const max = Math.max(1, ...Object.values(tot).map(Math.abs));
+  const bar = ([k, v]: [string, number]) => `<div class="st-cat"><span>${k}</span><div class="bar"><div style="width:${(Math.abs(v) / max) * 100}%;background:${v > 0 ? '#3fa34d' : '#c0392b'}"></div></div><b class="${v > 0 ? 'ok' : 'no'}">${v > 0 ? '+' : '−'}${eur(Math.abs(v))} €</b></div>`;
+  return `<div class="st-two"><div><div class="st-sec">Einnahmen nach Art</div>${ins.map(bar).join('')}</div><div><div class="st-sec">Ausgaben nach Art</div>${outs.map(bar).join('')}</div></div>`;
 }
 
 export function statsHtml(g: Game) {
-  const days = g.history.slice(-7);
-  const max = Math.max(1, ...days.map((d) => Math.max(d.income, d.expense)));
-  const bars = days.map((d) => {
-    const bal = d.income - d.expense;
-    return `<div class="st-day"><div class="st-bars"><div class="st-in" style="height:${(d.income / max) * 100}%" title="Einnahmen ${eur(d.income)} €"></div><div class="st-out" style="height:${(d.expense / max) * 100}%" title="Ausgaben ${eur(d.expense)} €"></div></div>
-      <b class="${bal >= 0 ? 'ok' : 'no'}">${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))}</b><small>Tag ${d.day + 1}</small>
-      <small>${d.handled ? Math.round((d.punctual / d.handled) * 100) + ' % pünktl.' : '–'}</small></div>`;
-  }).join('') || '<div class="ct-empty">Noch keine Tage gespielt.</div>';
-  const ops = Object.entries(g.stats.opStats ?? {}).filter(([, s]) => s.handled > 0)
-    .sort((a, b) => b[1].handled - a[1].handled)
-    .map(([id, s]) => {
-      const o = OPERATORS[id as keyof typeof OPERATORS];
-      const p = Math.round((s.punctual / s.handled) * 100);
-      return `<div class="st-op"><span class="dot" style="background:${o.color}"></span><span>${o.name}</span><span>${s.handled} Züge</span>
-        <div class="bar"><div style="width:${p}%;background:${p < 70 ? '#d9534f' : o.color}"></div></div><span class="${p < 70 ? 'no' : 'ok'}">${p} %</span></div>`;
-    }).join('') || '<div class="ct-empty">Noch keine Züge abgefertigt.</div>';
-  const cOk = g.stats.connOk ?? 0, cMiss = g.stats.connMissed ?? 0, conn = cOk + cMiss;
-  const cP = conn ? Math.round((cOk / conn) * 100) : 0;
+  const tab = statsView.tab;
+  const tabs = `<div class="st-tabs">${([['money', 'Finanzen'], ['ops', 'Betrieb'], ['ach', `Erfolge ${g.achievements.length}/${ACHIEVEMENTS.length}`]] as const)
+    .map(([id, l]) => `<button class="btn${tab === id ? ' on' : ''}" data-sttab="${id}">${l}</button>`).join('')}</div>`;
+  const days = g.history.slice(-14);
+  const lbl = days.map((d) => `Tag ${d.day + 1}`);
+  if (tab === 'money') {
+    const week = days.slice(-7);
+    const max = Math.max(1, ...week.map((d) => Math.max(d.income, d.expense)));
+    const bars = week.map((d) => {
+      const bal = d.income - d.expense;
+      return `<div class="st-day" title="Tag ${d.day + 1}: Einnahmen ${eur(d.income)} €, Ausgaben ${eur(d.expense)} €"><div class="st-bars"><div class="st-in" style="height:${(d.income / max) * 100}%"></div><div class="st-out" style="height:${(d.expense / max) * 100}%"></div></div>
+        <b class="${bal >= 0 ? 'ok' : 'no'}">${bal >= 0 ? '+' : '−'}${eur(Math.abs(bal))}</b><small>Tag ${d.day + 1}</small></div>`;
+    }).join('');
+    const cash = days.map((d) => d.cash ?? 0);
+    const shop = days.reduce((a, d) => a + (d.shop ?? 0), 0), inc = days.reduce((a, d) => a + d.income, 0), out = days.reduce((a, d) => a + d.expense, 0);
+    return `${tabs}<div class="st-kpis"><div><b class="ok">+${eur(inc)} €</b><small>Einnahmen</small></div><div><b class="no">−${eur(out)} €</b><small>Ausgaben</small></div>
+      <div><b>${eur(shop)} €</b><small>davon Läden</small></div><div><b class="${inc - out >= 0 ? 'ok' : 'no'}">${inc - out >= 0 ? '+' : '−'}${eur(Math.abs(inc - out))} €</b><small>Bilanz (${days.length} Tage)</small></div></div>
+      <div class="st-sec">Kontostand</div>${lineChart(cash, lbl, (v) => `${eur(v)} €`, '#e0b84a', true)}
+      ${catsHtml(days)}
+      <div class="st-sec" title="grün Einnahmen, rot Ausgaben">Tagesbilanz</div><div class="st-days">${bars}</div>`;
+  }
+  if (tab === 'ops') {
+    const ops = Object.entries(g.stats.opStats ?? {}).filter(([, s]) => s.handled > 0)
+      .sort((a, b) => b[1].handled - a[1].handled)
+      .map(([id, s]) => {
+        const o = OPERATORS[id as keyof typeof OPERATORS];
+        const p = Math.round((s.punctual / s.handled) * 100);
+        return `<div class="st-op"><span class="dot" style="background:${o.color}"></span><span>${o.name}</span><span>${s.handled} Züge</span>
+          <div class="bar"><div style="width:${p}%;background:${p < 70 ? '#d9534f' : o.color}"></div></div><span class="${p < 70 ? 'no' : 'ok'}">${p} %</span></div>`;
+      }).join('') || '<div class="ct-empty">Noch keine Züge abgefertigt.</div>';
+    const cOk = g.stats.connOk ?? 0, cMiss = g.stats.connMissed ?? 0, conn = cOk + cMiss;
+    const cP = conn ? Math.round((cOk / conn) * 100) : 0;
+    const punct = days.map((d) => (d.handled ? Math.round((d.punctual / d.handled) * 100) : 100));
+    return `${tabs}<div class="st-two"><div><div class="st-sec">Pünktlichkeit</div>${lineChart(punct, lbl, (v) => `${v} %`, '#6fbf73')}</div>
+      <div><div class="st-sec">Fahrgäste</div>${lineChart(days.map((d) => d.pax), lbl, (v) => v.toLocaleString('de-AT'), '#8fd0ff', true)}</div></div>
+      <div class="st-sec">Pünktlichkeit je Unternehmen</div><div class="st-ops">${ops}</div>
+      ${conn ? `<div class="st-sec">Anschlüsse</div><div class="st-ops"><div class="st-op"><span>erreicht ${cOk}</span><span>verpasst ${cMiss}</span>
+        <div class="bar"><div style="width:${cP}%;background:${cP < 80 ? '#d9534f' : '#3fa34d'}"></div></div><span class="${cP < 80 ? 'no' : 'ok'}">${cP} %</span></div></div>` : ''}`;
+  }
   const ach = ACHIEVEMENTS.map((a) => {
     const on = g.achievements.includes(a.id);
     return `<div class="st-ach${on ? ' on' : ''}" title="${a.info}"><span class="slot"><img src="${ICON(a.icon)}" alt="" /></span><b>${a.name}</b><small>${a.info}</small></div>`;
   }).join('');
-  return `<div class="st-sec">Tagesbilanz <small>(grün Einnahmen, rot Ausgaben)</small></div><div class="st-days">${bars}</div>
-    <div class="st-sec">Pünktlichkeit je Unternehmen</div><div class="st-ops">${ops}</div>
-    ${conn ? `<div class="st-sec">Anschlüsse</div><div class="st-ops"><div class="st-op"><span>erreicht ${cOk}</span><span>verpasst ${cMiss}</span>
-      <div class="bar"><div style="width:${cP}%;background:${cP < 80 ? '#d9534f' : '#3fa34d'}"></div></div><span class="${cP < 80 ? 'no' : 'ok'}">${cP} %</span></div></div>` : ''}
-    <div class="st-sec">Erfolge ${g.achievements.length}/${ACHIEVEMENTS.length}</div><div class="st-achs">${ach}</div>`;
+  return `${tabs}<div class="st-achs">${ach}</div>`;
 }
 
 /** Tooltip einer Forschung */
@@ -134,27 +181,39 @@ export function contractsKey(g: Game) {
   return contractOps(g).map((o) => {
     const c = g.contracts[o.id];
     return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
-  }).join('|') + Object.values(g.contracts).map((c) => `${+!!c.service}${c.lines ?? 1}`).join('') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}`;
+  }).join('|') + Object.values(g.contracts).map((c) => `${+!!c.service}${c.lines ?? 1}`).join('') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}i${g.inspectors}${g.researched('ticket')}`;
 }
 
 /** Personal: eigene Instandhalter */
 function crewHtml(g: Game) {
   if (!g.researched('crew')) {
-    return `<div class="ct-crew off"><img src="${ICON('tool_shovel')}" alt="" /><div><b>Instandhaltungsteam</b><small>Erforsche „Die Schrauber-Brigade“ (Stellwerk), um eigene Instandhalter einzustellen. Bis dahin: Störung anklicken und Störtrupp rufen.</small></div></div>`;
+    return `<div class="ct-crew off" title="Erforsche „Die Schrauber-Brigade“ (Stellwerk), um eigene Instandhalter einzustellen. Bis dahin: Störung anklicken und Störtrupp rufen."><img src="${ICON('tool_shovel')}" alt="" /><div><b>Instandhaltungsteam</b><small>noch nicht erforscht</small></div></div>`;
   }
   const n = g.crew;
   const workers = Array.from({ length: Game_CREW_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}">${portrait(31 + i * 17, 28)}</span>`).join('');
   return `<div class="ct-crew"><img src="${ICON('tool_shovel')}" alt="" />
-    <div><b>Instandhaltungsteam</b><small>${n ? `rücken bei Störungen selbst aus · Reparatur ${g.repairMinutes} min · ${Math.round(15 * n)} % weniger Ausfälle` : 'noch niemand eingestellt'}${g.researched('crew2') ? ' · vorbeugende Wartung aktiv' : ''}</small></div>
+    <div title="${n ? `rücken bei Störungen selbst aus · Reparatur ${g.repairMinutes} min · ${Math.round(15 * n)} % weniger Ausfälle` : 'noch niemand eingestellt'}${g.researched('crew2') ? ' · vorbeugende Wartung aktiv' : ''}"><b>Instandhaltungsteam</b></div>
     <div class="cw-list">${workers}</div>
     <div class="ct-price"><button class="btn" data-crew="-1"${n <= 0 ? ' disabled' : ''}>−</button><span>${n}</span><button class="btn" data-crew="1"${n >= Game_CREW_MAX ? ' disabled' : ''}>+</button>
     <small>${eur(n * 250)} €/Tag</small></div></div>`;
 }
 const Game_CREW_MAX = 4;
 
+/** Kontrolleure (RM-FR-ECO-13) */
+function inspectorsHtml(g: Game) {
+  if (!g.researched('ticket')) return '';
+  const n = g.inspectors;
+  const workers = Array.from({ length: INSPECTOR_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}">${portrait(77 + i * 13, 28)}</span>`).join('');
+  return `<div class="ct-crew"><img src="${ICON('bld_statue')}" alt="" />
+    <div title="Erwischen ${Math.round(catchRate(n) * 100)} % der Schwarzfahrer · ${FINE} € je Erwischtem · bisher ${(g.stats.caught ?? 0).toLocaleString('de-AT')} von ${(g.stats.dodgers ?? 0).toLocaleString('de-AT')}"><b>Kontrolleure</b></div>
+    <div class="cw-list">${workers}</div>
+    <div class="ct-price"><button class="btn" data-insp="-1"${n <= 0 ? ' disabled' : ''}>−</button><span>${n}</span><button class="btn" data-insp="1"${n >= INSPECTOR_MAX ? ' disabled' : ''}>+</button>
+    <small>${eur(n * INSPECTOR_WAGE)} €/Tag</small></div></div>`;
+}
+
 export function contractsHtml(g: Game) {
   const ops = contractOps(g);
-  if (!ops.length) return crewHtml(g) + '<div class="ct-empty">Noch keine Verträge. Sobald dein Empfangsgebäude steht, gibt es eine Ausschreibung.</div>';
+  if (!ops.length) return crewHtml(g) + inspectorsHtml(g) + '<div class="ct-empty">Noch keine Verträge. Sobald dein Empfangsgebäude steht, gibt es eine Ausschreibung.</div>';
   const rows = ops.map((o) => {
     const c = g.contracts[o.id];
     const sat = Math.round(g.satisfaction[o.id]);
@@ -162,37 +221,35 @@ export function contractsHtml(g: Game) {
       const fair = fairPrice(o, cls);
       const v = c.price[cls];
       const tone = v > fair * 1.15 ? 'no' : v < fair * 0.95 ? 'ok' : '';
-      return `<div class="ct-price"><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="-10">−</button>
-        <span class="${tone}">${eur(v)} €</span><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="10">+</button>
-        <small>fair ${eur(fair)}</small></div>`;
+      return `<div class="ct-price" title="${cls === 'short' ? 'kurzer' : 'langer'} Zug · fair wären ${eur(fair)} € – zu teuer macht unzufrieden"><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="-10">−</button>
+        <span class="${tone}">${eur(v)} €</span><button class="btn" data-op="${o.id}" data-cls="${cls}" data-d="10">+</button></div>`;
     };
     const night = o.kind === 'night';
     const takt = night ? `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1"${(c.lines ?? 1) <= 1 ? ' disabled' : ''}>−</button>
       <span>${c.lines ?? 1} Linie${(c.lines ?? 1) > 1 ? 'n' : ''}</span><button class="btn" data-takt="${o.id}" data-d="-1"${(c.lines ?? 1) >= 3 ? ' disabled' : ''}>+</button>
-      <small>je Nacht 1 Zug pro Richtung</small></div>`
-      : `<div class="ct-price"><button class="btn" data-takt="${o.id}" data-d="1">−</button>
-      <span>${c.takt} min</span><button class="btn" data-takt="${o.id}" data-d="-1"${c.takt <= g.minTakt ? ' disabled' : ''}>+</button>
-      <small>${c.takt <= g.minTakt && g.minTakt > 15 ? 'öfter erst mit 2. Gleis' : ''}</small></div>`;
+</div>`
+      : `<div class="ct-price"${c.takt <= g.minTakt && g.minTakt > 15 ? ' title="öfter erst mit 2. Streckengleis"' : ''}><button class="btn" data-takt="${o.id}" data-d="1" title="seltener">−</button>
+      <span>${c.takt} min</span><button class="btn" data-takt="${o.id}" data-d="-1"${c.takt <= g.minTakt ? ' disabled' : ''} title="öfter">+</button></div>`;
     let status: string;
     if (c.status === 'active') {
       const risk = cancelRisk(o, c, sat);
-      status = risk > 0 ? `<span class="no">⚠ Kündigung droht (${Math.round(risk * 100)} %/h)</span>` : '<span class="ok">Vertrag läuft</span>';
+      status = risk > 0 ? `<span class="no" title="Kündigung droht: ${Math.round(risk * 100)} % je Stunde – Preis senken oder pünktlicher werden">⚠ ${Math.round(risk * 100)} %/h</span>` : '<span class="ok" title="Vertrag läuft">✓</span>';
     } else if (g.sim.time < c.talkAfter) {
-      status = `<span class="no">gekündigt · Gespräch ab ${fmtTime(c.talkAfter)}</span>`;
+      status = `<span class="no" title="gekündigt – neues Gespräch ab ${fmtTime(c.talkAfter)}">✗ ${fmtTime(c.talkAfter)}</span>`;
     } else {
       const ch = Math.round(acceptChance(o, c, sat) * 100);
-      status = `<button class="btn ct-offer" data-offer="${o.id}">Angebot senden · ${ch} %</button>`;
+      status = `<button class="btn ct-offer" data-offer="${o.id}" title="Angebot senden – Chance ${ch} %">Angebot · ${ch} %</button>`;
     }
     return `<div class="ct-row${c.status === 'active' ? '' : ' off'}">
-      <div class="ct-name"><span class="dot" style="background:${o.color}"></span><div><b>${o.name}</b><small>${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}</small></div></div>
-      <div><small class="ct-lbl">${night ? 'Nachtlinien' : 'Takt'}</small>${takt}</div>
-      <div><small class="ct-lbl">kurzer Zug</small>${price('short')}</div>
-      <div><small class="ct-lbl">langer Zug</small>${price('long')}</div>
-      <div class="ct-sat"><small class="ct-lbl">Zufriedenheit</small><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
-      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Abstellen &amp; Pflege</button>` : ''}${c.status === 'active' && canBoost(o, g.sim.taktOf(o.id)) ? `<button class="btn ct-svc${c.boost ? ' on' : ''}" data-boost="${o.id}" data-tt="Verstärkerzüge: In der Stoßzeit (6–9 und 16–19 Uhr) schickt ${o.name} zusätzlich einen Zug zwischen zwei Regelzügen – mehr Halte, mehr Einnahmen, aber auch mehr Betrieb. Nur einschalten, wenn der Bahnhof genug Bahnsteige hat.">${c.boost ? '✓' : '○'} Verstärker in der Stoßzeit</button>` : ''}</div>
+      <div class="ct-name" title="${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}"><span class="dot" style="background:${o.color}"></span><b>${o.name}</b></div>
+      <div${night ? ' title="Nachtlinien: je Nacht 1 Zug pro Richtung"' : ''}>${takt}</div>
+      <div>${price('short')}</div>
+      <div>${price('long')}</div>
+      <div class="ct-sat" title="Zufriedenheit ${sat} %"><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
+      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Pflege</button>` : ''}${c.status === 'active' && canBoost(o, g.sim.taktOf(o.id)) ? `<button class="btn ct-svc${c.boost ? ' on' : ''}" data-boost="${o.id}" data-tt="Verstärkerzüge: In der Stoßzeit (6–9 und 16–19 Uhr) schickt ${o.name} zusätzlich einen Zug zwischen zwei Regelzügen – mehr Halte, mehr Einnahmen, aber auch mehr Betrieb. Nur einschalten, wenn der Bahnhof genug Bahnsteige hat.">${c.boost ? '✓' : '○'} Verstärker</button>` : ''}</div>
     </div>`;
   }).join('');
-  return crewHtml(g) + rows;
+  return crewHtml(g) + inspectorsHtml(g) + `<div class="ct-row ct-headrow"><span>Unternehmen</span><span>Takt</span><span>kurzer Zug</span><span>langer Zug</span><span>Zufriedenheit</span><span></span></div>` + rows;
 }
 
 /** Ausschreibung / Anfrage als Karten */

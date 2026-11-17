@@ -29,6 +29,10 @@ export interface Train {
   letPass?: boolean;
   /** festgelegten Bahnsteig ignorieren, irgendein freier passt */
   anyPlatform?: boolean;
+  /** Disposition: Bahnsteig nur für diesen Zug (RM-FR-OPS-12) */
+  platform?: string;
+  /** Disposition: frühestens zu dieser Spielzeit abfahren */
+  holdUntil?: number;
   dir: Dir;
   /** Sprite-Arten je Wagen ab Zugspitze (loco, coach, wagon0..2 …) */
   cars: string[];
@@ -690,7 +694,7 @@ export class Simulation {
           const f = c.filter((p) => this.net.paths(p[p.length - 1].to, el).length > 0);
           return f.length ? f : c;
         };
-        const pref = t.anyPlatform ? undefined : this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
+        const pref = t.anyPlatform ? undefined : t.platform ?? this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
         if (pref) {
           const c = through(this.net.pathsTo(from, (e) => ok(e) && e.stopRun!.id === pref, el));
           if (c.length) return c;
@@ -1036,6 +1040,10 @@ export class Simulation {
         if (!this.arrivedAt.has(t.waitFor) && this.time < (t.waitUntil ?? 0) && this.isComing(t.waitFor)) t.dwellLeft = 1;
         else { t.waitFor = undefined; t.waitUntil = undefined; }
       }
+      // Disposition: Abfahrt zurückhalten
+      if (t.dwellLeft <= 0 && t.holdUntil !== undefined) {
+        if (this.time < t.holdUntil) t.dwellLeft = 1; else t.holdUntil = undefined;
+      }
       if (t.dwellLeft <= 0) {
         const job = t.jobs.shift();
         t.state = 'running';
@@ -1165,7 +1173,7 @@ export class Simulation {
     // mit Abstellen (Wendezeit) fährt der Zug erst zur geplanten Rückfahrt, sonst nach der normalen Haltezeit
     const parks = !!t.ends || t.jobs.some((j) => j.k === 'park');
     const dep = parks ? this.plannedDeparture(t) : arr + (t.op.dwell + (t.passengers / 100) * 20) * this.dwellFactor;
-    return { arr, dep };
+    return { arr, dep: Math.max(dep, t.holdUntil ?? 0) };
   }
 
   /** alte Ankünfte vergessen */

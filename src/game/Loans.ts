@@ -58,7 +58,7 @@ export function payLoan(g: Game) {
   if (!l) return;
   const interest = Math.round(l.rest * l.rate);
   const share = Math.min(l.rest, Math.round(l.share));
-  g.money -= interest + share;
+  g.book('Zinsen', -(interest + share));
   l.rest -= share;
   l.daysLeft--;
   if (l.rest <= 0.5 || l.daysLeft <= 0) {

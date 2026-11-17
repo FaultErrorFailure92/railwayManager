@@ -71,11 +71,13 @@ export interface UiState {
   menu: boolean;
   /** Zug auf der Karte angeklickt (Bildschirmposition) */
   trainClick?: { id: number; x: number; y: number } | null;
+  /** Fahrgast angeklickt (Objektkarte, RM-FR-CPX-04) */
+  personClick?: number | null;
   /** eingeblendete Ebene (RM-FR-UI-12) */
   layer?: Layer;
 }
 
-/** Ebenen-Ansicht (RM-FR-UI-12) – Taste E schaltet weiter */
+/** Ebenen-Ansicht (RM-FR-UI-12) – Taste Ü schaltet weiter */
 export type Layer = 'occupancy' | 'pax' | 'mood' | 'wear';
 export const LAYERS: { id: Layer; name: string; legend: [string, string][] }[] = [
   { id: 'occupancy', name: 'Gleisbelegung', legend: [['#3fa34d', 'frei'], ['#ffb02e', 'belegt oder für einen Zug reserviert'], ['#d9534f', 'Störung']] },
@@ -345,16 +347,8 @@ export class GameScene extends Phaser.Scene {
   private setupInput() {
     this.input.mouse?.disableContextMenu();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT', false) as Record<string, Phaser.Input.Keyboard.Key>;
-    this.input.keyboard!.on('keydown-R', () => {
-      if (typing() || this.ui.menu) return;
-      if (VARIANTS[this.ui.tool]) this.ui.variant[this.ui.tool] = ((this.ui.variant[this.ui.tool] ?? 0) + 1) % VARIANTS[this.ui.tool]!.length;
-    });
+    // R (drehen) und T (Variante) behandelt die Oberfläche (BuildMenu.ts)
     this.input.keyboard!.on('keydown-ESC', () => { this.dragStart = null; });
-    // Q: Gebäude drehen
-    this.input.keyboard!.on('keydown-Q', () => {
-      if (typing() || this.ui.menu || this.ui.tool !== 'building') return;
-      this.g.buildRot = !this.g.buildRot;
-    });
 
     this.input.on('gameout', () => { this.ui.hoverTrain = null; this.hoverCell = null; if (!this.personPinned) this.ui.hoverPerson = null; });
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
@@ -390,6 +384,8 @@ export class GameScene extends Phaser.Scene {
         if (d && Math.hypot(p.x - d.x, p.y - d.y) < 5 && this.ui.tool === 'select') {
           const tr = this.trainAt(p.x, p.y);
           if (tr !== null) { this.ui.trainClick = { id: tr, x: p.x, y: p.y }; return; }
+          const pid = this.personAt(p.x, p.y);
+          if (pid !== null && pid !== undefined) { this.ui.personClick = pid; return; }
           const c = this.cellAt(p.x, p.y);
           if (c && this.g.repairFault(c.x, c.y)) return;
           const id = c ? this.g.grid.get(c.x, c.y)?.building : null;
