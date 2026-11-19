@@ -1,3 +1,4 @@
+import { fullOnly } from './Edition';
 /**
  * Spielerprofile (RM-FR-PROF-01/02): Firma + Spieler, Kampagnen-Fortschritt, freigespielte Karten.
  * Liegen im Browser (localStorage). Spielstände tragen die Profil-Id (storage.ts).
@@ -17,6 +18,10 @@ export interface Profile {
   stars?: Record<string, number>;
   /** Herausforderungen: Bestzeit in Minuten (RM-FR-MODE-08) */
   challenges?: Record<string, number>;
+  /** Neustart-Bonus fürs nächste freie Spiel in € (RM-FR-END-01) */
+  bonus?: number;
+  /** Erfolge über alle Spiele: Id → Tag der Vergabe (Dienstakte, Stempel) */
+  medals?: Record<string, number>;
 }
 
 const KEY = 'rm_profiles';
@@ -26,11 +31,11 @@ const ACTIVE = 'rm_profile';
 export const CHAPTERS: { map: string; title: string; topic: string; ready: boolean }[] = [
   { map: 'donau', title: 'Donautal', topic: 'Einstieg: der erste Bahnhof', ready: true },
   { map: 'ebene', title: 'Pannonische Ebene', topic: 'Güter und Takt', ready: true },
-  { map: 'revier', title: 'Industrierevier', topic: 'Betriebe und Rangieren', ready: false },
-  { map: 'schnee', title: 'Schneeland', topic: 'Wetter und Störungen', ready: false },
-  { map: 'alpen', title: 'Alpenbahn', topic: 'Berge und Tunnel', ready: false },
-  { map: 'wueste', title: 'Wüstenbahn', topic: 'Schnellverkehr, lange Strecken', ready: false },
-  { map: 'stadt', title: 'Großstadt', topic: 'Finale', ready: false },
+  { map: 'revier', title: 'Industrierevier', topic: 'Betriebe und Rangieren', ready: true },
+  { map: 'schnee', title: 'Schneeland', topic: 'Wetter und Störungen', ready: true },
+  { map: 'alpen', title: 'Alpenbahn', topic: 'Berge und Ausflugsverkehr', ready: true },
+  { map: 'wueste', title: 'Wüstenbahn', topic: 'Schnellverkehr, lange Strecken', ready: true },
+  { map: 'stadt', title: 'Großstadt', topic: 'Finale: alles auf einmal', ready: true },
 ];
 
 function read(): Profile[] {
@@ -53,14 +58,19 @@ export function setActive(id: string) {
   try { localStorage.setItem(ACTIVE, id); } catch { /* egal */ }
 }
 
+/** Profile wurden schon einmal eingerichtet (dann keine alten Spielstände mehr übernehmen) */
+const INIT = 'rm_profiles_init';
+export function profilesInitialized() { try { return localStorage.getItem(INIT) === '1'; } catch { return false; } }
+
 export function createProfile(company: string, player: Player): Profile {
+  try { localStorage.setItem(INIT, '1'); } catch { /* egal */ }
   const p: Profile = { id: `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, company: company.trim() || 'Meine Bahn AG', player, chapters: [], created: Date.now() };
   write([...read(), p]);
   setActive(p.id);
   return p;
 }
 
-export function updateProfile(id: string, patch: Partial<Pick<Profile, 'company' | 'player' | 'chapters' | 'stars' | 'challenges'>>) {
+export function updateProfile(id: string, patch: Partial<Pick<Profile, 'company' | 'player' | 'chapters' | 'stars' | 'challenges' | 'bonus' | 'medals'>>) {
   const list = read();
   const p = list.find((x) => x.id === id);
   if (!p) return;
@@ -77,6 +87,7 @@ export function deleteProfile(id: string) {
 /** Kapitel i spielbar? Erstes immer, sonst wenn das vorige geschafft ist */
 export function chapterOpen(p: Profile | undefined, i: number) {
   if (i === 0) return true;
+  if (fullOnly(i)) return false;
   return !!p && p.chapters.includes(CHAPTERS[i - 1].map);
 }
 
@@ -116,4 +127,16 @@ export function addStats(profileId: string | undefined, delta: Record<string, nu
   if (max !== undefined && Number.isFinite(max)) st.maxMoney = Math.max(st.maxMoney ?? -Infinity, max);
   if (min !== undefined && Number.isFinite(min)) st.minMoney = Math.min(st.minMoney ?? Infinity, min);
   write(list);
+}
+
+/** Neustart-Bonus gutschreiben / einlösen */
+export function addBonus(profileId: string, euro: number) {
+  const p = read().find((x) => x.id === profileId);
+  if (p) updateProfile(profileId, { bonus: Math.min(50000, (p.bonus ?? 0) + euro) });
+}
+export function takeBonus(profileId: string) {
+  const p = read().find((x) => x.id === profileId);
+  const b = p?.bonus ?? 0;
+  if (b) updateProfile(profileId, { bonus: 0 });
+  return b;
 }

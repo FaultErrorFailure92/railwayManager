@@ -48,9 +48,13 @@ describe('Disposition (RM-FR-OPS-12)', () => {
   it('meldet zwei Züge gleichzeitig am selben Bahnsteig als Konflikt', () => {
     const { g } = demoGame();
     fastForward(g, 2 * 3600);
-    const runs = g.platformRuns();
-    const s = dispoSlots(g).filter((x) => !x.locked);
-    const a = s[0], b = s.find((x) => x !== a && x.arr < a.dep + 600)!;
+    // Bahnsteige des Hauptbahnhofs (ohne Haltepunkt Nord an der Fremdbahn)
+    const runs = g.platformRuns().filter((r) => r.row > 26);
+    // a: ein Zug ohne Pflege-Zusatz (sein Halt lässt sich zurückhalten), b: ein anderer Zug kurz danach
+    const all = dispoSlots(g).filter((x) => !x.locked && !x.t.op.foreign);
+    const near = (x: typeof all[0], y: typeof all[0]) => y.t !== x.t && y.arr >= x.arr && y.arr < x.dep + 15 * 60;
+    const a = all.find((x) => !g.contracts[x.t.op.id].service && all.some((y) => near(x, y)))!;
+    const b = all.find((y) => near(a, y))!;
     expect(b).toBeDefined();
     setTrainPlatform(g, a.t, runs[0].id);
     setTrainPlatform(g, b.t, runs[0].id);

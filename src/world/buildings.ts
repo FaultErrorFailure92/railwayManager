@@ -52,6 +52,8 @@ const defs: BuildingDef[] = [
   { key: 'bld_statue', label: 'Denkmal', effect: 'Deko', w: 1, h: 1, cost: 900, onPlatform: false, group: 'deco', demolish: 100 },
   { key: 'bld_lamp', label: 'Laterne', effect: 'Deko am Bahnsteig · leuchtet in der Nacht', w: 1, h: 1, cost: 120, onPlatform: true, group: 'deco', demolish: 20 },
   { key: 'bld_clock', label: 'Bahnhofsuhr', effect: 'Wartende etwas geduldiger', w: 1, h: 1, cost: 400, onPlatform: true, group: 'func', demolish: 50 },
+  { key: 'bld_board', label: 'Zugzielanzeiger', effect: 'Wartende wissen Bescheid – mehr Komfort', w: 1, h: 1, cost: 900, onPlatform: true, group: 'func', demolish: 80 },
+  { key: 'bld_canopy', label: 'Bahnsteigdach', effect: 'Wetterschutz – bei Regen und Schnee doppelt so viel Komfort', w: 1, h: 1, cost: 300, onPlatform: true, group: 'func', demolish: 60 },
   { key: 'bld_sawmill', label: 'Sägewerk', effect: 'Privatbahn: Ladegleis mit deiner Strecke verbinden – zahlt für jede Fahrt', w: 3, h: 2, cost: 0, onPlatform: false, group: 'industry', demolish: 0, fixed: true },
   { key: 'bld_mine', label: 'Bergwerk', effect: 'Privatbahn: Ladegleis mit deiner Strecke verbinden – zahlt für jede Fahrt', w: 3, h: 2, cost: 0, onPlatform: false, group: 'industry', demolish: 0, fixed: true },
   { key: 'bld_streetlamp', label: 'Straßenlaterne', effect: 'Deko · leuchtet in der Nacht', w: 1, h: 1, cost: 150, onPlatform: false, group: 'deco', demolish: 20 },
@@ -75,12 +77,17 @@ const defs: BuildingDef[] = [
   { key: 'bld_drybush', label: 'Dornbusch', effect: 'Landschaft', w: 1, h: 1, cost: 10, onPlatform: false, group: 'nature', demolish: 10 },
   { key: 'bld_snowpine0', label: 'Verschneite Tanne', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
   { key: 'bld_snowpine1', label: 'Verschneite Tanne', effect: 'Landschaft', w: 1, h: 1, cost: 40, onPlatform: false, group: 'nature', demolish: 30 },
+  { key: 'bld_cityA', label: 'Stadthaus', effect: 'Deko', w: 2, h: 2, cost: 1500, onPlatform: false, group: 'deco', demolish: 900 },
+  { key: 'bld_cityB', label: 'Stadthaus mit Geschäft', effect: 'Deko', w: 2, h: 2, cost: 1800, onPlatform: false, group: 'deco', demolish: 1000 },
+  { key: 'bld_cityC', label: 'Eckhaus mit Lokal', effect: 'Deko', w: 2, h: 2, cost: 1400, onPlatform: false, group: 'deco', demolish: 800 },
+  { key: 'bld_slab', label: 'Wohnblock', effect: 'Deko', w: 2, h: 2, cost: 1600, onPlatform: false, group: 'deco', demolish: 1100 },
+  { key: 'bld_office', label: 'Bürohochhaus', effect: 'Deko', w: 2, h: 2, cost: 3000, onPlatform: false, group: 'deco', demolish: 2000 },
 ];
 
 export const BUILDINGS: Record<string, BuildingDef> = Object.fromEntries(defs.map((d) => [d.key, d]));
 
 /** Auswahl im Baumenü */
-export const BUILD_MENU = ['bld_station', 'bld_shelter', 'bld_kiosk', 'bld_vending', 'bld_cafe', 'bld_wc', 'bld_inn', 'bld_souvenir', 'bld_lockers', 'bld_bench', 'bld_clock',
+export const BUILD_MENU = ['bld_station', 'bld_shelter', 'bld_canopy', 'bld_kiosk', 'bld_vending', 'bld_cafe', 'bld_wc', 'bld_inn', 'bld_souvenir', 'bld_lockers', 'bld_bench', 'bld_clock', 'bld_board',
   'bld_parking', 'bld_bus', 'bld_billboard', 'bld_lamp', 'bld_streetlamp', 'bld_flowers', 'bld_fountain', 'bld_statue', 'bld_mural', 'bld_xmas',
   'bld_houseA', 'bld_houseB', 'bld_tree0', 'bld_pine0', 'bld_bush0'];
 
@@ -89,7 +96,7 @@ export const isStation = (key: string) => key === 'bld_station' || key === 'bld_
 /** Gebäude, die erst erforscht werden müssen */
 export const BUILDING_RESEARCH: Record<string, string> = {
   bld_parking: 'road', bld_bus: 'road', bld_lamp: 'light', bld_streetlamp: 'light', bld_flowers: 'green', bld_tree0: 'green', bld_pine0: 'green', bld_bush0: 'green',
-  bld_fountain: 'water', bld_statue: 'monument', bld_clock: 'clock', bld_bench: 'bench', bld_shelter: 'bench', bld_mural: 'art', bld_xmas: 'season',
+  bld_fountain: 'water', bld_statue: 'monument', bld_clock: 'clock', bld_board: 'clock', bld_canopy: 'bench', bld_bench: 'bench', bld_shelter: 'bench', bld_mural: 'art', bld_xmas: 'season',
   bld_kiosk: 'kiosk', bld_vending: 'kiosk', bld_cafe: 'cafe', bld_wc: 'wc', bld_inn: 'inn', bld_billboard: 'ads', bld_lockers: 'lockers', bld_souvenir: 'souvenir',
 };
 

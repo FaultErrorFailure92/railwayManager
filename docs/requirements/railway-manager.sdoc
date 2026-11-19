@@ -284,14 +284,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MAP-12
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Mehr Platz quer zur Strecke
 STATEMENT: >>>
 Das Spielfeld muss quer zur Strecke doppelt so groß werden (von 256 × 64 auf 256 × 128 Felder), damit große Rangierbahnhöfe, Abzweige und die Großstadt Platz haben. Die Leistung muss dabei erhalten bleiben (RM-FR-Q-01).
 <<<
+SOURCE: src/config.ts (MAP_H 128, ROW0), src/world/maps.ts (lift), src/world/Grid.ts (generateTerrain), src/game/saveMigrate.ts, test/grow.test.ts
 COMMENT: >>>
-Heute ist ein großer Rangierbahnhof kaum möglich (MAP_H = 64 in src/config.ts).
+Umgesetzt 18.11.2026: 256 × 128 Felder. Die bisherigen Karten liegen in der Mitte (32 Reihen Versatz, Strecke jetzt Reihe 63/64); oben und unten neue Streifen mit Dörfern, Seen, Wäldern, Felsrändern bis an den Kartenrand und durchgehenden Straßen. Gelände der Mitte bleibt gleich (Rauschen in alten Koordinaten). Spielstände Format 5 werden beim Laden auf Format 6 gehoben (alles verschoben, Züge fahren weiter, neue Streifen mit Landschaft). Eigene Karten aus der Kartenwerkstatt werden ebenfalls verschoben. Leistung: Referenz-Bahnhof Ø ≈ 2,6 ms je Bild (vorher 3,9 ms – dabei gleich zwei Bremsen gefunden: teurer Vergleich beim Rückgängig-Merken, Wegsuche bei belegter Einfahrt).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -346,26 +347,34 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MAP-08
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Straßen mit Verkehr
 STATEMENT: >>>
 Karten müssen vorhandene Straßen mit Fahrzeugen passend zum Thema haben. Bahnübergänge und Busterminals müssen daran angeschlossen werden können.
 <<<
-SOURCE: aufgaben.md AP6
+SOURCE: src/world/maps.ts (roads, vehicles), src/world/Grid.ts (addPublicRoads), src/render/GameScene.ts (moveTraffic), src/game/Game.ts, test/roads.test.ts
+COMMENT: >>>
+Jede Karte hat zwei öffentliche Straßen quer zur Strecke mit Fahrzeugen passend zum Thema (Traktor, Lieferwagen, Jeep, Schneepflug, Taxi, Autos). Bahnübergänge schließen, sobald ein Zug den Abschnitt reserviert hat; Fahrzeuge warten. Eigene Gleise über die Straße kosten zusätzlich einen Bahnübergang (400 €), Weichen, Bahnsteige und Gebäude sind dort nicht erlaubt, abreißen geht nicht. Eigene Straße vom Bahnhof bis zur Gemeindestraße: +5 % Einnahmen und mehr Laufkundschaft.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-12
 
 [FR]
 UID: RM-FR-MAP-09
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Andere Bahnen zum Anschließen
 STATEMENT: >>>
 Pro Karte muss es eine oder mehrere weitere Bahnstrecken geben, an die man sich anschließen kann. Anschlüsse müssen über einen eigenen, vierten Forschungsstrang freigeschaltet werden, damit man nicht beliebig viele baut.
 <<<
-SOURCE: aufgaben.md AP6
+SOURCE: src/world/foreign.ts, src/world/maps.ts (foreignLines), src/world/Grid.ts (placeForeignLines), src/world/Network.ts (Edge.line), src/sim/Simulation.ts (deco, via, exitsFrom), src/game/Foreign.ts, src/ui/Screens.ts, test/foreign.test.ts
+COMMENT: >>>
+Fremdbahnen „Lokalbahn Nord“ (ln) und „Lokalbahn Süd“ (ls), je Karte mit eigenem Namen; Alpenbahn nur Nord. Sie laufen an den Kartenrändern in Reihe 6 bzw. 57 und kommen im Bogen (Kurve, Diagonalen, Kurve) bis Reihe 20 bzw. 43 heran; der nahe, gerade Abschnitt (Spalten 100–156) liegt eine Parzellenreihe neben dem Startgelände. Eigene Ein-/Ausfahrten; Hauptstrecken-Züge fahren nie über sie aus, Fremdbahn-Züge nie über die Hauptstrecke. Signale des Netzbetreibers an beiden Enden des nahen Abschnitts. Alte Spielstände bekommen die Strecken nachgerüstet, wo das Land frei und nicht gekauft ist.
+Ohne Vertrag fahren ihre Züge alle 3 h als Kulisse vorbei (keine Kasse, keine Statistik, nicht in Listen; bleiben sie hängen, verschwinden sie still).
+Anschluss = Weiche von der Fremdbahn auf eigene Gleise oder Bahnsteig mit Zugang direkt an ihrer Strecke. Dann (mit freiem Anschluss aus RM-FR-PROG-06) ruft der Betreiber an: Anschlussvertrag mit Takt, Preis und Modus. Halten: Züge halten, wenden bei Bedarf (zwei Führerstände) und fahren auf ihre Strecke zurück; jede haltende Fremdbahn bringt +5 % Fahrgäste für alle Züge (Umsteiger). Durchfahren: ohne Halt über deine Gleise, 60 % des Preises. Erreicht ein Zug den Bahnsteig nicht (Weiche nur in eine Richtung), fährt er ohne Strafe vorbei, mit Hinweis im Protokoll. Anschluss abgebaut → Vertrag endet.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-12
@@ -385,13 +394,29 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MAP-11
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Großstadt-Karte
 STATEMENT: >>>
 Es muss eine siebte Karte mit Großstadt geben, in der man unter Hochbahnen und über Straßenbahnen und Verkehr hinweg bauen muss. Sie ist das Finale der Kampagne.
 <<<
-SOURCE: aufgaben.md AP6
+SOURCE: src/world/maps.ts, src/world/Grid.ts (viaductAt), src/render/GameScene.ts (moveMetro), tools/buildgen.py, test/viaduct.test.ts
+COMMENT: >>>
+Karte „Großstadt“ mit dichten Häuserblöcken, Kanal, zwei Gemeindestraßen mit Autos und Bahnübergang sowie einer Hochbahn quer über das Startgelände: darunter dürfen Gleise und Bahnsteig-Ausstattung liegen, aber keine Gebäude; die Pfeiler blockieren. Oben pendelt ein U-Bahn-Zug. Die Straßenbahn ist als RM-FR-MAP-13 eigene Anforderung.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-12
+
+[FR]
+UID: RM-FR-MAP-13
+STATUS: Neu
+PRIORITY: Später
+TITLE: Straßenbahn in der Großstadt
+STATEMENT: >>>
+In der Großstadt muss eine Straßenbahn auf einer Straße fahren, die die Strecke kreuzt. Gleise über die Straßenbahn bauen geht nur mit Brücke oder Bahnübergang mit Vorrang-Regel.
+<<<
+SOURCE: aufgaben.md AP6 (Großstadt)
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-12
@@ -408,7 +433,10 @@ TITLE: Gleisbau
 STATEMENT: >>>
 Es müssen Gleise, Kurven, Diagonalen, Weichen (auch schräge und Schnellfahrweichen), Gleiswechsel und Kreuzungen gebaut werden können. Die Richtung muss beim Ziehen automatisch erkannt werden.
 <<<
-SOURCE: src/world/pieces.ts, Grid.ts
+SOURCE: src/world/pieces.ts, src/world/Grid.ts, src/game/Game.ts, test/loops.test.ts
+COMMENT: >>>
+Kreuzungsstellen des Netzbetreibers (Fehlermeldung 17.11.2026): Nach dem zweigleisigen Ausbau baut der Netzbetreiber jede Kreuzungsstelle ab, sobald ihre Weichen gerade nicht befahren sind – Weichen und Signale verschwinden, auch auf deinem Gelände, beide Streckengleise laufen durch. Das 2. Gleis auf deinem Gelände gehört danach dir; Gleiswechsel und Anschlüsse sind dort möglich. Solange eingleisig, sind Kreuzungsstellen tabu (nicht seitlich anschließen, Weichen/Signale nicht abreißen).
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-01
@@ -547,14 +575,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-BUILD-13
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Kopieren und Vorlagen
 STATEMENT: >>>
 Ein Bereich mit Gleisen, Weichen, Signalen und Bahnsteigen muss kopiert und woanders eingefügt werden können. Häufige Bereiche müssen als eigene Vorlage gespeichert werden können.
 <<<
+SOURCE: src/game/Templates.ts, src/game/Game.ts, src/render/GameScene.ts, src/ui/BuildMenu.ts, test/medals.test.ts
 COMMENT: >>>
-Praktisch für große Rangierbahnhöfe.
+Baumenü 9 „Abriss & Kopieren“ → „Kopieren & Vorlagen“: Bereich aufziehen kopiert eigene Gleise, Weichen, Signale, Bahnsteige und Fahrdraht (feste Strecke des Netzbetreibers nicht). Die neueste Kopie wird Vorlage 1, drei Vorlagen bleiben im Browser gespeichert (über alle Spiele). Einfügen per Klick (links oben), Fläche muss gekauft und frei sein; Kosten wie beim Einzelbau.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -578,14 +607,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-BUILD-15
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Bahnsteig-Ausstattung
 STATEMENT: >>>
 Es müssen Bahnsteigdächer, Anzeigetafeln und Bahnhofsuhren gebaut werden können. Sie müssen die Zufriedenheit der Fahrgäste leicht erhöhen.
 <<<
+SOURCE: src/world/buildings.ts, src/game/Game.ts (updateRating), tools/buildgen.py (canopy, departure_board)
 COMMENT: >>>
-Freischalten über den Verschönerungsverein.
+Bahnsteigdach (Forschung „Sitzfleisch“, zählt bei Regen und Schnee doppelt), Zugzielanzeiger und Bahnhofsuhr (Forschung „Pünktlich wie die Uhr“). Alle zählen zum Komfort in der Bahnhofs-Bewertung.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -700,14 +730,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-OPS-10
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Güterwagen sortieren
 STATEMENT: >>>
 Güterzüge müssen aus Wagen mit Zielen bestehen. Am Abrollberg müssen Wagen nach Zielen auf Richtungsgleise sortiert und daraus neue Züge gebildet werden.
 <<<
+SOURCE: src/sim/Simulation.ts
 COMMENT: >>>
-Ursprüngliches Konzept „Zugbildung“. Lokwechsel, wenn überhaupt, nur hier.
+Abrollberg sortiert Wagen nach Ziel auf Richtungsgleise und bildet daraus neue Züge (sortedWagons).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -773,6 +804,22 @@ RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-02
 
+
+[FR]
+UID: RM-FR-OPS-15
+STATUS: Ist
+PRIORITY: 1.0
+TITLE: Dichter Verkehr ohne Stau
+STATEMENT: >>>
+Auch bei dichtem Verkehr (Verstärkerzüge in der Stoßzeit, zweigleisige Strecke) darf der Fahrdienstleiter keinen Stau zulassen, der das Spiel beendet, solange der Bahnhof genug Bahnsteige hat.
+<<<
+SOURCE: src/sim/Simulation.ts (spawn, candidatesRaw „stop“), test/blocksignals.test.ts
+COMMENT: >>>
+Befund 18.11.2026: Demobahnhof zweigleisig mit Verstärkern → Stau, Game Over (in 4 von 6 Läufen, teils auch ohne Verstärker). Ursache: Züge fuhren auf dem Gegengleis ein oder wendeten an einem Bahnsteig, von dem es nur auf dem Gegengleis weiterging. Jetzt zweigleisig: Einfahrt nur auf dem Richtungsgleis (sonst warten), Bahnsteige mit Weiterfahrt auf dem Richtungsgleis bevorzugt, Wendezüge wenden lieber dort, wo es danach auf dem Richtungsgleis zurückgeht. 12 von 12 Läufen ohne Stau, Pünktlichkeit 85–93 %.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-03
 [[/SECTION]]
 
 [[SECTION]]
@@ -906,14 +953,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-ECO-11
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Förderungen
 STATEMENT: >>>
 Land oder EU müssen per Brief Förderungen für bestimmte Ausbauten anbieten (z. B. Barrierefreiheit, Oberleitung), mit Bedingungen und Frist. Werden die Bedingungen nicht erfüllt, muss zurückgezahlt werden.
 <<<
+SOURCE: src/game/Grants.ts, src/game/Game.ts, src/game/Problems.ts, test/extras.test.ts
 COMMENT: >>>
-Passt zum Humor mit Briefen vom Amt.
+Angebot als Zeitungsanfrage (Annehmen/Ablehnen), nur wenn passend: Barrierefreiheit (5 000 €, 3 Tage), Fahrdraht auf allen eigenen Gleisen (6 000 €, 3 Tage), Busanbindung (4 000 €, 2 Tage). Geld sofort; Frist in „Was ist los?“; erfüllt → Brief, verfehlt → Rückforderung. Kategorie „Förderung“ in den Finanzen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -921,11 +969,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-ECO-12
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Personal mit Namen
 STATEMENT: >>>
 Personal (Instandhalter, Ladenpersonal, Kontrolleure) muss Namen und eine kleine Eigenschaft haben (z. B. schnell, gründlich, gesprächig), die die Arbeit beeinflusst.
+<<<
+SOURCE: src/game/Staff.ts, src/game/Game.ts, src/game/FareDodgers.ts, src/ui/Screens.ts, test/extras.test.ts
+COMMENT: >>>
+Instandhalter (Ferdl schnell, Gerti gründlich, Mehmet Tüftler, Rudi gesprächig) und Kontrolleure (Frau Streng, Herr Pfiffig, Karl Gutmütig, Resi Adlerauge) in fester Reihenfolge; Eigenschaft ändert Reparaturtempo, Ausfälle bzw. Fangquote. Name und Eigenschaft im Tooltip und Protokoll. Ladenpersonal noch ohne Namen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1012,14 +1064,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PROG-06
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Vierter Forschungsbaum „Anschlüsse“
 STATEMENT: >>>
 Es muss einen vierten Forschungsbaum für Anschlüsse geben: Anschlussbahnen, Privatbahnen, Straßen- und Busanbindung. Er begrenzt, wie viele Anschlüsse gebaut werden können.
 <<<
+SOURCE: src/game/Research.ts (Baum „link“), src/game/Foreign.ts (foreignSlots)
 COMMENT: >>>
-Aus aufgaben.md AP6. Hängt mit RM-FR-MAP-09 zusammen.
+Aus aufgaben.md AP6. Hängt mit RM-FR-MAP-09 zusammen. Umgesetzt nur für Fremdbahnen (Entscheidung 18.11.2026): Werke und Straße bleiben wie bisher. Baum „Abteilung Anschlussfragen“: Formular A38 (1. Anschluss) → Freie Fahrt für fremde Bahnen (Durchfahrt-Verträge) → Trassenpreis-Tango (+25 % Gebühren); Umsteigen ohne Umwege (+10 % statt +5 % Fahrgäste je haltender Fremdbahn) → Knotenpunkt-Träume (2. Anschluss).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1059,14 +1112,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PROG-09
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Mehr Erfolge
 STATEMENT: >>>
 Es muss etwa 40 Erfolge geben, verteilt auf Kampagne, freies Spiel und witzige Momente (z. B. „Pünktlich wie die Eisenbahn“, „Schwarzkappler des Monats“).
 <<<
+SOURCE: src/game/Achievements.ts, test/extras.test.ts
 COMMENT: >>>
-Heute 14 Erfolge (src/game/Achievements.ts).
+41 Erfolge: Pünktlichkeit und Serien, Fahrgäste, Fernzüge, Anschlüsse, Wenden/Abstellen/Pflege, Schwarzfahrer, Geld (auch Tiefpunkt), Kredit, Forschung, Bahnhofsstufen, Personal, Störungen, Spieltage, Schnee, Herausforderung, Sandkasten.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1090,15 +1144,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MODE-02
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Kampagne
 STATEMENT: >>>
 Die Kampagne muss aus sieben Kapiteln bestehen, eines pro Karte, mit eigener Ausgangslage und eigenen Aufträgen, nach steigender Schwierigkeit: 1. Donautal (Einstieg), 2. Pannonische Ebene (Güter, Takt), 3. Industrierevier (Betriebe, Rangieren), 4. Schneeland (Wetter, Störungen), 5. Alpenbahn (Berge, Tunnel), 6. Wüstenbahn (Schnellverkehr, lange Strecken), 7. Großstadt (Finale). Der Fortschritt wird im Spielerprofil gespeichert. Spielbar sind nur freigeschaltete Kapitel: ein abgeschlossenes Kapitel schaltet das nächste frei (wie in Age of Empires 2); abgeschlossene Kapitel können erneut gespielt werden.
 <<<
-SOURCE: src/game/Profiles.ts, src/game/Chapter2.ts, src/game/Game.ts, src/ui/Menus.ts, test/chapter2.test.ts
+SOURCE: src/game/Profiles.ts, src/game/Chapter2.ts, src/game/Chapters.ts, src/game/Game.ts, src/ui/Menus.ts, test/chapter2.test.ts
 COMMENT: >>>
-Teilweise umgesetzt: Kapitelkarten mit Kartenbild und Stempel, gesperrte Kapitel als kleine Kacheln (Details im Tooltip), Fortschritt im Profil. Kapitel 1 Donautal = Einschulung + Auftragsreihe. Kapitel 2 Pannonische Ebene spielbar: alle Donautal-Werkzeuge frei, Forschung neu, 5 Aufträge (Ankommen: Bahnhof + Personen- und Güterunternehmen; 15 Güterzüge; zweigleisig und 2 Unternehmen im 30-min-Takt; 15 Anschlüsse; 18 von 20 pünktlich). Offen: Kapitel 3–7, Großstadt-Karte (RM-FR-MAP-11).
+Alle 7 Kapitel spielbar, je eigene Auftragsreihe (Kapitel 2–7: alle Donautal-Werkzeuge frei, Forschung neu, 5 Aufträge). 2 Ebene: Güter und Takt, Anschlüsse. 3 Industrierevier: Privatbahn, Abrollberg (30 Wagen), 25 Güterzüge. 4 Schneeland: Weichenheizung + Instandhalter, 10 Störungen, 25 in Folge pünktlich, 4 Sterne. 5 Alpenbahn: Bahnhofsstufe + Fernzug, zweigleisig + Gleiswechsel, 30 000 Fahrgäste, 50 in Folge. 6 Wüstenbahn: Schnellfahrweichen, Fahrdraht überall, Fernverkehrsknoten. 7 Großstadt (Finale): S-Bahn-Takt (40 Fahrten), Knotenbahnhof + 30 Anschlüsse, 60 000 Fahrgäste + 3 Fernzug/S-Bahn-Verträge, Hauptbahnhof + 50 in Folge pünktlich. Nach Kapitel 7 Abschlussbrief und Stempel „Großstadtlegende“.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1160,9 +1214,25 @@ TITLE: Profil-Statistik
 STATEMENT: >>>
 Im Hauptmenü muss es eine Statistik über alle Spiele des Profils geben, gerne mit Augenzwinkern (z. B. „Insgesamt beförderte Fahrgäste“, „Geld insgesamt verschleudert“).
 <<<
-SOURCE: src/game/Lifetime.ts, src/game/Game.ts, test/profiles.test.ts
+SOURCE: src/game/Lifetime.ts, src/game/Game.ts, src/ui/Menus.ts, src/ui/IdCard.ts, test/profiles.test.ts
 COMMENT: >>>
-„Dienstakte“ (Hauptmenü → Statistik oder Account-Menü): Fahrgäste (in Fußballstadien), Züge und Pünktlichkeit, Verspätung (in Kaffeepausen), Geld verdient / verschleudert, Bauaufträge und Abrisse, Land, Ladenumsatz (in Melange), Störungen, Pflege, Anschlüsse, Tage im Dienst, Spiele, Rekord-Kontostand und Tiefpunkt. Zähler werden alle 30 s und beim Verlassen ins Profil übertragen.
+„Dienstakte“ (Hauptmenü → Statistik oder Account-Menü) als Mappe mit Reitern: Personalien (Dienstausweis, Personalnummer, Kapitel mit Sternen, Änderungsantrag), Laufbahn (Fahrgäste, Züge, Verspätung in Kaffeepausen, Geld, Bauaufträge, Land, Ladenumsatz, Störungen, Pflege, Anschlüsse, Tage im Dienst, Spiele) und Auszeichnungen (Stempel). Dienstausweis als Karte; beim Ändern direkt auf der Karte ausfüllen. Zähler werden alle 30 s und beim Verlassen ins Profil übertragen.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-14
+
+[FR]
+UID: RM-FR-PROF-04
+STATUS: Ist
+PRIORITY: 1.0
+TITLE: Auszeichnungen in der Dienstakte
+STATEMENT: >>>
+Erfolge müssen über alle Spiele eines Profils gesammelt und in der Dienstakte als Stempel vermerkt werden. Zusätzlich muss es Laufbahn-Auszeichnungen geben, die nur über mehrere Spiele erreichbar sind (Kampagne, Sterne, Herausforderungen, Dienstjahre).
+<<<
+SOURCE: src/game/Medals.ts, src/game/Lifetime.ts, src/ui/Menus.ts, src/style.css, test/medals.test.ts
+COMMENT: >>>
+Wunsch 17.11.2026. 41 Spiel-Erfolge (blaue Stempel, mit Datum der ersten Vergabe) und 13 Laufbahn-Auszeichnungen (rote Stempel), z. B. Eingeschult, Halbzeit, Kampagnen-Veteran, Sternenregen, Musterschüler, Mutprobe, Stammkunde (7 Tagesherausforderungen), Dienstjubiläum (100 Tage), Eine Million Fahrgäste. Abgleich alle 30 s und beim Öffnen der Dienstakte; neue Laufbahn-Stempel kommen per Brief. Offene Stempel gestrichelt mit Fragezeichen, Bedingung im Tooltip.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1170,11 +1240,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MODE-03
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Geschichte und Figuren
 STATEMENT: >>>
 Die Kampagne muss durch wiederkehrende Figuren (z. B. Vorstand, Bank, Unternehmen, Zeitung) erzählt werden, mit Briefen zwischen den Aufträgen.
+<<<
+SOURCE: src/game/Story.ts, src/game/Game.ts, test/medals.test.ts
+COMMENT: >>>
+Nach ausgewählten Aufträgen jedes Kapitels schreiben Vorstand (Hofrat Fahrplan), Bank (Direktor Groschen), Verkehrsverbund (Ing. Wagenstand) oder die Lokalzeitung einen kurzen Brief. Dazu die Kapitel-Start- und Abschlussbriefe.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1230,11 +1304,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MODE-07
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Sandbox
 STATEMENT: >>>
 Es muss einen Sandbox-Modus ohne Geld, Pleite und Forschungsgrenzen geben, zum entspannten Bauen.
+<<<
+SOURCE: src/game/Game.ts, src/game/FreePlay.ts, src/ui/Menus.ts, test/extras.test.ts
+COMMENT: >>>
+Freies Spiel → Schalter „Sandkasten“: 9 999 999 € und automatisch nachgefüllt, keine Pleite, Forschung ohne Punkte, Kosten und Wartezeit.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1336,11 +1414,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-EVT-07
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Stammgäste
 STATEMENT: >>>
 Es muss Stammgäste mit Namen geben, die regelmäßig zu festen Zeiten fahren und sich per Brief bedanken oder beschweren (z. B. Pendlerin Frau Huber, die immer den 7:12er nimmt).
+<<<
+SOURCE: src/game/Regulars.ts, src/game/Game.ts, test/extras.test.ts
+COMMENT: >>>
+5 Stammgäste mit fester Stunde (5, 7, 10, 13, 18 Uhr). Der erste passende Personenzug des Tages zählt: 5× pünktlich → Dankesbrief mit 200 € Trinkgeld, 2× verspätet → Beschwerde und Zufriedenheit des Unternehmens −3.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1380,14 +1462,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-EVT-10
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Jahreszeiten
 STATEMENT: >>>
 Es muss Jahreszeiten mit eigener Optik (Laub, Schnee, Blüten) und eigenem Verkehr geben (z. B. Ausflugsverkehr im Sommer).
 <<<
+SOURCE: src/game/Seasons.ts, src/game/Game.ts, src/ui/Hud.ts, test/seasons.test.ts
 COMMENT: >>>
-Heute gibt es Wetter, aber keine Jahreszeiten.
+Je 7 Spieltage eine Jahreszeit (Start Frühling). Optik: Farbton über dem Spielfeld (Herbst warm, Winter blass) und Symbol neben dem Tag. Wetter: Sommer kein Schnee, weniger Regen; Herbst mehr Regen; Winter viel Schnee. Verkehr: Sommer +15 % Regional/S-Bahn/Fernzug, Museumsbahn +40 %; Winter −5 %. Wechsel mit Zeitungsmeldung. Eigene Grafiken (Laub, Blüten, verschneite Bäume) folgen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1507,9 +1590,9 @@ TITLE: Einstellungen
 STATEMENT: >>>
 Es muss ein Einstellungsfenster geben: Lautstärke getrennt für Musik und Geräusche, Bildlauf-Tempo, Tastenbelegung, Schriftgröße, Sprache.
 <<<
-SOURCE: src/game/settings.ts
+SOURCE: src/game/settings.ts, src/ui/Hud.ts, index.html
 COMMENT: >>>
-Teilweise umgesetzt: Fenster mit Oberflächengröße (statt Schriftgröße), Lautstärke Musik und Geräusche getrennt, Bildlauf-Tempo, hoher Kontrast, Bauanimationen. Offen: Tastenbelegung, Sprache (mit RM-FR-UI-07).
+Lautstärke Musik/Geräusche, Bildlauf-Tempo, Oberflächengröße (Schriftgröße), hoher Kontrast, Bauanimationen, Farbenblind-Modus, Töne als Symbol und Tastenbelegung (10 Aktionen, Taste anklicken und neue drücken, Tausch bei Doppelbelegung, „Standard“). Hilfe und Hinweise zeigen die eigene Belegung. Offen: Sprache (kommt mit RM-FR-UI-07).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1565,11 +1648,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-UI-13
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Barrierefreiheit
 STATEMENT: >>>
 Signale und Markierungen müssen auch bei Farbenblindheit unterscheidbar sein (z. B. Formen statt nur Farben). Wichtige Töne müssen auch als Symbol angezeigt werden.
+<<<
+SOURCE: src/game/settings.ts, src/style.css, src/render/GameScene.ts, src/render/Sound.ts, src/ui/Hud.ts
+COMMENT: >>>
+Einstellung „Farbenblind-Modus“: Ampeln mit Zeichen (! ▲ ✓ i), Kennzahlen mit ▲/▼, Signale auf der Karte mit ■ (Halt) und ▲ (Fahrt); Konflikte im Fahrplan mit Kreuz und Rahmen. „Töne als Symbol“: Gong, Pfiff und Kasse als kurzes Zeichen oben.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1593,14 +1680,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-UI-15
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Filter und Shader
 STATEMENT: >>>
 Es muss wählbare Darstellungsfilter geben (z. B. Röhrenbildschirm mit Scanlines, Farbpaletten wie Game Boy oder Sepia, leichtes Wackeln bei Dampf). Filter müssen abschaltbar sein und dürfen die Leistung kaum belasten.
 <<<
+SOURCE: src/game/settings.ts, src/ui/Hud.ts, index.html, src/style.css
 COMMENT: >>>
-Spaß-Faktor, solange die Sprites noch generiert sind.
+Einstellungen → Filter: Aus, Röhre (Scanlines, Vignette, kräftigere Farben), Game Boy (4 Grüntöne per SVG-Filter), Sepia. Reine CSS-Filter, kaum Leistung. Wackeln bei Dampf: nicht umgesetzt.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1672,17 +1760,25 @@ TITLE: Ein Kapitel, ein neues System
 STATEMENT: >>>
 Jedes Kampagnenkapitel darf höchstens ein bis zwei neue Systeme einführen. Vorher sind sie unsichtbar. Reihenfolge: Donautal (Bauen, Verträge, Signale), Pannonische Ebene (Takt, Anschlüsse, Läden), Industrierevier (Güter, Rangieren, Betriebe), Schneeland (Störungen, Personal, Instandhaltung), Alpenbahn (Disposition, Verspätungen von außen), Wüstenbahn (Schnellverkehr, Kredit, Förderungen), Großstadt (alles zusammen). Im freien Spiel schaltet die Forschung die Systeme in derselben Reihenfolge frei.
 <<<
+SOURCE: src/game/Systems.ts
+COMMENT: >>>
+Kampagne: Anschlüsse ab Pannonischer Ebene, Störungen sowie Personal (Instandhalter, Kontrolleure) ab Schneeland, Fremdbahnen und Forschungsbaum „Anschlussfragen“ ab Industrierevier, Disposition ab Alpenbahn, Bank-Kredit und Förderungen ab Wüstenbahn. Bauen, Läden, Güter usw. sind über Forschung und Bauliste gesteuert. Freies Spiel, Herausforderungen und Demobahnhof (gespeichertes Kennzeichen) zeigen alles. Offen: Takt-Hinweise je Kapitel.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-07
 
 [FR]
 UID: RM-FR-CPX-02
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Automatik zuerst
 STATEMENT: >>>
 Jedes System muss eine sinnvolle Automatik haben, die der Spieler bei Bedarf auf „von Hand“ umstellen kann (z. B. Vertragspreise mit Vorschlag, Ladenpreise, Disposition, Bahnsteigwahl).
+<<<
+SOURCE: src/game/Game.ts, src/ui/Screens.ts, src/ui/Hud.ts, test/medals.test.ts
+COMMENT: >>>
+Vertragspreise: Knopf „A“ hält beide Preise auf fair (täglich nachgezogen, auch nach „Verhandlungsgeschick“); Ladenpreise: „Auto“ = üblicher Preis. Von Hand verstellen schaltet die Automatik aus. Bahnsteigwahl (Auto) und Disposition (Plan) hatten schon eine Automatik.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1722,11 +1818,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-CPX-05
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Zahlen sparsam
 STATEMENT: >>>
 Standardmäßig müssen Symbole und Ampeln statt Zahlen gezeigt werden. Genaue Zahlen gibt es per Hover oder Klick.
+<<<
+SOURCE: src/game/settings.ts, src/ui/Hud.ts, src/style.css, index.html
+COMMENT: >>>
+Standard: Balken und Ampeln ohne Zahlen daneben (Zugkarte: Auslastung, Schmutz, Verschleiß, Tempo; Partner: Zufriedenheit), genaue Werte im Tooltip jedes Balkens. Einstellung „Genaue Zahlen“ zeigt sie wieder. Kasse, Uhrzeit, Preise und Fahrplanzeiten bleiben als Zahl.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1750,14 +1850,14 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-CPX-07
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Komplexitäts-Budget
 STATEMENT: >>>
 Jede neue Funktion muss vor der Umsetzung vier Fragen beantworten: Welches Kapitel führt sie ein? Was ist die Automatik? Wo erscheinen ihre Probleme in der „Was ist los?“-Liste? Kann man sie im freien Spiel ausschalten?
 <<<
 COMMENT: >>>
-Regel für die Entwicklung, gilt für alle neuen Anforderungen.
+Regel für die Entwicklung, gilt für alle neuen Anforderungen. Angewendet auf die Fremdbahnen (18.11.2026): Kapitel 3 Industrierevier führt sie ein (System „foreign“, Forschungsbaum vorher ausgeblendet); Automatik = Preis-Automatik und Modus „Halten“ als Standard; „Was ist los?“ meldet Anschluss ohne Forschung und Züge, die den Bahnsteig nicht erreichen; im freien Spiel abschaltbar (Knopf „Fremdbahnen“). Kartenwerkstatt: Menü außerhalb des Spiels, keine Laufzeit-Probleme.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1770,11 +1870,15 @@ TITLE: Spielgefühl und Langzeitmotivation
 
 [FR]
 UID: RM-FR-FEEL-01
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Spielgefühl
 STATEMENT: >>>
 Jede Aktion muss sich gut anfühlen: hörbares Einrasten beim Gleisbau, Staub beim Abriss, sichtbares Beschleunigen und Bremsen, Kassenklingeln bei Einnahmen. Alle Effekte müssen über die Einstellungen gedämpft werden können.
+<<<
+SOURCE: src/render/Sound.ts, src/render/GameScene.ts
+COMMENT: >>>
+Einrasten (snap) beim Bauen, Poltern beim Abriss, Staub, Brems- und Anfahrgeräusche, Kassenklingeln. Lautstärke-Regler und Animationen-Schalter in den Einstellungen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1814,11 +1918,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-END-01
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Endspiel
 STATEMENT: >>>
 Im freien Spiel muss es Großprojekte geben (z. B. Umbau zum Hauptbahnhof, Rangierbahnhof mit Abrollberg, Anschluss an die Schnellfahrstrecke) sowie einen Neustart mit Bonus auf einer neuen Karte.
+<<<
+SOURCE: src/game/FreePlay.ts, src/game/Profiles.ts, src/ui/Menus.ts, test/medals.test.ts
+COMMENT: >>>
+Großprojekte als zusätzliche Langzeitziele: Rangierbahnhof (300 Wagen), Schnellfahrstrecke (4 Schnellfahrweichen, 150 Fernzug-Halte), Netz (3 Bahnhöfe, 12 Bahnsteiggleise). Je erreichtem Langzeitziel 1 000 € Neustart-Bonus (max. 50 000 €) im Profil, beim nächsten freien Spiel einmal gutgeschrieben.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1826,11 +1934,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-END-02
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Zufallskarten
 STATEMENT: >>>
 Karten müssen aus einem Startwert zufällig erzeugt werden können. Der Startwert muss teilbar sein.
+<<<
+SOURCE: src/world/maps.ts, src/ui/Menus.ts, test/medals.test.ts
+COMMENT: >>>
+Freies Spiel → Kachel „Zufallskarte“: Startwert eintippen oder würfeln. Aus dem Startwert: Vorlage/Thema, Gelände- und Landschafts-Seed, Dörfer, Seen, Flüsse, Wälder (deterministisch). Karten-Id zufall-<Startwert>, wird mit dem Spielstand gespeichert. Ab Kapitel 1 geschafft.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1838,11 +1950,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-END-03
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Tägliche Herausforderung
 STATEMENT: >>>
 Es muss jeden Tag eine Herausforderung mit derselben Karte und denselben Regeln für alle geben, mit Steam-Bestenliste.
+<<<
+SOURCE: src/game/Challenges.ts, src/ui/Menus.ts, test/extras.test.ts
+COMMENT: >>>
+Herausforderungen → „Heute: …“: Vorlage und Startgeld aus dem Datum, Zufall mit dem Datum als Startwert – für alle gleich. Bestzeit je Tag im Profil. Steam-Bestenliste folgt mit RM-FR-STEAM-06.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1850,11 +1966,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PAD-01
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Controller
 STATEMENT: >>>
 Das Spiel muss komplett mit Controller spielbar sein, um „Steam Deck Verified“ zu erreichen.
+<<<
+SOURCE: src/render/GameScene.ts
+COMMENT: >>>
+Gamepad-API: linker (oder rechter) Stick verschiebt die Karte, LB/RB zoomen, A Pause, X schneller, Y Fahrplan (eigene Taste), B Werkzeug weg, Start Menü. Bauen weiterhin mit Maus/Touch.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1867,37 +1987,47 @@ TITLE: Eigene Inhalte
 
 [FR]
 UID: RM-FR-MOD-01
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Unternehmens-Editor
 STATEMENT: >>>
 Bahnunternehmen müssen angelegt und bearbeitet werden können: Vertreter mit Avatar, Zugkategorien, Antriebe, Wappen, Farben. Mitgelieferte Unternehmen dienen als Vorlage und sind nicht löschbar.
 <<<
-SOURCE: aufgaben.md AP6
+SOURCE: src/game/Companies.ts, src/ui/MapEditor.ts (Reiter Unternehmen), src/sim/Operators.ts (OP_DEFAULTS, applyOpOverrides), src/render/GameScene.ts (paintKey), test/companies.test.ts
+COMMENT: >>>
+Seit 18.11.2026 gehören eigene Unternehmen zu einer eigenen Karte (Hauptmenü → Kartenwerkstatt → Reiter Unternehmen, RM-FR-MOD-04); frühere Unternehmen wandern beim ersten Öffnen in die Karte „Donautal (meine Unternehmen)“. Eigene Bahnunternehmen aus einer Vorlage anlegen, bearbeiten, kopieren, löschen. Eigene Werte: Name, Kürzel, Farbe (Wappen und Lackierung – der Farbton der Vorlage wird auf die eigene Farbe gedreht), Motto, Ansprechperson mit Funktion und Gesicht. Zugkategorie, Antrieb und Züge kommen von der Vorlage. Mitgelieferte Unternehmen sind Vorlagen und nicht änderbar. Eingaben werden geprüft und gekürzt.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-11
 
 [FR]
 UID: RM-FR-MOD-02
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Unternehmen auswählen
 STATEMENT: >>>
 Beim Spielstart muss gewählt werden können, welche Unternehmen mitspielen.
 <<<
-SOURCE: aufgaben.md AP6
+SOURCE: src/ui/Menus.ts (renderFreeOps), src/game/FreePlay.ts (FreeCfg.off, custom, opAllowed), src/game/Game.ts (allowedOps)
+COMMENT: >>>
+Freies Spiel → Unternehmen: jedes Unternehmen der Karte an/aus; je Ausschreibung bleibt mindestens eines. Ein eigenes Unternehmen kann den Platz seiner Vorlage einnehmen. Auswahl und eigene Unternehmen stehen im Spielstand.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-11
 
 [FR]
 UID: RM-FR-MOD-03
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Als Datei teilen
 STATEMENT: >>>
 Eigene Unternehmen (später auch Karten) müssen als Datei exportiert und importiert werden können, auch in der Web-Version.
+<<<
+SOURCE: src/game/Companies.ts (exportCompanies, importCompanies)
+COMMENT: >>>
+Export aller eigenen Unternehmen als JSON-Datei (bahnunternehmen.json), Import im Browser per Dateiauswahl; gleiche ID ersetzt, ungültige Einträge werden verworfen. Karten folgen später.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1905,11 +2035,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-MOD-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Leveleditor
 STATEMENT: >>>
 Es muss einen Editor für eigene Karten geben: Gelände, Wasser, Strecke, Orte, Betriebe, Startkapital, Unternehmen und optional eigene Aufträge.
+<<<
+SOURCE: src/game/CustomMaps.ts, src/ui/MapEditor.ts, src/ui/Menus.ts (freies Spiel), src/world/maps.ts (registerMap, withMap), src/main.ts (prepareMap), test/customMaps.test.ts
+COMMENT: >>>
+Kartenwerkstatt (Hauptmenü): eigene Karte = Kopie einer mitgelieferten Vorlage (Thema, Boden, Bäume, Häuser, Fahrzeuge, Musik von der Vorlage). Reiter Allgemein (Name, Zeitung, Endpunkte, Schwierigkeit, Startkapital, Regen/Schnee), Landschaft (Dörfer, Seen, Flüsse in der Vorschau setzen/ziehen/entfernen, Wälder, Felsränder, Zufallswerte), Strecken (Straßen, Sägewerk/Bergwerk an/aus und Lage, Fremdbahnen Nord/Süd, Namen), Unternehmen (wer mitspielt, Namen, eigene Unternehmen der Karte), Prüfen (Ampel). Live-Vorschau 256×64 mit Startgelände. Gespielt im freien Spiel (Vorlage muss freigespielt, keine roten Punkte); der Spielstand trägt die Karte mit. Noch nicht: eigene Aufträge, Gelände feldweise malen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -1924,11 +2058,42 @@ STATEMENT: >>>
 Eigene Karten müssen als Datei und über den Steam Workshop geteilt werden können.
 <<<
 COMMENT: >>>
-Siehe RM-FR-MOD-03 und RM-FR-STEAM-02.
+Siehe RM-FR-MOD-03 und RM-FR-STEAM-02. Datei: umgesetzt (Kartenwerkstatt → Exportieren/Importieren, Format „bahnhofsmanager-karte“ samt Unternehmen; Eingaben werden geprüft und gekürzt). Steam Workshop offen.
 <<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-15
+
+[FR]
+UID: RM-FR-MOD-06
+STATUS: Neu
+PRIORITY: Später
+TITLE: Zuggattung und Antrieb frei wählen
+STATEMENT: >>>
+Bei eigenen Unternehmen müssen Zugkategorie und Antrieb (Diesel, Dampf, Elektrisch) frei gewählt werden können, nicht nur über die Vorlage.
+<<<
+SOURCE: aufgaben.md AP6 (Unternehmens-Editor)
+COMMENT: >>>
+Heute kommen Zuggattung, Antrieb und Wagen von der Vorlage. Braucht passende Wagenbilder je Antrieb und Lackierung.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-11
+
+[FR]
+UID: RM-FR-MOD-07
+STATUS: Neu
+PRIORITY: Später
+TITLE: Gelände malen und eigene Aufträge
+STATEMENT: >>>
+In der Kartenwerkstatt müssen Wasser, Fels, Bäume und Häuser feldweise gemalt und eigene Aufträge (Ziele mit Belohnung) angelegt werden können.
+<<<
+COMMENT: >>>
+Rest aus RM-FR-MOD-04.
+<<<
+RELATIONS:
+- TYPE: Parent
+  VALUE: RM-SN-11
 
 [[/SECTION]]
 
@@ -2013,9 +2178,9 @@ TITLE: Desktop-Build
 STATEMENT: >>>
 Es muss eine Desktop-App für Windows und macOS (optional Linux) geben, die sich einfach starten lässt und über Steam vertrieben und aktualisiert wird.
 <<<
-SOURCE: aufgaben.md AP7
+SOURCE: src-tauri/, npm run desktop:dev / desktop:build / desktop:steam
 COMMENT: >>>
-Entscheidung: Tauri (klein, schon bei Bandcave im Einsatz), siehe Architektur.
+Entscheidung: Tauri 2. Teilweise (19.11.2026): App-Gerüst mit strikter CSP und nur Grundrechten (RM-FR-SEC-02); unter Linux gebaut und gestartet. Offen: Build und Test auf macOS und Windows, Signierung, Builds per GitHub Actions, eigenes App-Symbol.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2036,13 +2201,16 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PLAT-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Landing Page
 STATEMENT: >>>
 Es muss eine witzige Landing Page für das Spiel geben, mit Web-Demo und Link zur Steam-Seite.
 <<<
-SOURCE: aufgaben.md AP7
+SOURCE: landing/index.html, landing/img/
+COMMENT: >>>
+Witzige Landing Page ohne Cookies, Tracking oder externe Schriften: Abfahrtstafel, Laufschrift, Screenshots, Funktionen, Lokalpresse-Zitate aus dem Spiel, 7 Kapitel, FAQ, Impressum/Datenschutz. Erwartet die Demo unter /demo/. Steam-Link ist Platzhalter. Offen: online stellen (RM-FR-PLAT-03).
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-13
@@ -2120,6 +2288,10 @@ TITLE: Steam Cloud
 STATEMENT: >>>
 Spielstände müssen über Steam Cloud zwischen Geräten abgeglichen werden.
 <<<
+SOURCE: src/platform/Platform.ts, src/boot.ts, src-tauri/src/main.rs (store_read/store_write), test/platform.test.ts
+COMMENT: >>>
+Teilweise: Die Desktop-App schreibt Spielstände, Profile und Einstellungen zusätzlich in eine Datei im App-Ordner (saves/spielstaende.json); beim Start gewinnt die neuere Datei. Offen: Steam Auto-Cloud in Steamworks auf diesen Ordner einstellen.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-09
@@ -2132,6 +2304,10 @@ TITLE: Steam-Erfolge
 STATEMENT: >>>
 Die Erfolge im Spiel müssen auch als Steam-Erfolge vergeben werden.
 <<<
+SOURCE: src-tauri/src/steam.rs (Feature steam), src/platform/Platform.ts, tools/steam-depot.mjs
+COMMENT: >>>
+Teilweise: Erfolge gehen an Steam (API-Name = Erfolgs-ID im Spiel), bisherige werden beim Start nachgemeldet; kompiliert mit steamworks 0.13. Offen: eigene App-ID statt 480, Erfolge in Steamworks anlegen, Test mit laufendem Steam.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-15
@@ -2143,6 +2319,10 @@ PRIORITY: Später
 TITLE: Freunde sehen, was ich spiele
 STATEMENT: >>>
 Steam muss anzeigen, auf welcher Karte bzw. in welchem Kapitel jemand gerade spielt (Rich Presence).
+<<<
+SOURCE: src-tauri/src/steam.rs (steam_presence), src/main.ts
+COMMENT: >>>
+Vorbereitet: Karte und Spieltag als Rich Presence (steam_display); braucht noch Lokalisierungs-Token in Steamworks.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2162,11 +2342,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-STEAM-07
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Web-Demo
 STATEMENT: >>>
 Die Web-Version muss als kostenlose Demo mit dem ersten Kapitel spielbar sein (z. B. auf itch.io und der Landing Page) und auf die Steam-Seite verweisen. Spielstände der Demo müssen in die Vollversion übernommen werden können.
+<<<
+SOURCE: src/game/Edition.ts, package.json (build:demo), src/ui/Menus.ts, src/ui/Hud.ts
+COMMENT: >>>
+`npm run build:demo` baut die Demo nach dist-demo (VITE_DEMO=1): nur Kapitel 1 spielbar, Kapitel 2–7 als „Vollversion“ gekennzeichnet, Zufallskarten gesperrt, DEMO-Stempel und Knopf „Vollversion – auf Steam“ im Hauptmenü, Hinweisbrief nach Kapitel 1. Spielstände sind dieselben (Export/Import). Steam-Link ist noch ein Platzhalter (STEAM_URL).
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2265,14 +2449,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-Q-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Bedienung am Tablet
 STATEMENT: >>>
 Das Spiel muss am Tablet per Touch spielbar sein: Karte verschieben und zoomen mit Fingern, Bauen ohne Rechtsklick und Tastatur, große Touch-Ziele, Tooltips per langem Druck.
 <<<
+SOURCE: src/render/GameScene.ts
 COMMENT: >>>
-Später, weil Baumenü und Platzieren dafür umgebaut werden müssen.
+Zwei Finger: verschieben und zoomen (ganze Zoomstufen wegen Pixelgrafik). Lange drücken zeigt einen Fahrgast. Bauen und Menüs per Antippen wie mit der Maus.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2286,17 +2471,25 @@ TITLE: Simulation getrennt vom Zeichnen
 STATEMENT: >>>
 Die Simulation muss in festen Schritten und getrennt vom Zeichnen laufen, möglichst in einem eigenen Hintergrund-Thread (Web Worker). Das Bild muss auch bei höchstem Spieltempo flüssig bleiben.
 <<<
+SOURCE: src/game/SimClock.ts, test/simClock.test.ts
+COMMENT: >>>
+Teilweise (19.11.2026): Simulation in festen Schritten (1/60 s real), unabhängig von der Bildrate; je Bild höchstens 10 ms Rechenzeit, sonst läuft das Spiel kurz langsamer statt zu ruckeln; nach Pausen höchstens 0,25 s nachholen. Offen: eigener Hintergrund-Thread (Web Worker) – braucht eine Oberfläche, die nur über Nachrichten mit dem Spiel spricht.
+<<<
 RELATIONS:
 - TYPE: Parent
   VALUE: RM-SN-07
 
 [FR]
 UID: RM-FR-PERF-02
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Nur Sichtbares zeichnen
 STATEMENT: >>>
 Gezeichnet werden darf nur der sichtbare Ausschnitt. Sprites müssen in wenigen Textur-Atlanten liegen.
+<<<
+SOURCE: src/render/GameScene.ts (cull, img/setTex), src/render/atlas.ts, tools/pack_atlas.py (npm run atlas), test/atlas.test.ts
+COMMENT: >>>
+Feste Bilder außerhalb des Ausschnitts werden ausgeblendet (Demobahnhof: etwa ein Drittel gezeichnet). Alle 408 Einzelbilder liegen in einem Atlas (1024×1024, ca. 110 kB); Personen, Tiere und Emotes sind eigene Bildstreifen. Der Test prüft, dass der Atlas zu den Sprites passt.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2310,8 +2503,9 @@ TITLE: Leistungsbudget mit Referenz-Bahnhof
 STATEMENT: >>>
 Ein Referenz-Bahnhof (z. B. 60 Züge, 500 Fahrgäste, volle Kartengröße) muss auf einem fünf Jahre alten Laptop, einem iPad und dem Steam Deck flüssig laufen. Das muss automatisch gemessen werden.
 <<<
+SOURCE: src/dev/perf.ts, tools/perf.mjs (npm run perf), test/perf.test.ts
 COMMENT: >>>
-Präzisiert RM-FR-Q-01.
+Präzisiert RM-FR-Q-01. Teilweise (18.11.2026): `npm run perf` misst die Simulation des Referenz-Bahnhofs (Demobahnhof zweigleisig, alle Verträge im 30-min-Takt, Verstärker, Fremdbahnen) bei Tempo ×8 und 60 Bildern/s; Budget Ø ≤ 4 ms, 95 % ≤ 8 ms je Bild (gemessen Ø 3,9 ms, 95 % 5,3 ms; Spitze 16 Züge, rund 3 300 Fahrgäste in Zügen). Der Test prüft ein großzügiges Budget. Offen: Zeichnen messen, Geräte (Laptop, iPad, Steam Deck), 60 Züge gleichzeitig braucht einen größeren Referenz-Bahnhof.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2319,15 +2513,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PERF-04
-STATUS: Neu
+STATUS: Ist
 PRIORITY: 1.0
 TITLE: Ladezeiten und Speicher
 STATEMENT: >>>
 Das Spiel muss in unter 5 s starten und einen Spielstand in unter 2 s laden. Spielstände müssen klein bleiben (z. B. komprimiert).
 <<<
-SOURCE: src/game/saveCodec.ts
+SOURCE: src/game/saveCodec.ts, src/main.ts (hud.onLoad), src/game/Game.ts (adopt)
 COMMENT: >>>
-Teilweise: Spielstände im Browser kompakt (Demobahnhof 184 → 35 kB), Exportdateien gzip. Start im Test ca. 3,8 s (Headless-Chrome, Software-Grafik). Spielstand-Daten laden in ca. 20 ms, aber Laden lädt die Seite neu (ca. 3,6 s) – für unter 2 s muss ein Spielstand ohne Neuladen gewechselt werden können.
+Spielstände im Browser kompakt (Demobahnhof 184 → 35 kB), Exportdateien gzip. Start im Test ca. 3,8 s (Headless-Chrome, Software-Grafik). Laden und Import ohne Neuladen der Seite, auch mit Kartenwechsel: ca. 0,3 s; Zustand gleich wie nach Neuladen.
 <<<
 RELATIONS:
 - TYPE: Parent
@@ -2335,11 +2529,15 @@ RELATIONS:
 
 [FR]
 UID: RM-FR-PERF-05
-STATUS: Neu
+STATUS: Ist
 PRIORITY: Später
 TITLE: Akku schonen
 STATEMENT: >>>
 Auf Tablets und Laptops muss die Bildrate bei Pause oder wenig Bewegung sinken.
+<<<
+SOURCE: src/main.ts (saveBattery)
+COMMENT: >>>
+Bildrate: Pause 15 FPS, Menü oder 60 s ohne Eingabe 30 FPS, sonst voll. Jede Eingabe hebt die Drosselung für 3 s auf.
 <<<
 RELATIONS:
 - TYPE: Parent

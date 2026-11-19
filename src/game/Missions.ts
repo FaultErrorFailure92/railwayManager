@@ -6,7 +6,7 @@ import { OPERATORS } from '../sim/Operators';
 import type { Game, Stats } from './Game';
 
 export type ToolId = 'select' | 'land' | 'platform' | 'track' | 'signal' | 'switch' | 'curve' | 'diag' | 'wire' | 'access'
-  | 'building' | 'facility' | 'remove' | 'research' | 'road';
+  | 'building' | 'facility' | 'remove' | 'research' | 'road' | 'copy';
 
 type XY = { x: number; y: number };
 

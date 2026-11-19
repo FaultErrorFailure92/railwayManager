@@ -40,6 +40,9 @@ describe('Fahrgäste nach Tageszeit (RM-FR-ECO-08)', () => {
 
   it('Verstärkerzüge nur mit Vertragsoption: morgens ja, mittags nicht', () => {
     const { g } = demoGame();
+    // Demobahnhof hat S-Bahn-Verstärker: für den Test aus
+    if (g.contracts.sb.boost) g.toggleBoost('sb');
+    g.sim.queue = g.sim.queue.filter((t) => !t.boost);
     const all = () => [...g.sim.trains, ...g.sim.queue];
     expect(all().some((t) => t.boost)).toBe(false);
     // Vertragsoption für ein Pendler-Unternehmen einschalten

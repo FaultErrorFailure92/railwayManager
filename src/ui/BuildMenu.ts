@@ -62,13 +62,14 @@ export const BUILD_MENU_TREE: BGroup[] = [
     types: [single('road', plain('road', 'Straße', 'tool_road', COST.road, 'Ziehen'))] },
   { id: 'building', label: 'Gebäude', key: '8', alt: 'B', icon: 'bld_station', help: 'Klicken zum Bauen · R = drehen · T = nächstes Gebäude dieser Art',
     types: [
-      type('b_station', 'Bahnhof', bld(['bld_station', 'bld_shelter', 'bld_bench', 'bld_clock', 'bld_lockers'])),
+      type('b_station', 'Bahnhof', bld(['bld_station', 'bld_shelter', 'bld_canopy', 'bld_bench', 'bld_clock', 'bld_board', 'bld_lockers'])),
       type('b_shop', 'Läden', bld(['bld_kiosk', 'bld_vending', 'bld_cafe', 'bld_wc', 'bld_inn', 'bld_souvenir'])),
       type('b_traffic', 'Verkehr & Licht', bld(['bld_parking', 'bld_bus', 'bld_billboard', 'bld_lamp', 'bld_streetlamp'])),
       type('b_deco', 'Deko', bld(['bld_flowers', 'bld_fountain', 'bld_statue', 'bld_mural', 'bld_xmas', 'bld_houseA', 'bld_houseB', 'bld_tree0', 'bld_pine0', 'bld_bush0'])),
     ].filter((t) => t.variants.length) },
-  { id: 'remove', label: 'Abriss', key: '9', alt: 'X', icon: 'tool_shovel', help: 'Klicken oder Fläche aufziehen · je Feld das oberste Teil',
-    types: [single('remove', plain('remove', 'Abriss', 'tool_shovel', undefined, 'Klicken oder Fläche aufziehen'))] },
+  { id: 'remove', label: 'Abriss & Kopieren', key: '9', alt: 'X', icon: 'tool_shovel', help: 'Abriss: klicken oder Fläche aufziehen · Kopieren: Fläche aufziehen, dann Vorlage einfügen',
+    types: [single('remove', plain('remove', 'Abriss', 'tool_shovel', undefined, 'Klicken oder Fläche aufziehen')),
+      type('copy', 'Kopieren & Vorlagen', [one('copy', 'copy'), one('copy', 'tpl1'), one('copy', 'tpl2'), one('copy', 'tpl3')], 'Bereiche kopieren und als Vorlage woanders einfügen')] },
 ];
 
 // ------------------------------------------------------------ Zustand
@@ -82,7 +83,7 @@ export function needOf(v: BVariant): ResearchId | undefined {
   return undefined;
 }
 
-export const variantLocked = (g: Game, v: BVariant) => { const need = needOf(v); return !g.unlocked.has(v.tool) || (!!need && !g.researched(need)); };
+export const variantLocked = (g: Game, v: BVariant) => { const need = needOf(v); return !g.unlocked.has(v.tool === 'copy' ? 'track' : v.tool) || (!!need && !g.researched(need)); };
 export const typeLocked = (g: Game, t: BType) => t.variants.every((v) => variantLocked(g, v));
 
 /** aktuell gewählte Ausrichtung (Schlüssel in VARIANTS) */

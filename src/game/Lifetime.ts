@@ -3,6 +3,7 @@
  */
 import type { Game } from './Game';
 import { addStats, type Profile } from './Profiles';
+import { syncMedals } from './Medals';
 
 /** Zähler des laufenden Spiels ins Profil schreiben (regelmäßig und beim Verlassen) */
 export function flushLife(g: Game) {
@@ -11,6 +12,11 @@ export function flushLife(g: Game) {
   g.life = {};
   g.lifeMax = -Infinity;
   g.lifeMin = Infinity;
+  // neue Stempel in der Dienstakte
+  for (const m of syncMedals(g.profileId, g.achievements)) {
+    if (m.kind === 'laufbahn') g.uiEvents.push({ type: 'letter', mood: 'good', title: `Stempel in der Dienstakte: ${m.name}`,
+      text: `<p>${g.salutation()}</p><p>die Personalabteilung vermerkt in Ihrer Dienstakte: <b>${m.name}</b> – ${m.info}.</p><p>Gratulation! Einzusehen im Hauptmenü unter „Dienstakte“.</p>` });
+  }
 }
 
 const n = (v: number) => Math.round(v).toLocaleString('de-AT');

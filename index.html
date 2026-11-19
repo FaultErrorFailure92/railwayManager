@@ -166,7 +166,7 @@
         <button class="btn" data-close="timetable">✕</button>
       </div>
       <div class="tt-main"><canvas id="tt-canvas" width="960" height="620"></canvas>
-        <div class="tt-ops"><h3 title="Zug im Diagramm anklicken: Bahnsteig und Abfahrt ändern">Disposition</h3><div id="tt-dispo"></div><h3 title="Ganzer Fahrplan je Unternehmen: verschieben, Bahnsteig je Richtung">Unternehmen</h3><div id="tt-ops"></div></div></div>
+        <div class="tt-ops"><h3 id="tt-dispo-h" title="Zug im Diagramm anklicken: Bahnsteig und Abfahrt ändern">Disposition</h3><div id="tt-dispo"></div><h3 title="Ganzer Fahrplan je Unternehmen: verschieben, Bahnsteig je Richtung">Unternehmen</h3><div id="tt-ops"></div></div></div>
     </div>
   </div>
 
@@ -254,6 +254,11 @@
       <div class="set-row"><label for="set-scroll">Bildlauf-Tempo (Tastatur) <span id="set-scroll-v"></span></label><input type="range" id="set-scroll" min="25" max="300" step="25" /></div>
       <div class="set-row"><label>Hoher Kontrast</label><button class="btn" id="set-contrast"></button></div>
       <div class="set-row"><label>Bauanimationen</label><button class="btn" id="set-anim"></button></div>
+      <div class="set-row" title="Ampeln und Markierungen zusätzlich mit Zeichen (! ▲ ✓ i) statt nur Farbe"><label>Farbenblind-Modus</label><button class="btn" id="set-cb"></button></div>
+      <div class="set-row" title="Gong, Pfiff und Kasse zusätzlich als kleines Zeichen oben"><label>Töne als Symbol</label><button class="btn" id="set-cues"></button></div>
+      <div class="set-row" title="Aus: Balken und Ampeln, genaue Zahlen beim Drüberfahren"><label>Genaue Zahlen</label><button class="btn" id="set-numbers"></button></div>
+      <div class="set-row" title="Darstellungsfilter fürs Spielfeld – Röhrenbildschirm, Game-Boy-Grün oder Sepia"><label>Filter</label><div class="set-scale" id="set-filter"></div></div>
+      <div class="set-row set-keyrow" title="Taste anklicken, dann die neue Taste drücken (Esc bricht ab)"><label>Tastenbelegung</label><div id="set-keys"></div></div>
       <div class="dc-btns"><button class="btn big" id="set-ok">Fertig</button></div>
     </div>
   </div>
@@ -275,6 +280,12 @@
   </div>
   <div id="toasts"></div>
   <div id="dayend" class="panel hidden"></div>
+  <div id="cue" class="hidden"></div>
+  <div id="crt-overlay"></div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="gb-filter" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0 0 0 1 0" />
+    <feComponentTransfer><feFuncR type="discrete" tableValues="0.06 0.19 0.55 0.61" /><feFuncG type="discrete" tableValues="0.22 0.38 0.67 0.74" /><feFuncB type="discrete" tableValues="0.06 0.19 0.06 0.06" /></feComponentTransfer>
+  </filter></svg>
   <div id="flash" class="hidden"></div>
 
   <div id="changelog" class="hidden">
@@ -314,7 +325,7 @@
 
   <div id="menu" class="hidden">
     <div class="m-box">
-      <div class="m-title"><img class="m-logo" src="assets/gen/ui/train.png" alt="" /><h1>BAHNHOFS<br />MANAGER</h1></div>
+      <div class="m-title"><img class="m-logo" src="assets/gen/ui/train.png" alt="" /><h1>BAHNHOFS<br />MANAGER</h1><span class="m-demo-badge hidden" id="m-demo-badge" title="Kostenlose Demo: Kapitel 1 und das freie Spiel im Donautal">DEMO</span></div>
       <div class="m-sub" id="m-sub"></div>
       <!-- Hauptmenü als Abfahrtstafel -->
       <div class="m-board">
@@ -324,6 +335,8 @@
         <button class="mb-row" id="m-chal"><span class="mb-to"><img src="assets/gen/icons/bld_clock.png" alt="" /><b>Herausforderungen</b></span><span class="mb-note">kurz, knapp, gegen die Uhr</span></button>
         <button class="mb-row" id="m-free"><span class="mb-to"><img src="assets/gen/icons/tool_flag.png" alt="" /><b>Freies Spiel</b></span><span class="mb-note">eigene Regeln, große Ziele</span></button>
         <button class="mb-row" id="m-load"><span class="mb-to"><img src="assets/gen/icons/bld_lockers.png" alt="" /><b>Spielstand laden</b></span><span class="mb-note">aus dem Depot holen</span></button>
+        <button class="mb-row hidden" id="m-steam"><span class="mb-to"><img src="assets/gen/icons/bld_station3.png" alt="" /><b>Vollversion</b></span><span class="mb-note">alle 7 Kapitel – auf Steam</span></button>
+        <button class="mb-row" id="m-companies"><span class="mb-to"><img src="assets/gen/icons/bld_station2.png" alt="" /><b>Kartenwerkstatt</b></span><span class="mb-note">eigene Karten und Bahnen</span></button>
         <button class="mb-row" id="m-stats"><span class="mb-to"><img src="assets/gen/icons/bld_statue.png" alt="" /><b>Dienstakte</b></span><span class="mb-note">deine Statistik</span></button>
         <div class="mb-ticker"><span id="mb-ticker"></span></div>
       </div>
@@ -378,7 +391,26 @@
       <div class="fs-sec">Regeln</div>
       <div class="fs-sliders" id="fs-sliders"></div>
       <div class="fs-row"><label>Verkehrswachstum</label><div class="fs-toggle" id="fs-growth"></div></div>
+      <div class="fs-sec" title="Wer mitspielen darf – eigene Unternehmen gehören zu eigenen Karten (Hauptmenü → Kartenwerkstatt)">Unternehmen</div>
+      <div class="fs-ops" id="fs-ops"></div>
       <div class="dc-btns"><button class="btn" id="fs-reset">Standard</button><button class="btn big" id="fs-start">Spiel starten</button></div>
+    </div>
+  </div>
+
+  <!-- Kartenwerkstatt: eigene Karten mit eigenen Unternehmen (RM-FR-MOD-01 … 05) -->
+  <div id="maped" class="hidden">
+    <div class="panel cl-box me-box">
+      <div class="cl-head"><h2>KARTENWERKSTATT</h2><button class="btn" id="me-close">✕</button></div>
+      <div class="me-wrap">
+        <div class="co-list me-list" id="me-list"></div>
+        <div class="me-main">
+          <canvas id="me-canvas" width="768" height="384" title="Vorschau der Karte – gelb gestrichelt: Startgelände"></canvas>
+          <div class="me-tools" id="me-tools"></div>
+          <div class="me-tabs" id="me-tabs"></div>
+          <div class="co-form me-body" id="me-body"></div>
+        </div>
+      </div>
+      <div class="dc-btns"><span class="co-msg" id="me-msg"></span><button class="btn" id="me-import" title="Karte oder alte Unternehmens-Datei übernehmen">Importieren</button><button class="btn" id="me-export" title="Karte samt Unternehmen als Datei speichern – zum Weitergeben">Exportieren</button><button class="btn big" id="me-play" title="Im freien Spiel starten">Spielen</button><input type="file" id="me-file" accept=".json,application/json" hidden /></div>
     </div>
   </div>
 
@@ -389,9 +421,9 @@
 
   <!-- Profil-Statistik (RM-FR-PROF-03) -->
   <div id="lifestats" class="hidden">
-    <div class="panel cl-box ls-box doc">
-      <div class="cl-head"><h2>DIENSTAKTE</h2><button class="btn" id="ls-close">✕</button></div>
-      <div id="ls-body"></div>
+    <div class="akte">
+      <div class="ak-top"><div class="ak-label"><b>DIENSTAKTE</b><small>Personalabteilung</small></div><div id="ls-tabs" class="ak-tabs"></div><button class="btn" id="ls-close">✕</button></div>
+      <div id="ls-body" class="ak-sheet"></div>
     </div>
   </div>
 
@@ -406,7 +438,7 @@
     </div>
   </div>
 
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/boot.ts"></script>
   <div id="rs-tip" class="panel"></div>
   <div id="tt"></div>
   <div id="fault-pop" class="panel hidden"></div>

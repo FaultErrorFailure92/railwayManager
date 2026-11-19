@@ -83,7 +83,12 @@ function allowed(key: string, gap: number) {
   return true;
 }
 
+/** Töne als Symbol (RM-FR-UI-13) */
+const cueListeners: ((kind: string) => void)[] = [];
+const cue = (kind: string) => cueListeners.forEach((f) => f(kind));
+
 export const Sound = {
+  onCue(f: (kind: string) => void) { cueListeners.push(f); },
   get muted() { return muted; },
   toggle() {
     muted = !muted;
@@ -95,12 +100,14 @@ export const Sound = {
   /** Ding-Dong vor der Durchsage */
   gong() {
     if (!allowed('gong', 4000)) return;
+    cue('gong');
     tone(784, 0, 0.9, 'sine', 0.08);
     tone(523, 0.45, 1.1, 'sine', 0.08);
   },
   /** kurzer Abfahrtspfiff */
   whistle() {
     if (!allowed('whistle', 3000)) return;
+    cue('whistle');
     tone(1850, 0, 0.35, 'square', 0.025, 40);
     tone(1850, 0.45, 0.25, 'square', 0.02, 40);
   },
@@ -138,9 +145,21 @@ export const Sound = {
       noise(0.5, 1.0, 0.02, 3800, 8, 3400, 0.15);
     }
   },
+  /** Einrasten beim Bauen (RM-FR-FEEL-01) */
+  snap() {
+    if (!allowed('snap', 120)) return;
+    noise(0, 0.05, 0.05, 2400, 3);
+    tone(180, 0.03, 0.08, 'square', 0.025, -60);
+  },
+  /** dumpfes Poltern beim Abriss */
+  crunch() {
+    if (!allowed('crunch', 200)) return;
+    noise(0, 0.35, 0.05, 500, 0.8, 200);
+  },
   /** Klick bei Erfolg/Kasse */
   coin() {
     if (!allowed('coin', 250)) return;
+    cue('coin');
     tone(988, 0, 0.12, 'triangle', 0.05);
     tone(1319, 0.08, 0.2, 'triangle', 0.05);
   },

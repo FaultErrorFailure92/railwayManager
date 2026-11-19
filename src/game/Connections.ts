@@ -4,6 +4,7 @@
  * (anderes Unternehmen oder andere Richtung). Erreicht: Umsteiger zahlen, beide Unternehmen sind zufriedener.
  * Verpasst: kostet Geld und Zufriedenheit. Ein verspäteter Zubringer kann abgewartet werden (RM-FR-OPS-11).
  */
+import { systemOn } from './Systems';
 import type { Game } from './Game';
 import type { Train } from '../sim/Simulation';
 
@@ -33,7 +34,7 @@ const boards = (t: Train) => t.jobs.some((j) => j.k === 'stop' && j.board);
 
 /** alle geplanten Anschlüsse der Züge, die gerade unterwegs oder angekündigt sind */
 export function plannedConnections(g: Game): Connection[] {
-  if (!g.stations().length) return [];
+  if (!g.stations().length || !systemOn(g, 'connections')) return [];
   const sim = g.sim;
   const all = [...sim.trains, ...sim.queue].filter(isPaxStop);
   const out: Connection[] = [];

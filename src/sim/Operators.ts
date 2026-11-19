@@ -1,6 +1,6 @@
 import { TILE } from '../config';
 
-export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs' | 'tt' | 'sw' | 'mn' | 'fx';
+export type OperatorId = 'ro' | 'wx' | 'cd' | 'sb' | 'rx' | 'nj' | 'tx' | 'dm' | 'cs' | 'lb' | 'hv' | 'hs' | 'tt' | 'sw' | 'mn' | 'fx' | 'ln' | 'ls';
 export type TrainKind = 'regio' | 'ic' | 'freight' | 'sbahn' | 'night' | 'museum' | 'sort';
 export type Traction = 'electric' | 'diesel' | 'steam';
 
@@ -45,6 +45,8 @@ export interface Operator {
   highSpeed?: boolean;
   /** maximale Zahl Wagen (ohne Lok) bei langen Bahnsteigen */
   maxCoaches?: number;
+  /** Fremdbahn (RM-FR-MAP-09): fährt auf der eigenen Strecke gleichen Namens, darf überall wenden */
+  foreign?: boolean;
 }
 
 const tpm = (t: number) => (t * TILE) / 60;
@@ -123,6 +125,16 @@ export const OPERATORS: Record<OperatorId, Operator> = {
     cars: ['loco', 'wagon', 'wagon', 'wagon', 'wagon'], traction: 'diesel', vmax: tpm(9), needsStop: false, turnback: true, dwell: 900,
     fee: 170, pax: [0, 0], numberBase: 82000, industry: 'mine',
   },
+  ln: {
+    takt: 120, id: 'ln', name: 'Lokalbahn Nord', category: 'Fremdbahn · Triebwagen', short: 'LN', color: '#5a8f3c', kind: 'regio',
+    cars: ['ecab', 'ecab'], long: ['ecab', 'emu', 'ecab'], longShare: 0.3, traction: 'diesel', vmax: tpm(16), needsStop: true,
+    dwell: 60, fee: 110, pax: [40, 140], numberBase: 5100, foreign: true,
+  },
+  ls: {
+    takt: 120, id: 'ls', name: 'Lokalbahn Süd', category: 'Fremdbahn · Wendezug', short: 'LS', color: '#b5652a', kind: 'regio',
+    cars: ['loco', 'coach', 'cab'], long: ['loco', 'coach', 'coach', 'cab'], longShare: 0.3, traction: 'diesel', vmax: tpm(15), needsStop: true,
+    dwell: 70, fee: 120, pax: [50, 160], numberBase: 5300, foreign: true,
+  },
 };
 
 /** Zielrichtungen im Rangierbahnhof (Wagenfarbe = Ziel) */
@@ -133,7 +145,7 @@ export const SORT_DESTS = [
 ];
 
 const T = (t: Partial<Record<OperatorId, number>>): Record<OperatorId, number> =>
-  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, tt: 0, sw: 0, mn: 0, fx: 0, ...t });
+  ({ ro: 0, wx: 0, cd: 0, sb: 0, rx: 0, nj: 0, tx: 0, dm: 0, cs: 0, lb: 0, hv: 0, hs: 0, tt: 0, sw: 0, mn: 0, fx: 0, ln: 0, ls: 0, ...t });
 
 /** alter Takt je Stufe – nur noch für alte Spielstände (Verträge übernehmen) */
 export const TAKT: Record<number, Record<OperatorId, number>> = {
@@ -146,6 +158,26 @@ export const TAKT: Record<number, Record<OperatorId, number>> = {
   7: T({ ro: 15, wx: 30, cd: 40, sb: 20, rx: 40, tx: 45, nj: 60, cs: 45 }),
   8: T({ ro: 10, wx: 20, cd: 30, sb: 15, rx: 30, tx: 40, nj: 60, dm: 120, cs: 40 }),
 };
+
+/** Auslieferungszustand (Name, Kürzel, Farbe) – Kartennamen und eigene Unternehmen werden darüber gelegt */
+export const OP_DEFAULTS: Record<OperatorId, { name: string; short: string; color: string }> = Object.fromEntries(
+  Object.values(OPERATORS).map((o) => [o.id, { name: o.name, short: o.short, color: o.color }]),
+) as Record<OperatorId, { name: string; short: string; color: string }>;
+
+/** eigenes Unternehmen auf dem Platz eines mitgelieferten (RM-FR-MOD-01) */
+export interface OpOverride { name: string; short: string; color: string; rep: string; role: string; seed: number; motto?: string; base?: string }
+/** aktive Übersteuerungen im laufenden Spiel (Ansprechperson, neue Lackierung) */
+export const OP_OVERRIDES: Partial<Record<OperatorId, OpOverride>> = {};
+
+/** eigene Unternehmen ins Spiel übernehmen: Name, Kürzel und Farbe ersetzen, Ansprechperson merken */
+export function applyOpOverrides(over: Partial<Record<OperatorId, OpOverride>> | undefined) {
+  for (const id of Object.keys(OP_OVERRIDES) as OperatorId[]) delete OP_OVERRIDES[id];
+  for (const [id, o] of Object.entries(over ?? {}) as [OperatorId, OpOverride][]) {
+    if (!OPERATORS[id] || !o) continue;
+    OP_OVERRIDES[id] = o;
+    Object.assign(OPERATORS[id], { name: o.name, short: o.short, color: o.color });
+  }
+}
 
 /** ab dieser Stufe haben Wendezüge Wendezeit (brauchen Abstellgleise) */
 export const LAYOVER_LEVEL = 6;

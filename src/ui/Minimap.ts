@@ -51,6 +51,9 @@ export class Minimap {
     canvas.addEventListener('wheel', (e) => { e.preventDefault(); this.zoom(e.deltaY < 0 ? 1 : -1); }, { passive: false });
   }
 
+  /** nach dem Laden eines anderen Spielstands: Karte neu zeichnen */
+  reset() { this.base = null; this.builtKey = ''; this.draw(); }
+
   /** eine Zoomstufe hinein (+1) oder heraus (−1) */
   zoom(d: number) {
     const i = ZOOMS.indexOf(this.z);

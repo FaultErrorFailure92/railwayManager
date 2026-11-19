@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Hauptfenster: nur die Grundrechte, eigene Befehle (Spielstand-Datei, Steam) sind fest eingebaut",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

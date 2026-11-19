@@ -3,9 +3,12 @@
  * langfristige Ziele mit Belohnung. Der Verkehr wächst mit der Bahnhofsstufe (höchstens so viele Verträge).
  */
 import type { Game } from './Game';
+import { applyOpOverrides, type OperatorId, type OpOverride } from '../sim/Operators';
 import { MISSIONS, TUTORIAL_MISSIONS } from './Missions';
 import { buildDemo } from '../dev/demo';
-import { startChallenge } from './Challenges';
+import { seedDaily, startChallenge } from './Challenges';
+import { CHAPTER_MISSIONS } from './Chapters';
+import { addBonus, takeBonus } from './Profiles';
 import { RESEARCH } from './Research';
 import { TIERS } from './StationTiers';
 
@@ -14,6 +17,8 @@ export type GameMode = 'campaign' | 'free' | 'challenge';
 /** Einstellungen des freien Spiels (RM-FR-MODE-06) */
 export interface FreeCfg {
   map: string;
+  /** Sandbox: kein Geld, keine Pleite, Forschung sofort (RM-FR-MODE-07) */
+  sandbox?: boolean;
   /** Startkapital in € */
   money: number;
   /** Fahrgastaufkommen in % */
@@ -26,6 +31,12 @@ export interface FreeCfg {
   growth: 'tier' | 'instant';
   /** Pleite-Grenze (Schulden in €) */
   debt: number;
+  /** Unternehmen, die nicht mitspielen (RM-FR-MOD-02) */
+  off?: OperatorId[];
+  /** Fremdbahnen ausgeschaltet: keine fremden Strecken, kein Forschungsbaum „Anschlussfragen“ (RM-FR-CPX-07) */
+  noForeign?: boolean;
+  /** eigene Unternehmen auf dem Platz mitgelieferter (RM-FR-MOD-01) */
+  custom?: Partial<Record<OperatorId, OpOverride>>;
 }
 
 export const freeDefaults = (map: string, startMoney: number): FreeCfg => ({ map, money: startMoney, pax: 100, faults: 100, ext: 8, growth: 'tier', debt: 50000 });
@@ -42,7 +53,11 @@ export const FREE_SLIDERS: { key: 'money' | 'pax' | 'faults' | 'ext' | 'debt'; l
 /** Einstellungen auf das laufende Spiel anwenden (beim Start und nach dem Laden) */
 export function applyFreeCfg(g: Game) {
   if (g.freeCfg) g.sim.extDelayChance = g.freeCfg.ext / 100;
+  applyOpOverrides(g.freeCfg?.custom);
 }
+
+/** spielt das Unternehmen mit? (RM-FR-MOD-02) */
+export const opAllowed = (g: Game, id: OperatorId) => !g.freeCfg?.off?.includes(id);
 
 export const paxCfg = (g: Game) => (g.freeCfg ? g.freeCfg.pax / 100 : 1);
 export const faultCfg = (g: Game) => (g.freeCfg ? g.freeCfg.faults / 100 : 1);
@@ -76,7 +91,24 @@ export const LONG_GOALS: LongGoal[] = [
   { id: 'contracts', label: '8 Verträge gleichzeitig', reward: 8000, fp: 3, check: (g) => part(g.activeOperators().filter((o) => g.contracts[o.id].status === 'active').length, 8) },
   { id: 'conn', label: '500 Anschlüsse erreicht', reward: 8000, fp: 3, check: (g) => part(g.stats.connOk ?? 0, 500) },
   { id: 'million', label: '1 Million € auf dem Konto', reward: 0, fp: 5, check: (g) => part(Math.max(0, g.money), 1e6, ' €') },
+  // ---- Großprojekte (RM-FR-END-01)
+  { id: 'yard', label: 'Großprojekt Rangierbahnhof: 300 Wagen sortiert', reward: 25000, fp: 6, check: (g) => part(g.stats.sortedWagons, 300, ' Wagen') },
+  { id: 'hsr', label: 'Großprojekt Schnellfahrstrecke: 4 Schnellfahrweichen, 150 Fernzug-Halte', reward: 30000, fp: 6,
+    check: (g) => {
+      const fast = [...g.grid.pieces.values()].filter((p) => !g.grid.fixedPieces.has(p.id) && p.key.endsWith('_fast')).length;
+      const v = Math.min(1, fast / 4) * 0.5 + Math.min(1, g.stats.stopsIC / 150) * 0.5;
+      return { value: v >= 1 ? 1 : v, text: `${Math.min(fast, 4)}/4 · ${Math.min(g.stats.stopsIC, 150)}/150` };
+    } },
+  { id: 'net', label: 'Großprojekt Netz: 3 Bahnhöfe, 12 Bahnsteiggleise', reward: 30000, fp: 6,
+    check: (g) => {
+      const v = Math.min(1, g.stations().length / 3) * 0.5 + Math.min(1, g.platformRuns().length / 12) * 0.5;
+      return { value: v >= 1 ? 1 : v, text: `${Math.min(g.stations().length, 3)}/3 · ${Math.min(g.platformRuns().length, 12)}/12` };
+    } },
 ];
+
+/** Neustart-Bonus fürs nächste freie Spiel: je erreichtem Langzeitziel 1 000 € (RM-FR-END-01) */
+export const RESTART_BONUS_PER_GOAL = 1000;
+export const restartBonus = (goals: number) => goals * RESTART_BONUS_PER_GOAL;
 
 /** Auftragskette überspringen: alles freischalten, was die Aufträge freischalten würden */
 export function enterFreePlay(g: Game) {
@@ -106,6 +138,7 @@ export function freeTick(g: Game) {
   for (const goal of LONG_GOALS) {
     if (g.longGoals.includes(goal.id) || goal.check(g).value < 1) continue;
     g.longGoals.push(goal.id);
+    if (g.profileId) addBonus(g.profileId, RESTART_BONUS_PER_GOAL);
     g.book('Prämien', goal.reward);
     g.research.points += goal.fp;
     g.addLog(`Langzeitziel erreicht: ${goal.label}${goal.reward ? ` · +${eur(goal.reward)} €` : ''}${goal.fp ? ` · +${goal.fp} FP` : ''}`, 'good');
@@ -146,6 +179,7 @@ export function applySetup(g: Game, s: NewGameSetup) {
   g.player = { ...s.player };
   g.startMission();
   if (s.mode === 'challenge' && s.challenge) {
+    if (s.challenge.startsWith('daily-')) seedDaily(s.challenge.slice(6));
     buildDemo(g);
     g.company = s.company;
     g.player = { ...s.player };
@@ -159,13 +193,16 @@ export function applySetup(g: Game, s: NewGameSetup) {
   }
   if (s.mode === 'free') {
     g.freeCfg = s.cfg ?? freeDefaults(s.map, g.money);
-    g.money = g.freeCfg.money;
+    // Neustart-Bonus aus früheren freien Spielen (einmal einlösen)
+    const bonus = g.freeCfg.sandbox ? 0 : takeBonus(s.profileId);
+    g.money = g.freeCfg.sandbox ? 9_999_999 : g.freeCfg.money + bonus;
+    if (bonus) g.addLog(`Neustart-Bonus: +${eur(bonus)} € aus früheren Großprojekten`, 'good');
     applyFreeCfg(g);
     g.sim.paxFactor *= paxCfg(g);
     g.startFreePlay(false);
-  } else if (s.map === 'ebene') g.startChapter2();
+  } else if (s.map !== 'donau' && CHAPTER_MISSIONS[s.map]) g.startChapter(s.map);
   else if (s.tutorial === false) g.skipTutorial();
-  if (!(s.mode === 'campaign' && s.map === 'ebene')) g.welcome();
+  if (!(s.mode === 'campaign' && s.map !== 'donau' && CHAPTER_MISSIONS[s.map])) g.welcome();
   // Profil-Statistik und Finanzen: Startgeld zählt nicht als verdient
   g.history = [];
   g.life = { games: 1 };

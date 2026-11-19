@@ -2,23 +2,34 @@ import { autoCode } from './StationCode';
 import { CHAPTERS, completeChapter } from './Profiles';
 import { chapterRating } from './ChapterRating';
 import { inspectTrain, INSPECTOR_WAGE } from './FareDodgers';
+import { CREW, crewCare, crewSpeed } from './Staff';
+import { storyAfterMission } from './Story';
+import { capture, loadTemplates, pasteSteps, pushTemplate, templateCells, templateCost } from './Templates';
+import { SEASON_NAME, SEASON_NEWS, seasonOf, seasonPax, seasonWeather, type Season } from './Seasons';
+import { regularsOnStop, type RegularState } from './Regulars';
+import { acceptGrant, grantTick, pickGrant, type GrantState } from './Grants';
 import { challengeInfo, challengeTick, type ChallengeState } from './Challenges';
-import { CHAPTER2_MISSIONS, chapter2Letter } from './Chapter2';
-import { applyFreeCfg, contractCap, enterFreePlay, faultCfg, freeInfo, freeTick, paxCfg, type FreeCfg, type GameMode } from './FreePlay';
+import { CHAPTER_MISSIONS, chapterLetter } from './Chapters';
+import { growSave } from './saveMigrate';
+import { activeCustom } from './CustomMaps';
+import { checkForeign, FOREIGN_DECO_TAKT, foreignOps, foreignBlock, foreignFeeFactor, foreignPaxBonus } from './Foreign';
+import { applyFreeCfg, contractCap, opAllowed, enterFreePlay, faultCfg, freeInfo, freeTick, paxCfg, type FreeCfg, type GameMode } from './FreePlay';
 import { crewMaintain, faultFactor, pickWeighted, tickWear } from './Wear';
 import { BANK, BoardState, dailyLetter, newBoard, Sender, welcomeLetter } from './Board';
-import { MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
-import { OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
+import { ROW0, MAIN_ROW, PASSING_LOOPS, STATION_UPGRADE, COST, DELAY_PENALTY_PER_MIN, GAME_SEC_PER_REAL_SEC, MISSED_STOP_PENALTY, OLD_OFFSET, PARCEL, PUNCTUAL_LIMIT_MIN, REFUND, SECOND_ROW } from '../config';
+import { applyOpOverrides, OperatorId, OPERATORS, SORT_DESTS, TAKT, trafficClass } from '../sim/Operators';
 import { PARK_FEE, priceMod, acceptChance, cancelRisk, Contract, fairPrice, LengthClass, lengthClass, MIN_TAKT_DOUBLE, MIN_TAKT_SINGLE, newContracts, Offer, TAKT_STEPS, TALK_PAUSE, TRANSIT_FEE } from './Contracts';
 import { FACILITY_RESEARCH, RESEARCH_BY_ID, ResearchId, ResearchState, ResearchTree } from './Research';
 import { SimSave, Simulation, Train } from '../sim/Simulation';
 import { BUILDING_RESEARCH, BUILDINGS, isStation, SHOPS } from '../world/buildings';
 import { industries } from '../world/industries';
 import { currentMap } from '../world/maps';
+import { systemOn } from './Systems';
+import { DEMO } from './Edition';
 import { ACHIEVEMENTS } from './Achievements';
 import { Goal, goalProgress, newGoals } from './Goals';
 import { Grid } from '../world/Grid';
-import { edgeRow, Network } from '../world/Network';
+import { edgeRow, Network, type Edge } from '../world/Network';
 import { PIECES } from '../world/pieces';
 import { Mission, MISSIONS, MISSIONS_VERSION, ToolId, TUTORIAL_MISSIONS } from './Missions';
 import { VERSION } from './changelog';
@@ -116,7 +127,9 @@ const STATION_NAMES = ['Donaufeld', 'Mühlbach', 'Lindenau', 'Am Steinfeld', 'Gr
 
 export interface GameSave {
   /** Formatversion, siehe saveFile.ts (RM-FR-SAVE-02) */
-  v: 4 | 5;
+  v: 4 | 5 | 6;
+  /** aus Format 5 gehoben: die neuen Streifen oben und unten beim Laden mit Landschaft füllen (RM-FR-MAP-12) */
+  grown?: boolean;
   /** Spielversion beim Speichern */
   app?: string;
   links: { id: number; kind: 'tunnel' | 'bridge'; x: number; y0: number; y1: number }[];
@@ -145,14 +158,21 @@ export interface GameSave {
   wear?: Record<number, number>;
   goals?: Goal[];
   mapId?: string;
+  /** eigene Karte (RM-FR-MOD-04): reist im Spielstand mit */
+  customMap?: unknown;
   board?: BoardState;
   crew?: number;
   inspectors?: number;
+  grant?: GrantState;
+  grantsDone?: string[];
+  regulars?: Record<string, RegularState>;
+  shopAuto?: Record<string, boolean>;
   inbox?: InboxEntry[];
   player?: Game['player'];
   missionsV?: number;
   missionMark?: number;
   mode?: GameMode;
+  demo?: boolean;
   challenge?: ChallengeState;
   longGoals?: string[];
   profileId?: string;
@@ -181,6 +201,7 @@ const DEADLOCK_LIMIT = 3600;
 /** Kosten, wenn ein Zug aus dem Verkehr genommen wird */
 export const CANCEL_COST = 500;
 /** Großeinsatz bei einer Großstörung (RM-FR-EVT-09) */
+export const SANDBOX_MONEY = 9_999_999;
 export const BIG_REPAIR_COST = 1500;
 
 /** Störung: Weiche/Signal (klein) oder gesperrter Streckenabschnitt (groß) */
@@ -265,6 +286,8 @@ export class Game {
   missionIdx = 0;
   /** Kampagne oder freies Spiel (RM-FR-MODE-01) */
   mode: GameMode = 'campaign';
+  /** Demobahnhof (nur Entwicklung): zeigt alle Systeme */
+  demo = false;
   /** laufende Herausforderung (RM-FR-MODE-08) */
   challenge?: ChallengeState;
   /** Spielerprofil, zu dem dieses Spiel gehört (RM-FR-PROF-01) */
@@ -333,7 +356,12 @@ export class Game {
   tier = 0;
   /** besondere Tage: heute und morgen (RM-FR-EVT-08) */
   specials: SpecialDay[] = [];
-  decision: { id: 'fans' | 'sponsor'; at?: number; dir?: 'E' | 'W'; reward?: number; penalty?: number; cost?: number } | null = null;
+  /** laufende Förderung (RM-FR-ECO-11) */
+  grant?: GrantState;
+  grantsDone: string[] = [];
+  /** Stammgäste (RM-FR-EVT-07) */
+  regulars: Record<string, RegularState> = {};
+  decision: { id: 'fans' | 'sponsor' | 'grant'; grant?: string; at?: number; dir?: 'E' | 'W'; reward?: number; penalty?: number; cost?: number } | null = null;
   get repairs() { return this.stats.repairs ?? 0; }
   get specialsOk() { return this.stats.specialsOk ?? 0; }
   get wasInDebt() { return !!this.stats.wasDebt; }
@@ -341,6 +369,7 @@ export class Game {
   readonly fx: FxEvent[] = [];
 
   constructor(save?: GameSave) {
+    if (save?.v === 5) save = growSave(save);
     const old = save?.v === 4;
     this.grid = new Grid(!save || old);
     if (save) {
@@ -355,7 +384,10 @@ export class Game {
         g.mainRows = save.mainRows;
         g.markFixedLoops();
         g.placeIndustries();
+        g.placeForeignLines();
       }
+      if (old) g.dropBrokenForeign();
+      if (save.grown) this.fillOuter();
       Object.assign(this, {
         company: save.company, money: save.money, stats: { ...newStats(), ...save.stats }, missionBase: { ...newStats(), ...save.missionBase },
         missionIdx: save.missionIdx + ((save.missionsV ?? 1) < 2 && save.missionIdx >= 3 ? 1 : 0), log: save.log,
@@ -375,19 +407,13 @@ export class Game {
       this.sim.time = save.sim.time;
       this.sim.setLevel(save.sim.level);
     }
-    this.sim.contractActive = (id) => this.contracts[id].status === 'active';
-    this.sim.taktOf = (id) => (this.contracts[id].status === 'none' ? 0 : this.contracts[id].takt);
-    this.sim.nightLines = (id) => this.contracts[id].lines ?? 1;
-    this.sim.serviceOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].service;
-    this.sim.boostOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].boost;
+    this.wireSim();
     if (save && !save.offers) this.migrateContracts(save);
     if (save?.offers) Object.assign(this.offers, save.offers);
     if (save?.news) Object.assign(this.news, save.news);
     if (save?.specials) this.specials = save.specials;
     if (save?.loan) this.loan = save.loan;
     if (save?.tier) this.tier = Math.max(0, Math.min(TIERS.length - 1, Math.floor(save.tier)));
-    this.sim.paxMod = (op, at) => specialPax(this, op, at) * dayPax(op, at);
-    this.sim.runs = (op, at) => specialRuns(this, op, at);
     if (save?.history) this.history = save.history;
     if (save?.achievements) this.achievements = save.achievements;
     if (save?.weather) Object.assign(this.weather, save.weather);
@@ -397,12 +423,18 @@ export class Game {
     if (save?.board) this.board = save.board;
     if (save?.crew) this.crew = save.crew;
     if (save?.inspectors) this.inspectors = save.inspectors;
+    if (save?.grant) this.grant = save.grant;
+    if (save?.grantsDone) this.grantsDone = save.grantsDone;
+    if (save?.regulars) this.regulars = save.regulars;
+    if (save?.shopAuto) this.shopAuto = save.shopAuto;
     if (save?.inbox) this.inbox = save.inbox;
     if (save?.player) this.player = save.player;
     if (save?.missionMark !== undefined) this.missionMark = save.missionMark;
     if (save?.mode) this.mode = save.mode;
+    if (save?.demo) this.demo = true;
     if (save?.challenge) this.challenge = save.challenge;
     if (save?.profileId) this.profileId = save.profileId;
+    applyOpOverrides(undefined);
     if (save?.freeCfg) { this.freeCfg = save.freeCfg; applyFreeCfg(this); }
     if (save?.longGoals) this.longGoals = save.longGoals;
     this.faults.forEach((f) => { this.sim.faultCells.add(f.k); f.cells?.forEach((k) => this.sim.faultCells.add(k)); });
@@ -413,6 +445,56 @@ export class Game {
     this.applySwitchSpeed();
     this.lastHour = Math.floor(this.sim.time / 3600);
     this.loopsPending = this.grid.mainRows.includes(SECOND_ROW) && this.grid.fixedPieces.size > 0;
+    // zweigleisiger Ausbau erforscht, aber das 2. Streckengleis fehlt (ältere Stände, Demobahnhof): jetzt nachholen
+    this.ensureSecondTrack();
+  }
+
+  /** Rückrufe der Simulation an dieses Spiel binden */
+  private wireSim() {
+    this.sim.contractActive = (id) => this.contracts[id].status === 'active';
+    this.sim.taktOf = (id) => {
+      const c = this.contracts[id];
+      // Fremdbahn: ohne Vertrag fahren ihre Züge als Kulisse im eigenen Takt – nur, wenn die Strecke liegt
+      if (OPERATORS[id].foreign) {
+        if (!this.grid.foreignLaid.some((l) => l.op === id) || this.freeCfg?.noForeign) return 0;
+        return c.status === 'active' && foreignOps(this).includes(id) ? c.takt : FOREIGN_DECO_TAKT;
+      }
+      return c.status === 'none' ? 0 : c.takt;
+    };
+    this.sim.foreignMode = (id) => (this.researched('linkThru') ? this.contracts[id].mode ?? 'stop' : 'stop');
+    this.sim.nightLines = (id) => this.contracts[id].lines ?? 1;
+    this.sim.serviceOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].service;
+    this.sim.boostOf = (id) => this.contracts[id].status === 'active' && !!this.contracts[id].boost;
+    this.sim.paxMod = (op, at) => specialPax(this, op, at) * dayPax(op, at) * seasonPax(seasonOf(Math.floor(at / 86400)), op);
+    this.sim.runs = (op, at) => specialRuns(this, op, at);
+  }
+
+  /** Spielstand ohne Neuladen übernehmen (RM-FR-PERF-04): Zustand eines frisch geladenen Spiels in dieses Objekt holen */
+  adopt(o: Game) {
+    Object.assign(this, o);
+    this.wireSim();
+  }
+
+  /** „Doppelt hält besser“ erforscht → Netzbetreiber baut das 2. Streckengleis (falls noch nicht geschehen) */
+  ensureSecondTrack() {
+    if (this.researched('double') && !this.grid.mainRows.includes(SECOND_ROW)) this.expandLine();
+    if (this.grid.mainRows.includes(SECOND_ROW) && this.grid.addBlockSignals()) this.rebuild();
+  }
+
+  /** gehobener Spielstand (RM-FR-MAP-12): neue Streifen oben und unten wie auf einer frischen Karte (Landschaft, Straßen) */
+  private fillOuter() {
+    const g = this.grid, fresh = new Grid(true);
+    const outer = (y: number) => y < ROW0 || y >= ROW0 + 64;
+    for (let y = 0; y < g.h; y++) {
+      if (!outer(y)) continue;
+      for (let x = 0; x < g.w; x++) g.get(x, y)!.road = fresh.get(x, y)!.road;
+    }
+    for (const b of fresh.buildings.values()) {
+      const cells = fresh.buildingCells(b);
+      if (!cells.every((k) => outer(fresh.xy(k).y))) continue;
+      if (cells.some((k) => g.cells[k].building !== null || g.cells[k].track || g.cells[k].piece !== null)) continue;
+      g.addBuilding(b.key, b.x, b.y, true);
+    }
   }
 
   /** Spielstand der kleinen Karte (96x32) mittig in die große Welt setzen */
@@ -464,10 +546,10 @@ export class Game {
       owned: [...g.owned],
       mainRows: [...g.mainRows],
       money: this.money, stats: this.stats, missionBase: this.missionBase,
-      satisfaction: this.satisfaction, missionIdx: this.missionIdx, mode: this.mode, challenge: this.challenge, profileId: this.profileId, freeCfg: this.freeCfg, longGoals: this.longGoals,
+      satisfaction: this.satisfaction, missionIdx: this.missionIdx, mode: this.mode, demo: this.demo || undefined, challenge: this.challenge, profileId: this.profileId, freeCfg: this.freeCfg, longGoals: this.longGoals,
       unlocked: [...this.unlocked], log: this.log, sim: this.sim.save(),
       research: this.research, contracts: this.contracts, shopPrices: this.shopPrices, offers: this.offers, news: this.news,
-      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, wear: this.wear, goals: this.goals, specials: this.specials, tier: this.tier, loan: this.loan, mapId: currentMap().id, board: this.board, crew: this.crew, inspectors: this.inspectors, inbox: this.inbox, player: this.player,
+      history: this.history, achievements: this.achievements, weather: this.weather, faults: this.faults, wear: this.wear, goals: this.goals, specials: this.specials, tier: this.tier, loan: this.loan, mapId: currentMap().id, customMap: activeCustom(currentMap().id), board: this.board, crew: this.crew, inspectors: this.inspectors, grant: this.grant, grantsDone: this.grantsDone, regulars: this.regulars, shopAuto: this.shopAuto, inbox: this.inbox, player: this.player,
     };
   }
 
@@ -501,7 +583,7 @@ export class Game {
 
   stationLevel(key: string) { return key === 'bld_station3' ? 3 : key === 'bld_station2' ? 2 : 1; }
 
-  private connCache = { version: -1, map: new Map<number, { parking: boolean; bus: boolean }>() };
+  private connCache = { version: -1, map: new Map<number, { parking: boolean; bus: boolean; street: boolean }>() };
   /** Straßenanbindung je Bahnhof: Parkplatz / Busterminal über Straßen erreichbar */
   connections(id: number) {
     if (this.connCache.version !== this.version) {
@@ -519,7 +601,7 @@ export class Game {
           }
         };
         near(g.buildingCells(st));
-        const found = { parking: false, bus: false };
+        const found = { parking: false, bus: false, street: false };
         while (stack.length) {
           const k = stack.pop()!;
           const { x, y } = g.xy(k);
@@ -529,6 +611,7 @@ export class Game {
             const bk = c.building !== null ? g.buildings.get(c.building)?.key : undefined;
             if (bk === 'bld_parking') found.parking = true;
             if (bk === 'bld_bus') found.bus = true;
+            if (c.road && g.isPublicRoad(x + dx, y + dy)) found.street = true;
             const nk = g.key(x + dx, y + dy);
             if (c.road && !seen.has(nk)) { seen.add(nk); stack.push(nk); }
           }
@@ -536,7 +619,7 @@ export class Game {
         this.connCache.map.set(st.id, found);
       }
     }
-    return this.connCache.map.get(id) ?? { parking: false, bus: false };
+    return this.connCache.map.get(id) ?? { parking: false, bus: false, street: false };
   }
 
   /** Zuschlag eines Bahnhofs auf die Einnahmen */
@@ -545,7 +628,7 @@ export class Game {
     if (!b) return 0;
     const lvl = this.stationLevel(b.key);
     const c = this.connections(id);
-    return [0, 0.15, 0.25, 0.4][lvl] + (c.parking ? 0.1 : 0) + (c.bus ? 0.15 : 0);
+    return [0, 0.15, 0.25, 0.4][lvl] + (c.parking ? 0.1 : 0) + (c.bus ? 0.15 : 0) + (c.street ? 0.05 : 0);
   }
 
   /** Einnahmen-Faktor Personenverkehr durch Empfangsgebäude, Parkplatz und Bus */
@@ -583,8 +666,32 @@ export class Game {
   }
 
   setShopPrice(key: string, price: number) {
+    this.shopAuto[key] = false;
     const ref = SHOPS[key].ref;
     this.shopPrices[key] = Math.round(Math.max(ref * 0.4, Math.min(ref * 2.5, price)) * 10) / 10;
+  }
+
+  /**
+   * Laufkundschaft: Leute aus dem Ort kaufen auch ohne Zug ein (stündlich).
+   * Tagsüber mehr, nachts kaum; größere Bahnhöfe mit Park- und Busanbindung ziehen mehr an.
+   */
+  walkIns() {
+    const st = this.stations();
+    if (!st.length) return 0;
+    const hour = Math.floor(this.sim.time / 3600) % 24;
+    const dayFactor = hour < 6 ? 0.1 : hour < 9 ? 0.8 : hour < 19 ? 1 : hour < 22 ? 0.6 : 0.2;
+    const conn = st.reduce((a, b) => { const c = this.connections(b.id); return a + (c.parking ? 0.3 : 0) + (c.bus ? 0.4 : 0) + (c.street ? 0.3 : 0); }, 0);
+    // Passanten je Stunde am Bahnhof
+    const people = 40 * (1 + 0.5 * this.tier + conn) * dayFactor * this.sim.paxFactor;
+    let total = 0;
+    for (const key of Object.keys(SHOPS)) {
+      const n = [...this.grid.buildings.values()].filter((b) => b.key === key && !b.decor).length;
+      if (!n) continue;
+      const sum = Math.round(people * Math.min(1.8, 1 + 0.4 * (n - 1)) * this.shopRate(key) * this.shopPrices[key]);
+      if (sum > 0) { this.book('Läden', sum); total += sum; }
+    }
+    if (total) { const td = this.today(); td.shop = (td.shop ?? 0) + total; this.bump('shop', total); }
+    return total;
   }
 
   /** Stimmung eines Fahrgasts beim Einsteigen (aus der Menschen-Simulation) */
@@ -617,7 +724,9 @@ export class Game {
         continue;
       }
       const t = ev.train;
-      if (ev.type === 'arrive') { noteArrival(this, t); continue; }
+      // Fremdbahn-Züge ohne Vertrag sind Kulisse: keine Kasse, keine Statistik
+      if (t.deco) continue;
+      if (ev.type === 'arrive') { if (systemOn(this, 'connections')) noteArrival(this, t); continue; }
       if (ev.type === 'cancel') {
         this.book('Strafen', -(CANCEL_COST));
         this.stats.handled++;
@@ -629,7 +738,7 @@ export class Game {
         continue;
       }
       if (ev.type === 'stop') {
-        settleDeparture(this, t);
+        if (systemOn(this, 'connections')) settleDeparture(this, t);
         this.stats.passengers += t.passengers;
         inspectTrain(this, t);
         if (trafficClass(t.op) === 'regional') this.stats.stopsRegio++;
@@ -729,10 +838,11 @@ export class Game {
       this.satisfaction[t.op.id] -= 12;
       this.addLog(`${t.number} ohne Halt durchgefahren · ${income} €`, 'bad');
     } else {
-      const f = t.op.needsStop ? this.incomeFactor : 1;
+      const f = t.op.needsStop && !t.via ? this.incomeFactor : 1;
       const late = Math.max(0, delayMin - PUNCTUAL_LIMIT_MIN);
       this.bump('lateMin', late);
-      const price = this.contracts[t.op.id].price[lengthClass(t.cars.length)];
+      let price = this.contracts[t.op.id].price[lengthClass(t.cars.length)];
+      if (t.op.foreign) price = Math.round(price * foreignFeeFactor(this, !!t.via));
       // Stoßzeit: Pendler ärgern sich mehr über Verspätungen (RM-FR-ECO-08)
       const rushF = rushPenalty(t.op, this.sim.time);
       income = punctual ? Math.round(price * f) : Math.round(price * 0.7 * f - late * DELAY_PENALTY_PER_MIN * rushF);
@@ -746,6 +856,7 @@ export class Game {
     this.satisfaction[t.op.id] = Math.max(0, Math.min(100, this.satisfaction[t.op.id]));
     this.book('Unternehmen', income);
     this.stats.handled++;
+    regularsOnStop(this, t, punctual);
     if (punctual) {
       this.stats.punctual++; this.stats.streak++;
       if ([5, 10, 25, 50, 100].includes(this.stats.streak) || (this.stats.streak > 100 && this.stats.streak % 50 === 0)) this.uiEvents.push({ type: 'streak', n: this.stats.streak });
@@ -795,17 +906,23 @@ export class Game {
   researchBlock(id: ResearchId): string | null {
     const r = RESEARCH_BY_ID[id];
     if (this.researched(id)) return 'Schon erforscht';
+    if (r.tree === 'link' && !systemOn(this, 'foreign')) return 'Fremdbahnen kommen erst im Industrierevier';
     if (this.runningIn(r.tree)) return 'In diesem Baum läuft schon eine Forschung';
     const miss = r.requires.filter((q) => !this.researched(q));
     if (miss.length) return `Zuerst: ${miss.map((q) => RESEARCH_BY_ID[q].name).join(', ')}`;
+    if (this.sandbox) return null;
     if (this.research.points < r.fp) return `Zu wenig Forschungspunkte (${r.fp})`;
     if (this.money < r.cost) return 'Zu wenig Geld';
     return null;
   }
 
+  /** Sandbox (RM-FR-MODE-07): kein Geld, keine Pleite, Forschung sofort */
+  get sandbox() { return !!this.freeCfg?.sandbox; }
+
   startResearch(id: ResearchId) {
     if (this.researchBlock(id)) return false;
     const r = RESEARCH_BY_ID[id];
+    if (this.sandbox) { this.finishResearch(id); return true; }
     this.book('Forschung', -(r.cost));
     this.research.points -= r.fp;
     (this.research.running ??= {})[r.tree] = { id, left: r.hours * 3600 };
@@ -871,7 +988,29 @@ export class Game {
     for (const c of Object.values(this.contracts)) c.takt = Math.max(this.minTakt, c.takt);
   }
 
+  /** Automatik (RM-FR-CPX-02): Vertragspreise auf fair, Ladenpreise auf üblich */
+  applyAutoPrices() {
+    for (const [id, c] of Object.entries(this.contracts)) {
+      if (!c.auto) continue;
+      const o = OPERATORS[id as OperatorId];
+      c.price = { short: fairPrice(o, 'short'), long: fairPrice(o, 'long') };
+    }
+    for (const k of Object.keys(this.shopAuto)) if (this.shopAuto[k]) this.shopPrices[k] = SHOPS[k].ref;
+  }
+  toggleAutoPrice(op: OperatorId) {
+    const c = this.contracts[op];
+    c.auto = !c.auto;
+    this.applyAutoPrices();
+  }
+  /** Ladenpreise automatisch (je Ladenart) */
+  shopAuto: Record<string, boolean> = {};
+  toggleShopAuto(key: string) {
+    this.shopAuto[key] = !this.shopAuto[key];
+    this.applyAutoPrices();
+  }
+
   setPrice(op: OperatorId, cls: LengthClass, price: number) {
+    this.contracts[op].auto = false;
     const fair = fairPrice(OPERATORS[op], cls);
     this.contracts[op].price[cls] = Math.max(Math.round(fair * 0.5), Math.min(Math.round(fair * 2), Math.round(price / 10) * 10));
   }
@@ -918,6 +1057,7 @@ export class Game {
   /** Kann das Unternehmen bei uns fahren? (E-Züge brauchen Oberleitung) */
   canRun(op: OperatorId) {
     const o = OPERATORS[op];
+    if (o.foreign) return foreignBlock(this, op);
     if (o.traction === 'electric' && !this.researched('wire')) return 'braucht Oberleitung';
     if (o.kind === 'sort' && !this.researched('hump')) return 'braucht Rangierbahnhof';
     if (o.highSpeed && !this.researched('fastSwitch')) return 'braucht Schnellfahrweichen';
@@ -935,6 +1075,7 @@ export class Game {
     this.offers.open = null;
     this.offers.nextInquiry = this.sim.time + 3 * 3600;
     this.sim.retime(op);
+    if (OPERATORS[op].foreign) { c.mode ??= 'stop'; this.sim.recontract(op); }
     this.addLog(`Vertrag mit ${OPERATORS[op].name}: ${OPERATORS[op].category} alle ${c.takt} min`, 'good');
     return true;
   }
@@ -948,7 +1089,7 @@ export class Game {
     this.offers.nextInquiry = this.sim.time + 2 * 3600;
   }
 
-  private openOffer(o: Offer, key: string) {
+  openOffer(o: Offer, key: string) {
     if (this.offers.open || this.offers.done.includes(key)) return;
     this.offers.done.push(key);
     this.offers.open = o;
@@ -964,7 +1105,7 @@ export class Game {
     const t = this.sim.time;
     if (t < this.weather.until) return;
     const r = Math.random();
-    const w = currentMap().weather;
+    const w = seasonWeather(this.season, currentMap().weather);
     const kind = r < w.snow ? 'snow' : r < w.snow + w.rain ? 'rain' : 'sun';
     const was = this.weather.kind;
     this.weather = { kind, until: t + (3 + Math.random() * 6) * 3600 };
@@ -980,8 +1121,8 @@ export class Game {
   private maybeFault() {
     // Instandhalter warten vorbeugend: weniger Ausfälle
     // abgenutzte Weichen und Signale fallen öfter aus
-    const chance = 0.05 * (1 - 0.15 * this.crew) * (this.researched('crew2') ? 0.5 : 1) * faultFactor(this) * faultCfg(this);
-    if (this.faults.length || Math.random() > chance) return;
+    const chance = 0.05 * (1 - 0.15 * this.crew) * crewCare(this.crew) * (this.researched('crew2') ? 0.5 : 1) * faultFactor(this) * faultCfg(this);
+    if (this.faults.length || Math.random() > chance || !systemOn(this, 'faults')) return;
     const g = this.grid;
     const cand: { k: number; kind: 'switch' | 'signal' }[] = [];
     for (const p of g.pieces.values()) {
@@ -1077,14 +1218,14 @@ export class Game {
   }
 
   /** Reparaturdauer: eigene Instandhalter sind schneller */
-  get repairMinutes() { return Math.max(3, Math.round((20 / (1 + 0.5 * this.crew)) * (this.researched('estw') ? 0.5 : 1))); }
+  get repairMinutes() { return Math.max(3, Math.round((20 / (1 + 0.5 * this.crew)) * crewSpeed(this.crew) * (this.researched('estw') ? 0.5 : 1))); }
 
   /** Instandhalter einstellen / entlassen */
   setCrew(n: number) {
     if (!this.researched('crew')) return;
     const v = Math.max(0, Math.min(Game.CREW_MAX, n));
     if (v === this.crew) return;
-    this.addLog(v > this.crew ? `Instandhalter eingestellt (jetzt ${v})` : `Instandhalter entlassen (jetzt ${v})`, 'info');
+    this.addLog(v > this.crew ? `${CREW[v - 1].name} (${CREW[v - 1].trait}) als Instandhalter eingestellt` : `${CREW[this.crew - 1].name} entlassen`, 'info');
     this.crew = v;
     this.version++;
   }
@@ -1146,6 +1287,7 @@ export class Game {
       this.news.deals[tr.id] = { reward: d.reward ?? 0, penalty: d.penalty ?? 0 };
       this.addLog(`Sonderzug ${tr.number} bestellt: Ankunft um ${fmtTime(d.at)}`, 'good');
     }
+    if (d.id === 'grant' && d.grant) acceptGrant(this, d.grant);
     if (d.id === 'sponsor' && d.cost) {
       this.book('Sonstiges', -(d.cost));
       this.sim.festUntil = this.sim.time + 12 * 3600;
@@ -1167,6 +1309,7 @@ export class Game {
 
   private checkDebt() {
     if (this.gameOver) return;
+    if (this.sandbox) { if (this.money < 1e6) this._money = SANDBOX_MONEY; return; }
     if (this.money < 0 && !this.inDebt) {
       this.inDebt = true;
       this.stats.wasDebt = true;
@@ -1217,6 +1360,12 @@ export class Game {
     this.openOffer({ kind: 'tender', title: 'Ausschreibung Wendezüge', text: 'Diese Züge enden bei dir und fahren zurück. Wähle einen Partner.', ops }, 'turnback');
   }
 
+  /** abgewählte Unternehmen aus einer Ausschreibung nehmen (mindestens eines bleibt, sonst stockt das Spiel) */
+  private allowedOps(ops: OperatorId[]) {
+    const ok = ops.filter((op) => opAllowed(this, op));
+    return ok.length ? ok : ops;
+  }
+
   /** Ausschreibungen und Anfragen auslösen */
   private checkOffers() {
     // Herausforderung: feste Ausgangslage, keine neuen Anfragen
@@ -1226,21 +1375,21 @@ export class Game {
     // 1. Regionalverkehr, sobald ein Empfangsgebäude steht
     if (this.stations().length && !this.offers.done.includes('regio')) {
       this.openOffer({ kind: 'tender', title: 'Ausschreibung Regionalverkehr', text: 'Dein Bahnhof ist eröffnet! Wähle EIN Unternehmen, das bei dir hält.',
-        ops: currentMap().tenderRegio }, 'regio');
+        ops: this.allowedOps(currentMap().tenderRegio) }, 'regio');
       this.offers.freightAt = t + 2 * 3600;
       return;
     }
     // 2. Güterverkehr kurz danach
     if (this.offers.freightAt && t >= this.offers.freightAt && !this.offers.done.includes('freight')) {
       this.openOffer({ kind: 'tender', title: 'Ausschreibung Güterverkehr', text: 'Güterzüge fahren durch und zahlen für die Trasse. Wähle EIN Unternehmen.',
-        ops: currentMap().tenderFreight }, 'freight');
+        ops: this.allowedOps(currentMap().tenderFreight) }, 'freight');
       return;
     }
     // 3. danach melden sich immer wieder Unternehmen (E-Züge erst mit Oberleitung)
     if (!this.offers.done.includes('freight') || t < this.offers.nextInquiry) return;
     // freies Spiel: mehr Verkehr erst mit der nächsten Bahnhofsstufe
     if (this.activeOperators().filter((o) => this.contracts[o.id].status === 'active').length >= contractCap(this)) { this.offers.nextInquiry = t + 3600; return; }
-    const order: OperatorId[] = currentMap().inquiries;
+    const order: OperatorId[] = currentMap().inquiries.filter((op) => opAllowed(this, op));
     const cand = order.find((op) => none(op) && !this.canRun(op) && (this.contracts[op].declinedUntil ?? 0) <= t
       && (op !== 'hs' || this.grid.mainRows.includes(SECOND_ROW)));
     if (!cand) { this.offers.nextInquiry = t + 3600; return; }
@@ -1338,7 +1487,9 @@ export class Game {
     const punct = r.length ? r.filter(Boolean).length / r.length : 0.8;
     const runs = Math.max(1, this.net.runs.filter((x) => x.accessible).length);
     const count = (keys: string[]) => [...this.grid.buildings.values()].filter((b) => !b.decor && keys.includes(b.key)).length;
-    const comfort = Math.min(1, (count(['bld_shelter', 'bld_bench', 'bld_clock', 'bld_wc', 'bld_lamp']) / (runs * 3)));
+    // Bahnsteigdächer zählen bei Regen und Schnee doppelt (RM-FR-BUILD-15)
+    const wet = this.weather.kind !== 'sun' ? 2 : 1;
+    const comfort = Math.min(1, (count(['bld_shelter', 'bld_bench', 'bld_clock', 'bld_board', 'bld_wc', 'bld_lamp']) + count(['bld_canopy']) * wet) / (runs * 3));
     const shopTypes = ['bld_kiosk', 'bld_cafe', 'bld_vending', 'bld_inn'].filter((k) => count([k]) > 0).length;
     const service = Math.min(1, shopTypes / 3 + (count(['bld_parking', 'bld_bus']) ? 0.2 : 0));
     const mood = Math.max(0, Math.min(1, (this.moodEma + 1) / 2 + (this.researched('cat') ? 0.1 : 0)));
@@ -1347,10 +1498,22 @@ export class Game {
     const stars = Math.max(1, Math.min(5, Math.round(score * 5)));
     if (this.stations().length && stars !== this.rating.stars) this.addLog(`Bahnhofs-Bewertung: ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`, stars > this.rating.stars ? 'good' : 'bad');
     this.rating = { stars, parts };
-    this.sim.paxFactor = (0.8 + 0.1 * stars) * (1 + TIERS[this.tier].bonus.pax) * paxCfg(this);
+    this.sim.paxFactor = (0.8 + 0.1 * stars) * (1 + TIERS[this.tier].bonus.pax) * paxCfg(this) * (1 + foreignPaxBonus(this));
   }
 
+  /** aktuelle Jahreszeit (RM-FR-EVT-10) */
+  get season(): Season { return seasonOf(Math.floor(this.sim.time / 86400)); }
+
   private daily() {
+    // neue Jahreszeit: Meldung und Wetter neu würfeln
+    const day = Math.floor(this.sim.time / 86400);
+    if (day > 0 && seasonOf(day) !== seasonOf(day - 1)) {
+      const s = this.season;
+      this.addLog(`${SEASON_NAME[s]}: ${SEASON_NEWS[s]}`, 'info');
+      this.uiEvents.push({ type: 'news', title: `${SEASON_NAME[s]} im Land`, text: SEASON_NEWS[s], tag: `season-${s}` });
+      this.weather.until = 0;
+    }
+    this.applyAutoPrices();
     // Tagesabschluss des vergangenen Tages (RM-FR-FEEL-01)
     const yd = Math.floor(this.sim.time / 86400) - 1;
     const y = this.history.find((h) => h.day === yd);
@@ -1411,6 +1574,14 @@ export class Game {
       this.uiEvents.push({ type: 'decision', tag: 'fans', title: 'Fußball-Fans brauchen einen Sonderzug',
         text: `Der Fanclub fragt an: Ein langer Sonderzug soll um ${fmtTime(at)} Uhr bei dir halten. Pünktlich gibt es ${reward.toLocaleString('de-AT')} € Prämie – kommt er zu spät, kostet es 800 € Strafe.`,
         yes: 'Annehmen', no: 'Ablehnen' });
+      return;
+    }
+    const gr = q >= 0.4 && q < 0.6 && !this.decision && systemOn(this, 'grants') ? pickGrant(this) : undefined;
+    if (gr) {
+      this.decision = { id: 'grant', grant: gr.id };
+      this.uiEvents.push({ type: 'decision', tag: 'grant', title: `${gr.from} fördert: ${gr.title}`,
+        text: `${gr.text} Dafür gibt es ${gr.amount.toLocaleString('de-AT')} € sofort – klappt es nicht binnen ${gr.days} Tagen, muss alles zurückgezahlt werden.`,
+        yes: `Annehmen (+${gr.amount.toLocaleString('de-AT')} €)`, no: 'Nein danke' });
       return;
     }
     if (q < 0.4 && this.stations().length && !this.decision && this.money > 4000) {
@@ -1492,9 +1663,12 @@ export class Game {
 
   /** stündlich: Zufriedenheit je nach Preis, Kündigungen */
   private hourly() {
+    checkForeign(this);
     const day = Math.floor(this.sim.time / 86400);
     if (this.news.lastDay < 0) this.news.lastDay = day;
     if (day !== this.news.lastDay) { this.news.lastDay = day; this.bump('days'); this.daily(); }
+    grantTick(this);
+    this.walkIns();
     // Auftrag „Wendezüge“: Ausschreibung wiederholen, falls noch kein Partner gewählt
     if (this.mission?.title === 'Wendezüge' && !this.offers.open) this.requestTurnback();
     this.checkNews();
@@ -1537,25 +1711,29 @@ export class Game {
   // ------------------------------------------------------------ Aufträge
   /** Auftragsliste: Kapitel 2 hat eigene Aufträge, sonst Donautal/Einschulung */
   get missions(): Mission[] {
-    return this.mode === 'campaign' && currentMap().id === 'ebene' ? CHAPTER2_MISSIONS : MISSIONS;
+    return (this.mode === 'campaign' && CHAPTER_MISSIONS[currentMap().id]) || MISSIONS;
   }
 
   get mission(): Mission | null {
     return this.missions[this.missionIdx] ?? null;
   }
 
-  /** Kapitel 2 starten: alle Werkzeuge aus dem Donautal frei, eigene Aufträge */
-  startChapter2() {
+  /** Kapitel 2–6 starten: alle Werkzeuge aus dem Donautal frei, eigene Aufträge */
+  startChapter(map = currentMap().id) {
+    const list = CHAPTER_MISSIONS[map];
+    if (!list) return;
     MISSIONS.forEach((m) => m.unlock.forEach((u) => this.unlocked.add(u)));
     this.unlocked.add('research');
     this.research.points += 12;
-    this.sim.setLevel(CHAPTER2_MISSIONS[0].level);
+    this.sim.setLevel(list[0].level);
     this.missionIdx = 0;
     this.missionBase = structuredClone(this.stats);
     this.startMission();
-    const l = chapter2Letter(this.salutation());
+    const i = CHAPTERS.findIndex((c) => c.map === map);
+    const l = chapterLetter(map, i + 1, CHAPTERS[i]?.title ?? currentMap().name, this.salutation());
     this.uiEvents.push({ type: 'letter', mood: 'info', title: l.title, text: l.text });
   }
+  startChapter2() { this.startChapter('ebene'); }
 
   missionInfo() {
     const m = this.mission;
@@ -1586,6 +1764,7 @@ export class Game {
     if (this.grid.mainRows.includes(SECOND_ROW)) return;
     const blocked = this.grid.expandLine(this.researched('wire')) ?? 0;
     if (this.researched('wire')) this.grid.electrifyLine();
+    this.grid.addBlockSignals();
     this.rebuild();
     this.loopsPending = true;
     this.addLog('Netzbetreiber baut das 2. Streckengleis – auch durch deinen Bahnhof, wo Platz ist', 'info');
@@ -1597,17 +1776,26 @@ export class Game {
     const g = this.grid;
     let changed = false, left = false;
     for (const [xa, xb] of PASSING_LOOPS) {
-      const cells: number[] = [];
-      for (let x = xa; x <= xb + 2; x++) for (const y of [MAIN_ROW, SECOND_ROW]) cells.push(g.key(x, y));
-      const pieces = [...new Set(cells.map((k) => g.cells[k].piece).filter((id): id is number => id !== null && g.fixedPieces.has(id)))];
-      const sig = cells.filter((k) => (g.cells[k].signal || g.cells[k].signalW) && !g.isOwned(g.xy(k).x, g.xy(k).y));
-      if (!pieces.length && !sig.length) continue;
-      if (cells.some((k) => this.sim.owner[k] !== 0)) { left = true; continue; }
-      pieces.forEach((id) => { g.removePiece(id); g.fixedPieces.delete(id); });
-      sig.forEach((k) => { g.cells[k].signal = false; g.cells[k].signalW = false; });
+      if (!g.loopStanding([xa, xb])) continue;
+      // nur die Weichen müssen frei sein – auf der zweigleisigen Strecke ist die Kreuzungsstelle sonst ständig befahren
+      const sw: number[] = [];
+      for (const x0 of [xa, xb]) for (let x = x0; x <= x0 + 2; x++) for (const y of [MAIN_ROW, SECOND_ROW]) sw.push(g.key(x, y));
+      if (sw.some((k) => this.sim.owner[k] !== 0)) { left = true; continue; }
+      for (const id of new Set(sw.map((k) => g.cells[k].piece).filter((id): id is number => id !== null && g.fixedPieces.has(id)))) {
+        g.removePiece(id); g.fixedPieces.delete(id);
+      }
+      // Weichen weg: durchgehendes Gleis auf beiden Streckengleisen
+      for (const k of sw) g.cells[k].track = true;
+      // Signale der Kreuzungsstelle abbauen – auch auf deinem Gelände
+      for (const y of [MAIN_ROW, SECOND_ROW]) {
+        g.get(xb - 1, y)!.signal = false;
+        g.get(xa + 3, y)!.signalW = false;
+      }
+      // auf deinem Gelände gehört das Gleis jetzt dir (anschließen, Weichen setzen)
+      for (let x = xa; x <= xb + 2; x++) for (const y of [MAIN_ROW, SECOND_ROW]) if (g.isOwned(x, y) && y === SECOND_ROW) g.get(x, y)!.fixed = false;
       changed = true;
     }
-    if (changed) this.rebuild();
+    if (changed) { this.grid.addBlockSignals(); this.rebuild(); this.addLog('Netzbetreiber hat eine Kreuzungsstelle abgebaut – dort ist jetzt durchgehend zweigleisige Strecke', 'info'); }
     this.loopsPending = left;
   }
 
@@ -1621,7 +1809,9 @@ export class Game {
     this.uiEvents.push({ type: 'letter', mood: 'good', open: true, title: `Kapitel ${i + 1} geschafft: ${CHAPTERS[i]?.title ?? currentMap().name}`,
       text: `<p>${this.salutation()}</p><p>alle Aufträge dieses Kapitels sind erfüllt – der Vorstand ist begeistert.</p>`
         + `<p class="lt-stars">${'★'.repeat(r.stars)}${'☆'.repeat(3 - r.stars)}</p><ul class="lt-checks">${r.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'} ${c.label}</li>`).join('')}</ul>`
-        + (next && fresh ? `<p>Damit ist <b>Kapitel ${i + 2}: ${next.title}</b> freigeschaltet${next.ready ? '' : ' (wird gerade noch vorbereitet)'} – und die Karte ist ab sofort auch im <b>freien Spiel</b> wählbar.</p>` : '')
+        + (next && fresh && !DEMO ? `<p>Damit ist <b>Kapitel ${i + 2}: ${next.title}</b> freigeschaltet${next.ready ? '' : ' (wird gerade noch vorbereitet)'} – und die Karte ist ab sofort auch im <b>freien Spiel</b> wählbar.</p>` : '')
+        + (DEMO && next ? `<p><b>Das war die Demo!</b> Die Kapitel 2 bis 7 – von der Pannonischen Ebene bis zur Großstadt – gibt es in der Vollversion auf Steam. Ihren Spielstand können Sie im Menü exportieren und dort weiterspielen.</p>` : '')
+        + (!next ? `<p><b>Damit ist die Kampagne geschafft.</b> Vom ersten Bahnsteig im Donautal bis zum Hauptbahnhof der Großstadt – der Vorstand erhebt sich, die Kantine serviert Schnitzel, und irgendwo pfeift ein Zug. Danke fürs Spielen!</p><p>Im freien Spiel, bei den Herausforderungen und auf Zufallskarten geht es weiter.</p>` : '')
         + '<p>Sie können hier gerne weiterbauen: ab jetzt gelten die Langzeitziele.</p>' });
   }
 
@@ -1655,6 +1845,7 @@ export class Game {
     m.unlock.forEach((u) => this.unlocked.add(u));
     if (m.level !== this.sim.level) this.sim.setLevel(m.level);
     this.uiEvents.push({ type: 'mission', title: m.title, reward: m.reward, unlocked: m.unlock, fp: m.fp });
+    storyAfterMission(this, this.missionIdx);
     this.addLog(`Auftrag „${m.title}“ erledigt`, 'good');
     this.missionIdx++;
     this.missionMark = undefined;
@@ -1765,6 +1956,7 @@ export class Game {
   plan(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const g = this.grid;
     const fail = (reason: string, c = cells): BuildPlan => ({ ok: false, cost: 0, reason, cells: c });
+    if (tool === 'copy') return this.planCopy(cells, variant);
     if (!this.unlocked.has(tool)) return fail('Noch nicht freigeschaltet');
     if (tool === 'remove' && cells.length > 1) return this.planRemoveMany(cells);
     if (!cells.length) return fail('');
@@ -1782,6 +1974,9 @@ export class Game {
     const solid = (c?: { building: number | null }) => !!c && c.building !== null && !this.clearable(c.building);
     const rails = tool === 'track' || tool === 'switch' || tool === 'curve' || tool === 'diag';
     const rough = (cs: XY[]) => {
+      // Hochbahn (RM-FR-MAP-11): Pfeiler blockieren, unter der Fahrbahn haben Gebäude keinen Platz
+      if (cs.some((q) => g.viaductAt(q.x, q.y) === 2)) return 'Pfeiler der Hochbahn – hier kann man nicht bauen';
+      if (tool === 'building' && !BUILDINGS[variant]?.onPlatform && cs.some((q) => g.viaductAt(q.x, q.y) === 1)) return 'Unter der Hochbahn ist kein Platz für Gebäude';
       const c = cs.find((q) => !g.isGround(q.x, q.y) && !g.get(q.x, q.y)?.track && !(rails && g.isWater(q.x, q.y) && this.researched('railBridge')));
       return !c ? null : g.isWater(c.x, c.y) ? (rails ? 'Wasser – erst Eisenbahnbrücken erforschen' : 'Wasser – hier kann man nicht bauen')
         : 'Felsen – hier kann man nicht bauen';
@@ -1804,6 +1999,7 @@ export class Game {
           fp.push(q);
           if (!g.isOwned(q.x, q.y)) return 'Fläche nicht gekauft';
           if (rough([q])) return rough([q])!;
+          if (g.isPublicRoad(q.x, q.y)) return 'Weichen nicht auf dem Bahnübergang';
           if (cell.platform) return 'Bahnsteig im Weg';
           if (solid(cell)) return 'Gebäude im Weg';
           if (cell.piece !== null && cell.piece !== up?.id) return 'Überschneidet anderes Gleisteil';
@@ -1833,6 +2029,7 @@ export class Game {
         if (notOwned(cells)) return fail('Fläche nicht gekauft');
         if (rough(cells)) return fail(rough(cells)!);
         if (cells.some((c) => g.get(c.x, c.y)!.track || g.get(c.x, c.y)!.piece !== null)) return fail('Bahnsteig nicht auf Gleis');
+        if (cells.some((c) => g.isPublicRoad(c.x, c.y))) return fail('Straße im Weg');
         if (cells.some((c) => solid(g.get(c.x, c.y)))) return fail('Gebäude im Weg');
         cost = cells.filter((c) => !g.get(c.x, c.y)!.platform).length * COST.platform;
         break;
@@ -1854,7 +2051,8 @@ export class Game {
         if (straight.some((c) => !g.get(c.x, c.y)!.track && (loopSwitch(c.x - 1, c.y) || loopSwitch(c.x + 1, c.y)))) {
           return fail('Hier endet die Kreuzungsstelle des Netzbetreibers – nicht anschließen', straight);
         }
-        cost = straight.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track + bridgeCost(straight);
+        cost = straight.filter((c) => !g.get(c.x, c.y)!.track).length * COST.track + bridgeCost(straight)
+          + straight.filter((c) => !g.get(c.x, c.y)!.track && g.get(c.x, c.y)!.road).length * COST.crossing;
         const fp: XY[] = [...straight];
         const pc = checkPieces(pieces, fp);
         if (typeof pc === 'string') return { ok: false, cost: 0, reason: pc, cells: fp, pieces };
@@ -1902,6 +2100,7 @@ export class Game {
           if (rough([c])) return fail(rough([c])!, fp);
           if (solid(cell)) return fail('Hier steht schon etwas', fp);
           if (cell.track || cell.piece !== null) return fail('Gleis im Weg', fp);
+          if (cell.road) return fail('Straße im Weg', fp);
           if (def.onPlatform && !cell.platform) return fail('Nur auf dem Bahnsteig', fp);
           if (!def.onPlatform && cell.platform) return fail('Nicht auf dem Bahnsteig', fp);
         }
@@ -1985,7 +2184,10 @@ export class Game {
           return { ok: true, cost: -cs.length * (link.kind === 'bridge' ? COST.bridge : COST.tunnel) * REFUND, cells: cs };
         }
         if (c.platform) { cost = -COST.platform * REFUND; break; }
-        if (c.road) { cost = -COST.road * REFUND; break; }
+        if (c.road && !c.track && c.piece === null) {
+          if (g.isPublicRoad(cells[0].x, cells[0].y)) return fail('Öffentliche Straße – gehört der Gemeinde');
+          cost = -COST.road * REFUND; break;
+        }
         if (c.siding || c.sortDest !== null || c.shunt) { cost = 0; break; }
         if (c.piece !== null) {
           const p = g.pieces.get(c.piece)!;
@@ -2137,9 +2339,41 @@ export class Game {
     return { ok: true, text: `${s.label} ${forward ? 'wiederholt' : 'rückgängig'}${pay ? ` · ${pay < 0 ? '+' : '−'}${Math.abs(Math.round(pay)).toLocaleString('de-AT')} €` : ''}` };
   }
 
+  /** Kopieren / Vorlage einfügen (RM-FR-BUILD-13) */
+  private planCopy(cells: XY[], variant: string): BuildPlan {
+    const g = this.grid;
+    const fail = (reason: string, c = cells): BuildPlan => ({ ok: false, cost: 0, reason, cells: c });
+    if (!this.unlocked.has('track')) return fail('Noch nicht freigeschaltet');
+    if (!cells.length) return fail('');
+    if (variant === 'copy') {
+      if (!capture(g, cells)) return fail('Hier gibt es nichts Eigenes zum Kopieren (Gleise, Weichen, Signale, Bahnsteige)');
+      return { ok: true, cost: 0, cells };
+    }
+    const t = loadTemplates()[Number(variant.slice(3)) - 1];
+    if (!t) return fail('Diese Vorlage ist leer – erst einen Bereich kopieren');
+    const area = templateCells(t, cells[0]);
+    if (area.some((c) => !g.inside(c.x, c.y))) return fail('Außerhalb der Karte', area);
+    if (area.some((c) => !g.isOwned(c.x, c.y))) return fail('Fläche nicht gekauft', area);
+    if (area.some((c) => { const cc = g.get(c.x, c.y)!; return cc.piece !== null || cc.platform || (cc.track && !cc.fixed) || (cc.building !== null && !this.clearable(cc.building)); })) return fail('Fläche ist nicht frei', area);
+    const cost = templateCost(t);
+    return { ok: this.money >= cost, cost, reason: 'Zu wenig Geld', cells: area };
+  }
+
   private buildOnce(tool: ToolId, cells: XY[], variant = ''): BuildPlan {
     const p = this.plan(tool, cells, variant);
     if (!p.ok) return p;
+    if (tool === 'copy') {
+      if (variant === 'copy') {
+        const t = capture(this.grid, cells);
+        if (t) { pushTemplate(t); this.addLog(`Bereich kopiert (${t.w}×${t.h}) – jetzt als Vorlage 1 einfügen`, 'info'); }
+        return { ...p, cost: 0 };
+      }
+      const t = loadTemplates()[Number(variant.slice(3)) - 1]!;
+      let fails = 0;
+      for (const st of pasteSteps(t, cells[0])) if (!this.buildOnce(st.tool, st.cells, st.variant).ok) fails++;
+      this.addLog(`Vorlage eingefügt${fails ? ` – ${fails} Teile passten nicht` : ''}`, fails ? 'bad' : 'info');
+      return p;
+    }
     if (tool === 'remove' && p.removeAt) {
       for (const c of p.removeAt) this.build('remove', [c]);
       return p;
@@ -2208,7 +2442,7 @@ export class Game {
         else if (c.building !== null) g.removeBuilding(c.building);
         else if (link) g.links.delete(link.id);
         else if (c.platform) c.platform = false;
-        else if (c.road) c.road = false;
+        else if (c.road && !c.track && c.piece === null) c.road = false;
         else if (c.siding || c.sortDest !== null) { c.siding = false; c.sortDest = null; }
         else if (c.shunt) c.shunt = false;
         else if (c.piece !== null) g.removePiece(c.piece);
@@ -2228,12 +2462,20 @@ export class Game {
     this.sim.setNetwork(this.net);
     this.updatePlatformLength();
     this.checkIndustries();
+    checkForeign(this);
     this.version++;
+  }
+
+  /** von der Hauptstrecke aus erreichbare Kanten (je Netz einmal berechnet) */
+  private reachCache?: { net: Network; set: Set<Edge> };
+  mainReach() {
+    if (this.reachCache?.net !== this.net) this.reachCache = { net: this.net, set: this.net.reach(this.net.entries.filter((e) => !e.line).map((e) => e.to)) };
+    return this.reachCache.set;
   }
 
   /** Ladegleis über eigene Gleise mit der Strecke verbunden? */
   industryConnected(id: string) {
-    return this.net.entries.some((en) => this.net.pathsTo(en.to, (e) => e.industry === id, false, 5).length > 0);
+    return [...this.mainReach()].some((e) => e.industry === id);
   }
 
   /** Privatbahnen: angeschlossen → fahren und zahlen; getrennt → fahren nicht mehr */

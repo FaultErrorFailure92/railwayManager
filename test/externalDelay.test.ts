@@ -18,8 +18,10 @@ describe('Verspätungen von außen (RM-FR-OPS-11)', () => {
 
   it('verspäteter Zug hält Folgezüge auf – vorlassen löst es', () => {
     const { g } = demoGame();
+    if (g.contracts.sb.boost) g.toggleBoost('sb');
+    g.sim.queue = g.sim.queue.filter((t) => !t.boost);
     fastForward(g, 3600);
-    const q = g.sim.queue;
+    const q = g.sim.queue.filter((x) => !x.op.foreign);
     const a = q[0];
     const b = q.find((x) => x !== a && x.dir === a.dir)!;
     a.extDelay = Math.max(600, b.plannedSpawn - a.plannedSpawn + 600);
@@ -37,8 +39,9 @@ describe('Verspätungen von außen (RM-FR-OPS-11)', () => {
   it('ohne Vorlassen bleibt die Reihenfolge', () => {
     const { g } = demoGame();
     fastForward(g, 3600);
-    const a = g.sim.queue[0];
-    const b = g.sim.queue.find((x) => x !== a && x.dir === a.dir)!;
+    const main = g.sim.queue.filter((x) => !x.op.foreign);
+    const a = main[0];
+    const b = main.find((x) => x !== a && x.dir === a.dir)!;
     a.extDelay = b.plannedSpawn - a.plannedSpawn + 900;
     fastForward(g, b.plannedSpawn - g.sim.time + 300);
     expect(g.sim.queue).toContain(b);

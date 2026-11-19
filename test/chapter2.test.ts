@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Game } from '../src/game/Game';
 import { applySetup } from '../src/game/FreePlay';
 import { CHAPTER2_MISSIONS } from '../src/game/Chapter2';
+import { CHAPTER_MISSIONS } from '../src/game/Chapters';
 import { MISSIONS } from '../src/game/Missions';
 import { chapterRating } from '../src/game/ChapterRating';
 import { CHAPTERS } from '../src/game/Profiles';
@@ -37,4 +38,27 @@ describe('Kapitel 2 und Kapitel-Bewertung (RM-FR-MODE-02/04)', () => {
     g.sim.time = 20 * 86400;
     expect(chapterRating(g, 'donau').stars).toBe(1);
   });
+});
+
+describe('Kapitel 3–7 (RM-FR-MODE-02)', () => {
+  afterEach(() => setMap(undefined));
+  for (const map of ['revier', 'schnee', 'alpen', 'wueste', 'stadt']) {
+    it(`${map}: spielbar mit eigenen Aufträgen`, () => {
+      const i = CHAPTERS.findIndex((c) => c.map === map);
+      expect(CHAPTERS[i].ready).toBe(true);
+      setMap(map);
+      const g = new Game();
+      applySetup(g, { mode: 'campaign', map, profileId: '', company: 'Test', player: { name: 'B', title: '', avatar: 1 }, tutorial: false });
+      expect(g.missions).toBe(CHAPTER_MISSIONS[map]);
+      expect(g.missions.length).toBe(5);
+      expect(g.mission?.title).toBe('Ankommen');
+      expect(g.uiEvents.some((e) => e.type === 'letter' && e.title.startsWith(`Kapitel ${i + 1}`))).toBe(true);
+      // jeder Auftrag liefert Fortschritt und Checkliste ohne Fehler
+      for (const m of g.missions) {
+        const p = m.progress(g.stats, g.stats, g);
+        expect(p.value).toBeLessThan(1);
+        m.checks?.(g, g.stats, g.stats);
+      }
+    });
+  }
 });

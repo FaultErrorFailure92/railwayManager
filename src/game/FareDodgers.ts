@@ -1,5 +1,6 @@
 import type { Game } from './Game';
 import type { Train } from '../sim/Simulation';
+import { inspectorBonus, INSPECTORS } from './Staff';
 
 /** Schwarzfahrer und Kontrolle (RM-FR-ECO-13): erst ab der Forschung „Schwarzkappler“ */
 
@@ -11,7 +12,7 @@ export const FINE = 60;
 export const DODGE_SHARE = 0.04;
 
 /** Anteil der Schwarzfahrer, die erwischt werden */
-export function catchRate(n: number) { return Math.min(0.9, n * 0.25); }
+export function catchRate(n: number) { return n ? Math.max(0, Math.min(0.95, n * 0.25 + inspectorBonus(n))) : 0; }
 
 /** Halt eines Personenzugs: Schwarzfahrer zählen, Kontrolleure kassieren */
 export function inspectTrain(g: Game, t: Train) {
@@ -32,7 +33,7 @@ export function setInspectors(g: Game, n: number) {
   if (!g.researched('ticket')) return;
   const v = Math.max(0, Math.min(INSPECTOR_MAX, n));
   if (v === g.inspectors) return;
-  g.addLog(v > g.inspectors ? `Kontrolleur eingestellt (jetzt ${v})` : `Kontrolleur entlassen (jetzt ${v})`, 'info');
+  g.addLog(v > g.inspectors ? `${INSPECTORS[v - 1].name} (${INSPECTORS[v - 1].trait}) als Kontrolleur eingestellt` : `${INSPECTORS[g.inspectors - 1].name} entlassen`, 'info');
   g.inspectors = v;
   g.version++;
 }

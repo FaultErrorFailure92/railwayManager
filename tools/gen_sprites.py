@@ -454,6 +454,12 @@ SCHEMES = {
            "wagon0": ((70, 66, 64), (52, 48, 46), None),
            "wagon1": ((82, 76, 72), (58, 54, 50), None),
            "wagon2": ((64, 60, 58), (46, 44, 42), None)},
+    "ln": {"emu": ((214, 226, 196), (110, 120, 100), (90, 143, 60, 255)),
+           "ecabE": ((214, 226, 196), (110, 120, 100), (90, 143, 60, 255)),
+           "ecabW": ((214, 226, 196), (110, 120, 100), (90, 143, 60, 255))},
+    "ls": {"loco": ((181, 101, 42), (100, 96, 92), (240, 226, 190, 255)),
+           "coach": ((232, 220, 196), (130, 124, 116), (181, 101, 42, 255)),
+           "cab": ((232, 220, 196), (130, 124, 116), (181, 101, 42, 255))},
     "dm": {"steam": ((34, 34, 38), (52, 52, 58), None),
            "coach": ((122, 42, 36), (70, 60, 56), (214, 176, 80, 255))},
 }
@@ -633,10 +639,17 @@ P5 = {
     "bld_adobeC": bg.adobe(1, 1, (204, 156, 104), H=12, seed=3),
     "bld_well": bg.well(), "bld_tent": bg.tent(),
     "bld_billboard": bg.billboard(), "bld_mural": bg.mural(),
+    # Großstadt (Kapitel 7)
+    "bld_cityA": bg.city_block(2, 2, (222, 196, 140), floors=4, seed=1),
+    "bld_cityB": bg.city_block(2, 2, (206, 214, 218), floors=5, roof=(96, 104, 112), shop=(46, 120, 90, 255), seed=2),
+    "bld_cityC": bg.city_block(2, 2, (214, 150, 120), floors=3, shop=(180, 60, 50, 255), seed=3),
+    "bld_slab": bg.slab_block(2, 2, floors=6, seed=4),
+    "bld_office": bg.office_tower(2, 2, floors=10),
 }
 for name, (img, ox, oy) in P5.items():
     save(name, img, ox, oy)
 for name, (img, ox, oy) in {"bld_vending": bg.vending(), "bld_lamp": bg.lamp(), "bld_clock": bg.platform_clock(),
+                            "bld_canopy": bg.canopy(), "bld_board": bg.departure_board(),
                             "bld_lockers": bg.lockers(), "bld_souvenir": bg.souvenir()}.items():
     save(name, img, ox, oy - 4)   # stehen auf dem Bahnsteig
 for m in range(16):
@@ -739,9 +752,10 @@ for n in ("cursor", "flag", "shovel", "house"):
 for name, d in (("bld_cafe", (2, 2)), ("bld_parking", (3, 2)), ("bld_bus", (3, 2)), ("bld_station2", (3, 2)), ("bld_station3", (3, 2)),
                 ("bld_fountain", (1, 1)), ("bld_flowers", (1, 1)), ("bld_statue", (1, 1)), ("bld_wc", (1, 1)), ("bld_inn", (2, 2)), ("bld_streetlamp", (1, 1)), ("bld_sawmill", (3, 2)), ("bld_mine", (3, 2)),
                 ("bld_adobeA", (2, 2)), ("bld_adobeB", (2, 2)), ("bld_adobeC", (1, 1)), ("bld_well", (1, 1)), ("bld_tent", (1, 1)),
-                ("bld_billboard", (1, 1)), ("bld_mural", (1, 1))):
+                ("bld_billboard", (1, 1)), ("bld_mural", (1, 1)),
+                ("bld_cityA", (2, 2)), ("bld_cityB", (2, 2)), ("bld_cityC", (2, 2)), ("bld_slab", (2, 2)), ("bld_office", (2, 2))):
     icon_save(name, compose([(name, 0, 0)], [(x, y) for x in range(d[0]) for y in range(d[1])]))
-for name in ("bld_vending", "bld_lamp", "bld_clock"):
+for name in ("bld_vending", "bld_lamp", "bld_clock", "bld_canopy", "bld_board"):
     icon_save(name, compose([("platform", 0, 0), (name, 0, 0)], T1))
 icon_save("tool_road", compose([("road_10", 0, 0), ("road_10", 1, 0), ("road_10", 2, 0)], [(0, 0), (1, 0), (2, 0)]))
 icon_save("rail_bridge_icon", compose([("water_10", 0, 0), ("water_10", 1, 0), ("track", 0, 0), ("track", 1, 0), ("rail_bridge", 0, 0), ("rail_bridge", 1, 0)], []))
@@ -751,6 +765,11 @@ for name, (img, ox, oy) in {
     "wire_span": bg.wire_span(), "wire_mast": bg.wire_mast(),
     "buffer_E": bg.buffer_stop(True), "buffer_W": bg.buffer_stop(False),
     "tunnel_stairs": bg.tunnel_stairs(), "bridge_deck": bg.bridge_deck(), "bridge_tower": bg.bridge_tower(),
+    "viaduct_deck": bg.viaduct(False), "viaduct_pier": bg.viaduct(True), "viaduct_car": bg.metro_car(),
+    "xing_open": bg.level_crossing(False), "xing_closed": bg.level_crossing(True),
+    "auto_0": bg.road_car((200, 50, 40)), "auto_1": bg.road_car((40, 90, 170)), "auto_2": bg.road_car((230, 200, 60)), "auto_3": bg.road_car((230, 230, 230)),
+    "auto_tractor": bg.road_vehicle('tractor'), "auto_jeep": bg.road_vehicle('jeep'), "auto_plow": bg.road_vehicle('plow'),
+    "auto_taxi": bg.road_vehicle('taxi'), "auto_van": bg.road_vehicle('van'),
     "bld_remise": bg.shed(5, (176, 92, 70), (110, 70, 60), brick=True),
     "bld_workshop": bg.shed(5, (150, 156, 166), (96, 100, 110), H=20, door=(230, 170, 40, 255)),
     "bld_wash": bg.wash(), "bld_hump": bg.hump(),

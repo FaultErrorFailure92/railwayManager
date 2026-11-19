@@ -2,15 +2,17 @@
 export const TILE = 16;
 export const PARCEL = 8;
 export const MAP_W = 256;
-export const MAP_H = 64;
+export const MAP_H = 128;
+/** Versatz der früheren, halb so hohen Karte (256 × 64) in der heutigen (RM-FR-MAP-12): oben und unten je 32 Reihen dazu */
+export const ROW0 = 32;
 /** Bestandsstrecke */
-export const MAIN_ROW = 31;
+export const MAIN_ROW = 31 + ROW0;
 /** zweites Streckengleis (kommt mit dem Streckenausbau, Fahrtrichtung Ost = rechts) */
-export const SECOND_ROW = 32;
+export const SECOND_ROW = 32 + ROW0;
 /** Startfläche in Parzellen (inklusive) */
-export const START_PARCELS = { x0: 14, x1: 17, y0: 3, y1: 4 };
+export const START_PARCELS = { x0: 14, x1: 17, y0: 3 + ROW0 / 8, y1: 4 + ROW0 / 8 };
 /** Spielstände v4 (Karte 96x32) liegen um diesen Versatz in der großen Karte */
-export const OLD_OFFSET = { x: 80, y: 16 };
+export const OLD_OFFSET = { x: 80, y: 16 + ROW0 };
 /** Kreuzungsstellen des Netzbetreibers auf der eingleisigen Strecke: [Weiche West, Weiche Ost] */
 export const PASSING_LOOPS: [number, number][] = [[6, 20], [48, 62], [88, 102], [154, 168], [190, 204], [232, 246]];
 /** Fahrplanzuschlag je Kreuzungsstelle (Spielsekunden) */

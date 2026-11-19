@@ -1,6 +1,22 @@
+# Offen – Stand 19.11.2026 (Details und Status im sdoc `docs/requirements/railway-manager.sdoc`)
+
+- [x] BUG: Stau mit Verstärkerzügen auf zweigleisiger Strecke → RM-FR-OPS-15 *(behoben 18.11.)*
+- [ ] Englische Version → RM-FR-UI-07 (auch Sprache in den Einstellungen, RM-FR-UI-09)
+- [x] Spielfeld quer zur Strecke doppelt so groß → RM-FR-MAP-12 *(256 × 128, 18.11.)*
+- [ ] Höhen, Tunnel, große Brücken, Gleis über Gleis → RM-FR-MAP-10, RM-FR-BUILD-12
+- [ ] Straßenbahn in der Großstadt → RM-FR-MAP-13
+- [ ] Weichen und Signale von Hand stellen → RM-FR-OPS-14
+- [ ] Unternehmen: Zuggattung und Antrieb frei wählen → RM-FR-MOD-06
+- [ ] Kartenwerkstatt: Gelände malen, eigene Aufträge → RM-FR-MOD-07; Steam Workshop → RM-FR-MOD-05, RM-FR-STEAM-02
+- [x] Leistung: Laden ohne Neuladen, Textur-Atlas, feste Simulationsschritte → RM-FR-PERF-02/04 *(19.11.)*
+- [ ] Leistung: Simulation im Web Worker, Zeichnen und Geräte messen → RM-FR-PERF-01/03, RM-FR-Q-01
+- [ ] Release: Desktop-App auf macOS/Windows bauen und testen, Steam-App-ID, Erfolge in Steamworks, Auto-Cloud *(Gerüst steht: src-tauri, 19.11.)* → RM-FR-PLAT-02, RM-FR-STEAM-03/04
+- [ ] Release: Name, Toolchain, Steam, Community-Kanal, Datenschutz-Platzhalter → RM-FR-PLAT-02/03/05, RM-FR-STEAM-*, RM-FR-COMM-01, RM-FR-SEC-02/05
+
+===
 
 - [x] BUG: Aufnahmegebäude wird benötigt am Anfang, kann aber nicht gebaut werden, weils erst später freigeschaltet wird
-- [x] Oberleitung soll am Anfang nicht dabei sein, ich stelle mir eine art Forschungsbaum vor, wo man das 2. gleis, Oberleitung, schnellfahrweichen für schnellzüge, Anbindung an weitere Bahnstrecken usw erforschen kann *(offen: Anbindung weiterer Strecken)*
+- [x] Oberleitung soll am Anfang nicht dabei sein, ich stelle mir eine art Forschungsbaum vor, wo man das 2. gleis, Oberleitung, schnellfahrweichen für schnellzüge, Anbindung an weitere Bahnstrecken usw erforschen kann *(Anbindung weiterer Strecken: Fremdbahnen, 18.11.2026)*
 - [x] beim Kiosk soll man die Preise für Speisen festlegen können
 - [x] es soll neben dem Kiosk auch Automaten und Cafés geben
 - [x] die Preise für Züge sind derzeit irgendwie wahllos, ich stelle mir vor, dass man mit den Unternehmen Preise verhandelt... jeweils für kurze und Lange züge, sowie regional, fern und güterverkehr extra. der Spieler kann die Preise dann selbstständig heben oder senken mit der Gefahr, dass die UNternehmen die Verträge canceln und dann nur mehr durchfahren, das geht für einen minimalpreis
@@ -147,22 +163,24 @@
 ## AP5 – Spieler & Optik *(mittel)*
 - [x] FEATURE: ich möchte einen Spielernamen und einen Avatar angeben können. Mach da gerne eine Auswahl, um jedes Geschlecht und Hautfarbe gut zu repräsentieren, gerne auch jüngere und ältere Personen. Die Anrede in den Briefen/Nachrichten soll immer persönlich und/oder genderneutral sein "Betriebsleiter Profil". Soll auch änderbar sein. soll beim Starten auch ausgewählt oder angelegt werden können (ohne authentifizierung oder PW, läuft ja eh nur lokal)
 - [x] FEATURE: optisches Update: ich hätte gerne in längeren Zügen auch Gepäckwägen und Speisewägen, die sich optisch ein wenig abheben
-- [ ] FEATURE: Wir brauchen noch einen fetzigeren Namen für unser Spiel
+- [ ] FEATURE: Wir brauchen noch einen fetzigeren Namen für unser Spiel → sdoc RM-FR-PLAT-05
 - [x] FEATURE: unterschiedliche Demoanimationen für den Titelscreen von Zügen die ur schnell durch die Wüste fahren, Busy Hauptbahnhöfen etc. mach da so 4-5 unterschiedliche, die abwechselnd mit dem letzten Spiel angezeigt (wie bisher) werden
 
 ## AP6 – Große Features *(später)*
-- [ ] FEATURE: Mach mir gerne einen Editor, wo ich Eisenbahnunternehmen hinzufgen und bearbeiten kann. Die bestehenden soll man als Vorlage verwenden können, aber nicht löschen können. Die selbst erstellten schon. Lass mich beim Spiel starten auch auswählen, welche Unternehmen teilhaben sollen. Man soll beim unternehmen den Vertreter mit Avatar, die Zugkategorien, ein Wappen und die Farben auswählen können. Auch gerne die Antriebe (Diesel, Dampf, Elektrisch)
-- [ ] FEATURE: Füge bitte auch die eine oder andere Bahn pro Karte an, die vl in einem Bogen zu meiner verläuft, an die ich mich anbinden kann und so noch ein besseres verkehrsangebot leisten kann. Vielleciht könnten so privatbahnen und anschluss an andere Bahnen generell noch ein 4. Forschungsstrang sein, damit man das nicht einfach nach lust und Laune 20x machen kann.
-- [ ] FEATURE: Baue schon vorhandene Straßen in die karten, wo auch Fahrzeuge, je nach Theme, herum fahren, an die ich dann auch irgendwo meine Eisenbahnkreuzungen und Busterminals anschließen kann
-- [ ] FEATURE: ich hätte gerne auch tunnel, unterführungen und größere brücken für die gleise, baue auch in die Alpenregion ganz am Ende noch die Möglichkeit ein auf einen berg rauf zu fahren (in der Wüste auch gerne). dafür brauch ich vl auch ein bodenbearbeitungswerkzeug. damit soll es zB auch möglich sein kreuzungsfrei abzuzweigen. vl kanns ne größere 2. bahn geben zum anschließen. Veilleicht wollen wir das spielfeld doppelt so breit machen wie bisher
-- [ ] FEATURE: in einem Theme hätt ich gerne eine Großstadt, wo es viele andere Bahnen gibt und wo wir uns unter hochbahnen und über straßenbahnen und verkehr hinwegbauen müssen. 
+- [x] FEATURE: Mach mir gerne einen Editor, wo ich Eisenbahnunternehmen hinzufgen und bearbeiten kann. Die bestehenden soll man als Vorlage verwenden können, aber nicht löschen können. Die selbst erstellten schon. Lass mich beim Spiel starten auch auswählen, welche Unternehmen teilhaben sollen. Man soll beim unternehmen den Vertreter mit Avatar, die Zugkategorien, ein Wappen und die Farben auswählen können. Auch gerne die Antriebe (Diesel, Dampf, Elektrisch) *(Kartenwerkstatt → Reiter Unternehmen; Zuggattung/Antrieb frei wählen → RM-FR-MOD-06)*
+- [x] FEATURE: Füge bitte auch die eine oder andere Bahn pro Karte an, die vl in einem Bogen zu meiner verläuft, an die ich mich anbinden kann und so noch ein besseres verkehrsangebot leisten kann. Vielleciht könnten so privatbahnen und anschluss an andere Bahnen generell noch ein 4. Forschungsstrang sein, damit man das nicht einfach nach lust und Laune 20x machen kann. *(Fremdbahnen Nord/Süd im Bogen je Karte, Vertrag mit Halten/Durchfahren, ohne Vertrag Kulisse; 4. Forschungsbaum „Abteilung Anschlussfragen“ mit 2 Anschlüssen)*
+- [x] FEATURE: Baue schon vorhandene Straßen in die karten, wo auch Fahrzeuge, je nach Theme, herum fahren, an die ich dann auch irgendwo meine Eisenbahnkreuzungen und Busterminals anschließen kann *(2 Gemeindestraßen je Karte mit Fahrzeugen je Thema und Bahnübergängen; eigene Straße zum Straßennetz bringt +5 %)*
+- [ ] FEATURE: ich hätte gerne auch tunnel, unterführungen und größere brücken für die gleise, baue auch in die Alpenregion ganz am Ende noch die Möglichkeit ein auf einen berg rauf zu fahren (in der Wüste auch gerne). dafür brauch ich vl auch ein bodenbearbeitungswerkzeug. damit soll es zB auch möglich sein kreuzungsfrei abzuzweigen. vl kanns ne größere 2. bahn geben zum anschließen. Veilleicht wollen wir das spielfeld doppelt so breit machen wie bisher → sdoc RM-FR-MAP-10, RM-FR-BUILD-12, RM-FR-MAP-12
+- [x] FEATURE: in einem Theme hätt ich gerne eine Großstadt, wo es viele andere Bahnen gibt und wo wir uns unter hochbahnen und über straßenbahnen und verkehr hinwegbauen müssen. *(Kapitel 7 Großstadt mit Hochbahn und Straßen; Straßenbahn → RM-FR-MAP-13)*
 - [x] DEV FEATURE: Bau den Demo Bahnhof bitte so aus, dass alle Funktionen mal ausprobiert werden *(Straße, Läden, Deko, Waschanlage, Abstellgleis, Instandhalter, mehr Verträge)*
-- [ ] FEATURE: Englische Version
+- [ ] FEATURE: Englische Version → sdoc RM-FR-UI-07
+
+- [x] FEATURE: Map Editor, mit dem Unternehmens-Editor fusioniert *(Kartenwerkstatt: Vorlage kopieren, Landschaft/Strecken/Unternehmen, Prüfen, Export/Import; Gelände malen, eigene Aufträge → RM-FR-MOD-07)*
 
 ## AP7 – Release 
-- [ ] RELEASE: Lokaler Build für Win und Macos, damit man es einfach starten kann. Eventuell mit Electron oder vgl? Kann gern ein eigener Branch sein *(eigener Branch, zuletzt)*
-- [ ] RELEASE: Bau mir eine witzige Landing Page für das Spiel
-- [ ] RELEASE: überlege dir eine Toolchain und Möglichkeiten, wie wir das Spiel ins Netz bekommen
+- [ ] RELEASE: Lokaler Build für Win und Macos, damit man es einfach starten kann. Eventuell mit Electron oder vgl? Kann gern ein eigener Branch sein *(eigener Branch, zuletzt)* → sdoc RM-FR-PLAT-02
+- [x] RELEASE: Bau mir eine witzige Landing Page für das Spiel *(landing/index.html; Web-Demo per `npm run build:demo`)*
+- [ ] RELEASE: überlege dir eine Toolchain und Möglichkeiten, wie wir das Spiel ins Netz bekommen → sdoc RM-FR-PLAT-03
 
 
 ## noch zuzuordnen
@@ -177,30 +195,6 @@
 - [x] BUG: Remise funktioniert nicht, bzw. wird nicht verwendet. vielleciht braucht es eine Zusatzklausel in den Verträgen, die besagen, wie oft ein Zug in eine Remise gestellt wird (gilt analog dann natürlich Pauschalpreis pro Reparatur bei Werkstatt, benutzung der Waschanlage, etc.)
 - [x] BUG: Nachtzüge haben aktuell auch eine Frequenz, die sollten aber eher nur Nachts fahren und da vielleicht 1x oder 2x. Vielleicht machen wirs eher so: Es gibt 1 Nachtzug unternehmen und die bieten an, dass unterschiedlichen Linien bei mir abfahren, dafür bekommt man Geld. Und ansonsten gibt es Nachtzüge die durchfahren (auch nachts) und dafür gibt es auch geld, wie für Güterzüge
 - [x] BUG: Züge sind nur in der Zugliste anklickbar, sollte aber direkt auf den Zug auch gehen
-- [ ] BUG: Markieren als Abstellbereich oder Verschubbereich sollte kein Geld kosten. Auch Vereinheitlichung Rangierbereich und Rangieren, Verschub gibt es nicht. Zusätzlich sollte das Markieren auch gehen, wenn grade kein Geld da ist.
+- [x] BUG: Markeiren als Abstellbereich oder Verschubbereich sollte kein Geld kosten. Auch Vereinheitlichung Rangierbereich und Rangieren, Verschub gibt es nicht
 - [x] FEATURE: Anzeige in der Titelleiste, wie viel Tage man schon im Dienst ist
 - [x] FEATURE:  Schräge Weichen (also auf Diagonalen mit der geraden Seite). Muss erforscht werden, vor der Schnellfahrweiche
-- [ ] BUG: Wendezüge bleiben auf langen Bahnsteigen manchmal 2x stehen, das ist nicht notwendig
-- [ ] BUG: Züge fahren in das Abstellgleis, oder Remise, obwohl sie einen Fahrplan hätten. Die Remise ist eher gedacht, dass sie dort abgestellt werden, wenn der Fahrplan sie nicht gleich wieder weiter schickt. Waschstraße, Remise, Abstellgleis und Werkstatt können nur ohne Fahrgäste befahren werden
-- [ ] BUG: Wendezüge bleiben in Stumpfgleis hängen und zucken herum
-- [ ] FEATURE: Bei Game Over soll sich auch der Vorstand nochmal mit einer aufmunternden Nachricht melden, aber dass wir an dieser Stelle nicht weiter machen können
-- [ ] FEATURE: Züge sind nicht verspätet, wenn sie +/-5min vom Fahrplan sind, 5-10 min gib es nur ein bisschen abzug vom Geld, zwischen 10 und 20 min noch weniger und ab 20 min gib es kein geld mehr. ab 45min gibt es dann strafen. bzw das könnte auch vertragsgegendstand sein
-- [ ] FEATURE: Vertrags-Waltraud soll auch mitteilen, wenn sie glaubt, dass sich mehr züge nicht mehr ausgehen
-- [ ] FEATURE: Bei Störungen und Vandalismus soll sich bitte der Instandhalter auch mit einer kurzen Nachricht melden.
-- [ ] BUG: Der "Menü"-Button im Spiel heisst "Hauptmenü", aber es wird ja eher nur das "Spiel"-Menü gezeigt
-- [ ] FEATURE: Der Spieler sollte unabhängig vom Spiel erstellbar und konfigurierbar sein, ein Spieler kann mehrere laufende Spiele haben.
-- [ ] FEATURE: gib mir lustige Bahnbezogene Accessories, die ich meinem Spieler-Avatar anziehen kann
-- [ ] BUG: Das Busterminal soll keinen Gleisanschluss brauchen, aber eine Bahnhofserweiterung sein und einen Straßenanschluss brauchen. Dann fahren dort Busse. Für die kann man auch Verträge abschließen. Aber nur 1 pro Busterminal und dann den Takt festlegen. Fokus des Spiels ist ja nicht Busverkehr
-- [ ] FEATURE: Der Finanzmitarbeiter soll regelmässig updates geben, wie die Bilanz sich entwickelt.
-- [ ] BUG: Wenn man einen Kredit bekommt, sollte man einfach 50k€ bekommen und wenn man dann wieder auf 0 kommt, kommt das Game over. Wenn der KRedit zurück gezahlt ist, sollte sich auch der Finanzmitarbeiter mit einer Nachricht melden.
-- [ ] FEATURE: Organigramm mit Vorstand, mir selbst, dem FInanzmitarbeiter und der Waltraud, damit man weiss, wer der Chef von wem ist, Instandhalter werden dort auch angezeigt
-- [ ] FEATURE: für jedes Gebäude, Sonderding und Bahnbetriebliche Ding soll es in irgend einer Form einen Auftrag geben, um das konkret zu lernen. Stelle gerne auch die Reihenfolge der Aufträge noch einmal so um, dass es auch mit dem Forschungsbaum sinn ergibt. Das Signal und auch die Weichen mach erforschbar (aber ganz billig und am Anfang)
-- [ ] BUG: Güterzug fährt gerade ein um durchzufahren. laut sim zugverkehr steht fährt aus und zwar schon bevor er im Bild sichtbar ist. Überprüfe die Anzeigen im Zugverkehr nochmal.
-- [ ] BUG: oft zahlt man strafe für einen Zug, der verspätet ist, obwohl er schon verspätet ankommt. das kann zwar passieren, aber wenn ich als betriebsleiter die verzögerung nicht schlimmer mache, sollte ich dafür keine strafe zahlen müssen
-- [ ] FEATURE: Gäste sollen teilweise auch Gepäck, kleine Kinder oder Hunde mit dabei haben. 
-- [ ] FEATURE: bei Hauptbahnhof soll es Gepäckwagen als Forschung geben und die können dann auch eingesetzt werdens
-- [ ] FEATURE: Erweiterung für Hauptbahnhof: Fahrkartenschalter mit Personal
-- [ ] FEATURE: Ticketautomat
-- [ ] FEATURE: Mehrgleisige Remise
-- [ ] BUG: Bahnhofsname wird manchmal zu groß angezeigt
-- [ ] BUG: Brücken und unterführungen für Passagiere müssen auch in Richtung West/Ost gebaut werden können

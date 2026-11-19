@@ -48,7 +48,13 @@ function sortById<T>(m: Map<number, T>) {
   m.clear();
   for (const [id, x] of all) m.set(id, x);
 }
-const same = (a: object, b: object) => JSON.stringify(a) === JSON.stringify(b);
+/** flacher Vergleich (Gleisteile, Gebäude, Zugänge haben nur einfache Felder) – viel schneller als JSON bei tausenden Bäumen */
+const same = (a: object, b: object) => {
+  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+  for (const k in x) if (x[k] !== y[k]) return false;
+  for (const k in y) if (!(k in x)) return false;
+  return true;
+};
 
 function diffMaps<T extends { id: number }>(a: Map<number, T>, b: Map<number, T>): Diff<T> {
   const before: T[] = [], after: T[] = [];

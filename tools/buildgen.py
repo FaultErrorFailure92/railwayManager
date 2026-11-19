@@ -971,3 +971,219 @@ def ri_icon(kind):
             if not m[y, x] and any(0 <= y + dy < 18 and 0 <= x + dx < 18 and m[y + dy, x + dx] for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0))):
                 out[y, x] = (20, 20, 24, 255)
     return Image.fromarray(out).resize((36, 36), Image.NEAREST)
+
+
+def city_block(w, h, wall, floors=4, roof=(150, 70, 56), cornice=True, shop=None, seed=0):
+    """Stadthaus (Gründerzeit): mehrere Stockwerke, Fensterreihen, Gesims, Walmdach; unten optional Geschäft"""
+    W, D = 16 * w, 16 * h
+    m = 1.0
+    x0, y0, x1, y1 = m, m, W - m, D - m
+    fh = 6
+    H = floors * fh + 3
+    R = 6
+    iso = Iso(W, D, H + R + 2)
+    iso.box(x0, y0, x1, y1, 0, H, wall)
+    # Erdgeschoss-Sockel
+    iso.wall_rect_y(y1, x0, x1, 0, 4.5, shade(wall, 0.82))
+    iso.wall_rect_x(x1, y0, y1, 0, 4.5, shade(wall, 0.66))
+    if shop:
+        iso.wall_rect_y(y1, x0 + 2, x1 - 2, 1, 4.2, (60, 84, 108, 255))
+        iso.wall_rect_y(y1, x0 + 1.5, x1 - 1.5, 4.2, 5.4, shop)
+    else:
+        iso.wall_rect_y(y1, (x0 + x1) / 2 - 1.5, (x0 + x1) / 2 + 1.5, 0, 4.2, (92, 60, 40, 255))
+    nx = max(2, int((x1 - x0) // 5))
+    ny = max(1, int((y1 - y0) // 5))
+    rng = np.random.default_rng(seed)
+    for f in range(1, floors):
+        za = 3 + f * fh - 4.5
+        for i in range(nx):
+            xa = x0 + 2 + i * (x1 - x0 - 3) / nx
+            lit = rng.random() < 0.25
+            iso.wall_rect_y(y1, xa, xa + 2, za, za + 3.5, WIN_L if lit else WIN)
+            iso.wall_rect_y(y1, xa - 0.3, xa + 2.3, za + 3.5, za + 4.1, shade(wall, 1.15))
+        for i in range(ny):
+            ya = y0 + 2 + i * (y1 - y0 - 3) / ny
+            iso.wall_rect_x(x1, ya, ya + 2, za, za + 3.5, shade(WIN, 0.85))
+        # Stockwerksband
+        iso.wall_rect_y(y1, x0, x1, za - 1.2, za - 0.6, shade(wall, 0.9))
+    if cornice:
+        iso.box(x0 - 0.8, y0 - 0.8, x1 + 0.8, y1 + 0.8, H - 1.2, H, shade(wall, 1.1), outline=False)
+    # Walmdach (flach geneigt)
+    xm0, xm1, ym = x0 + R, x1 - R, (y0 + y1) / 2
+    iso.poly([(x0, y0, H), (x1, y0, H), (xm1, ym, H + R), (xm0, ym, H + R)], shade(roof, 0.7))
+    iso.poly([(x1, y0, H), (x1, y1, H), (xm1, ym, H + R)], shade(roof, 0.82), shade(roof, 0.55))
+    iso.poly([(x0, y1, H), (x1, y1, H), (xm1, ym, H + R), (xm0, ym, H + R)], shade(roof, 1.0), shade(roof, 0.6))
+    # Kamin
+    iso.box(x1 - 6, y0 + 3, x1 - 4, y0 + 5, H + 1, H + R + 2, (150, 90, 70))
+    return iso.result()
+
+
+def slab_block(w, h, floors=6, seed=0):
+    """Plattenbau: grau, Flachdach, Balkonstreifen"""
+    W, D = 16 * w, 16 * h
+    m = 1.0
+    x0, y0, x1, y1 = m, m, W - m, D - m
+    fh = 5
+    H = floors * fh + 2
+    wall = (196, 196, 188)
+    iso = Iso(W, D, H + 4)
+    iso.box(x0, y0, x1, y1, 0, H, wall)
+    rng = np.random.default_rng(seed)
+    nx = max(2, int((x1 - x0) // 4))
+    ny = max(1, int((y1 - y0) // 4))
+    for f in range(floors):
+        za = 1.5 + f * fh
+        for i in range(nx):
+            xa = x0 + 1.5 + i * (x1 - x0 - 2) / nx
+            iso.wall_rect_y(y1, xa, xa + 2.2, za + 1, za + 3.6, WIN_L if rng.random() < 0.2 else WIN)
+        for i in range(ny):
+            ya = y0 + 1.5 + i * (y1 - y0 - 2) / ny
+            iso.wall_rect_x(x1, ya, ya + 2.2, za + 1, za + 3.6, shade(WIN, 0.85))
+        iso.wall_rect_y(y1, x0, x1, za, za + 0.7, (170, 120, 90, 255) if f % 2 else (140, 150, 160, 255))
+    iso.box(x0 + 3, y0 + 3, x0 + 7, y0 + 7, H, H + 3, (170, 170, 164))
+    return iso.result()
+
+
+def office_tower(w, h, floors=10):
+    """Bürohochhaus: Glasfassade, Technikaufbau"""
+    W, D = 16 * w, 16 * h
+    m = 2.0
+    x0, y0, x1, y1 = m, m, W - m, D - m
+    fh = 4.5
+    H = floors * fh + 2
+    glass = (88, 130, 160)
+    iso = Iso(W, D, H + 6)
+    iso.box(x0, y0, x1, y1, 0, H, glass)
+    for f in range(floors):
+        za = 1 + f * fh
+        iso.wall_rect_y(y1, x0, x1, za, za + 0.6, (60, 70, 82, 255))
+        iso.wall_rect_x(x1, y0, y1, za, za + 0.6, (50, 58, 70, 255))
+    for i in range(1, int((x1 - x0) // 4)):
+        xa = x0 + i * 4
+        iso.wall_rect_y(y1, xa, xa + 0.5, 0, H, (60, 70, 82, 255))
+    for i in range(1, int((y1 - y0) // 4)):
+        ya = y0 + i * 4
+        iso.wall_rect_x(x1, ya, ya + 0.5, 0, H, (50, 58, 70, 255))
+    # Spiegelung
+    iso.poly([(x0 + 2, y1, H * 0.55), (x0 + 6, y1, H * 0.75), (x0 + 6, y1, H * 0.9), (x0 + 2, y1, H * 0.7)], (170, 210, 230, 255))
+    iso.box(x0 + 4, y0 + 4, x1 - 4, y1 - 4, H, H + 4, (120, 124, 130))
+    iso.wall_rect_y(y1, x0, x1, 0, 4, (40, 46, 56, 255))
+    return iso.result()
+
+
+def canopy():
+    """Bahnsteigdach: Stahlstütze in der Mitte, flaches Satteldach über das ganze Feld (aneinanderreihbar)"""
+    iso = Iso(16, 16, 20)
+    post = (70, 76, 86, 255)
+    iso.box(7.2, 7.2, 8.8, 8.8, 0, 13, (90, 96, 108))
+    roof = (130, 60, 52)
+    iso.poly([(0, 1, 13), (16, 1, 13), (16, 8, 15), (0, 8, 15)], shade(roof, 0.8), shade(roof, 0.5))
+    iso.poly([(0, 15, 13), (16, 15, 13), (16, 8, 15), (0, 8, 15)], shade(roof, 1.0), shade(roof, 0.55))
+    iso.line((0, 15, 13), (16, 15, 13), (230, 220, 200, 255))
+    return iso.result()
+
+
+def departure_board():
+    """Zugzielanzeiger: zwei Stützen, dunkle Tafel mit gelber Schrift"""
+    iso = Iso(16, 16, 22)
+    post = (60, 64, 72, 255)
+    iso.line((4, 8, 0), (4, 8, 15), post)
+    iso.line((12, 8, 0), (12, 8, 15), post)
+    iso.box(2.5, 7.4, 13.5, 8.6, 14, 19.5, (30, 34, 42), top=(60, 64, 72, 255))
+    for i, z in enumerate((18.6, 16.8, 15.0)):
+        col = (250, 200, 40, 255) if i == 0 else (200, 210, 220, 255)
+        iso.line((3.4, 8.6, z), (6.0, 8.6, z), col)
+        iso.line((7.0, 8.6, z), (12.4 - i * 1.5, 8.6, z), col)
+    return iso.result()
+
+
+VIADUCT_Z = 30
+
+
+def viaduct(pier=False):
+    """Hochbahn (Großstadt): Betonfahrbahn quer zu den Gleisen (y-Richtung), Schienen oben; mit pier=True ein Pfeiler bis zum Boden"""
+    z = VIADUCT_Z
+    iso = Iso(16, 16, z + 8)
+    conc = (176, 172, 164)
+    if pier:
+        iso.box(5.5, 5.5, 10.5, 10.5, 0, z - 3, (150, 146, 140))
+        iso.box(4.5, 4.5, 11.5, 11.5, z - 4, z - 3, (130, 126, 120))
+    iso.box(3, 0, 13, 16, z - 3, z, conc)
+    iso.box(3, 0, 4, 16, z, z + 2.5, shade(conc, 1.05))
+    iso.box(12, 0, 13, 16, z, z + 2.5, shade(conc, 1.05))
+    for xr in (6, 9.5):
+        iso.poly([(xr, 0, z + 0.2), (xr + 0.8, 0, z + 0.2), (xr + 0.8, 16, z + 0.2), (xr, 16, z + 0.2)], (110, 96, 84, 255))
+    for yy in range(1, 16, 3):
+        iso.poly([(5, yy, z + 0.1), (11, yy, z + 0.1), (11, yy + 1, z + 0.1), (5, yy + 1, z + 0.1)], (96, 76, 60, 255))
+    return iso.result()
+
+
+def metro_car():
+    """U-Bahn/Hochbahn-Wagen, quer zu den Gleisen (y-Richtung), 1 Feld lang"""
+    z = VIADUCT_Z
+    iso = Iso(16, 16, z + 14)
+    body = (226, 120, 40)
+    iso.box(5, 0.5, 11, 15.5, z + 1, z + 9, body, top=(200, 200, 200, 255))
+    iso.wall_rect_x(11, 2, 14, z + 4.5, z + 7, (60, 80, 110, 255))
+    iso.wall_rect_x(11, 2, 14, z + 2, z + 2.8, (250, 250, 240, 255))
+    return iso.result()
+
+
+def level_crossing(closed):
+    """Bahnübergang: Schranken an beiden Straßenseiten (Straße läuft in y-Richtung, Gleis in x-Richtung)"""
+    iso = Iso(16, 16, 14)
+    post = (60, 60, 66)
+    for (x, y) in ((2, 1), (14, 15)):
+        iso.box(x - 0.6, y - 0.6, x + 0.6, y + 0.6, 0, 7, post)
+        iso.box(x - 0.9, y - 0.9, x + 0.9, y + 0.9, 7, 8.2, (40, 40, 44), top=(230, 40, 30, 255) if closed else (60, 20, 20, 255))
+    seg = 2
+    for (x, y, d) in ((2, 1, 1), (14, 15, -1)):
+        for i in range(6):
+            col = (235, 50, 40, 255) if i % 2 == 0 else (245, 245, 245, 255)
+            if closed:
+                xa = x + d * i * seg
+                iso.box(min(xa, xa + d * seg), y - 0.5, max(xa, xa + d * seg), y + 0.5, 5, 6.4, col[:3], top=col, outline=False)
+            else:
+                iso.poly([(x, y, 6 + i * seg), (x + 0.6 * d, y, 6 + i * seg), (x + 0.6 * d, y, 6 + (i + 1) * seg), (x, y, 6 + (i + 1) * seg)], col)
+    return iso.result()
+
+
+def road_car(color, seed=0):
+    """Auto auf der Straße, fährt in y-Richtung"""
+    iso = Iso(16, 16, 10)
+    iso.box(5.5, 3, 10.5, 13, 0.6, 3.6, color)
+    iso.box(6, 5.5, 10, 10.5, 3.6, 6, shade(color, 1.05), top=shade(color, 1.15))
+    iso.wall_rect_x(10, 6, 10, 4, 5.6, (60, 80, 110, 255))
+    iso.wall_rect_y(10.5, 6.5, 9.5, 4, 5.6, (60, 80, 110, 255))
+    return iso.result()
+
+
+def road_vehicle(kind):
+    """Fahrzeuge je Thema (fahren in y-Richtung): Traktor, Jeep, Schneepflug, Taxi, Lieferwagen"""
+    iso = Iso(16, 16, 12)
+    win = (60, 80, 110, 255)
+    if kind == 'tractor':
+        iso.box(6, 3, 10, 9, 0.6, 4, (60, 140, 60))
+        iso.box(6.5, 9, 9.5, 13, 0.6, 7, (60, 140, 60), top=(40, 40, 40, 255))
+        iso.wall_rect_x(9.5, 9.5, 12.5, 4, 6.5, win)
+        for (x, y, r) in ((5.4, 11, 2.2), (10.6, 11, 2.2)):
+            iso.box(x - 0.5, y - r / 2, x + 0.5, y + r / 2, 0, r, (30, 30, 30), outline=False)
+    elif kind == 'jeep':
+        iso.box(5.5, 3, 10.5, 13, 0.8, 4, (196, 168, 110))
+        iso.box(6, 6, 10, 10.5, 4, 6.4, (180, 150, 96), top=(120, 100, 70, 255))
+        iso.wall_rect_x(10, 6.5, 10, 4.4, 6, win)
+    elif kind == 'plow':
+        iso.box(5.5, 4, 10.5, 13, 0.8, 4.5, (240, 140, 30))
+        iso.box(6, 9, 10, 13, 4.5, 7.5, (240, 140, 30), top=(250, 250, 250, 255))
+        iso.wall_rect_x(10, 9.5, 12.5, 5, 7, win)
+        iso.box(3.5, 2, 12.5, 3.2, 0.3, 3.2, (220, 220, 220))
+    elif kind == 'taxi':
+        iso.box(5.5, 3, 10.5, 13, 0.6, 3.6, (245, 200, 40))
+        iso.box(6, 5.5, 10, 10.5, 3.6, 6, (245, 200, 40), top=(250, 220, 80, 255))
+        iso.box(7.2, 7.4, 8.8, 8.6, 6, 7, (30, 30, 30), outline=False)
+        iso.wall_rect_x(10, 6, 10, 4, 5.6, win)
+    else:  # van
+        iso.box(5.5, 2, 10.5, 14, 0.6, 7, (236, 236, 232), top=(220, 220, 214, 255))
+        iso.wall_rect_x(10.5, 11, 13.5, 4.5, 6.5, win)
+        iso.wall_rect_x(10.5, 3, 10, 2, 3, (200, 40, 40, 255))
+    return iso.result()

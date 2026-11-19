@@ -1,9 +1,13 @@
+import { CREW, INSPECTORS, staffTip } from '../game/Staff';
+import { systemOn } from '../game/Systems';
 import { catchRate, FINE, INSPECTOR_MAX, INSPECTOR_WAGE } from '../game/FareDodgers';
 import { acceptChance, cancelRisk, fairPrice, PARK_FEE, TRANSIT_FEE } from '../game/Contracts';
+import { THROUGH_SHARE } from '../game/Foreign';
 import type { Game } from '../game/Game';
 import { fmtTime } from '../game/Game';
 import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES, treeOf } from '../game/Research';
-import { OPERATORS, TRAFFIC_LABEL, trafficClass } from '../sim/Operators';
+import { OP_OVERRIDES, OPERATORS, TRAFFIC_LABEL, trafficClass, type OperatorId } from '../sim/Operators';
+import { crest } from '../game/Companies';
 import { canBoost } from '../sim/demand';
 import { ACHIEVEMENTS } from '../game/Achievements';
 import { contactOf, VERBUND } from '../game/Board';
@@ -26,9 +30,12 @@ export function researchKey(g: Game, tree: ResearchTree, quest?: string) {
 }
 
 /** Reiter oben: drei Bäume mit laufender Forschung */
+/** sichtbare Bäume: „Anschlussfragen“ erst, wenn Fremdbahnen im Spiel sind (RM-FR-CPX-01/07) */
+export const visibleTrees = (g: Game) => TREES.filter((t) => t.id !== 'link' || systemOn(g, 'foreign'));
+
 export function researchTabsHtml(g: Game, tree: ResearchTree, quest?: string) {
   const questTree = quest ? RESEARCH_BY_ID[quest as ResearchId]?.tree : undefined;
-  return TREES.map((t) => {
+  return visibleTrees(g).map((t) => {
     const cur = g.runningIn(t.id);
     const all = treeOf(t.id), done = all.filter((r) => g.researched(r.id)).length;
     const ready = all.some((r) => !g.researchBlock(r.id));
@@ -180,17 +187,18 @@ function contractOps(g: Game) {
 export function contractsKey(g: Game) {
   return contractOps(g).map((o) => {
     const c = g.contracts[o.id];
-    return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}`;
-  }).join('|') + Object.values(g.contracts).map((c) => `${+!!c.service}${c.lines ?? 1}`).join('') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}i${g.inspectors}${g.researched('ticket')}`;
+    return `${o.id}${c.status}${c.takt}${c.price.short},${c.price.long},${Math.round(g.satisfaction[o.id])},${g.sim.time >= c.talkAfter}${c.mode ?? ''}`;
+  }).join('|') + g.researched('linkThru') + Object.values(g.contracts).map((c) => `${+!!c.service}${c.lines ?? 1}`).join('') + Object.values(g.contracts).map((c) => +!!c.auto).join('') + g.minTakt + `c${g.crew}${g.researched('crew')}${g.researched('crew2')}i${g.inspectors}${g.researched('ticket')}`;
 }
 
 /** Personal: eigene Instandhalter */
 function crewHtml(g: Game) {
+  if (!systemOn(g, 'staff')) return '';
   if (!g.researched('crew')) {
     return `<div class="ct-crew off" title="Erforsche „Die Schrauber-Brigade“ (Stellwerk), um eigene Instandhalter einzustellen. Bis dahin: Störung anklicken und Störtrupp rufen."><img src="${ICON('tool_shovel')}" alt="" /><div><b>Instandhaltungsteam</b><small>noch nicht erforscht</small></div></div>`;
   }
   const n = g.crew;
-  const workers = Array.from({ length: Game_CREW_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}">${portrait(31 + i * 17, 28)}</span>`).join('');
+  const workers = Array.from({ length: Game_CREW_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}" title="${staffTip(CREW[i])}">${portrait(31 + i * 17, 28)}</span>`).join('');
   return `<div class="ct-crew"><img src="${ICON('tool_shovel')}" alt="" />
     <div title="${n ? `rücken bei Störungen selbst aus · Reparatur ${g.repairMinutes} min · ${Math.round(15 * n)} % weniger Ausfälle` : 'noch niemand eingestellt'}${g.researched('crew2') ? ' · vorbeugende Wartung aktiv' : ''}"><b>Instandhaltungsteam</b></div>
     <div class="cw-list">${workers}</div>
@@ -201,9 +209,9 @@ const Game_CREW_MAX = 4;
 
 /** Kontrolleure (RM-FR-ECO-13) */
 function inspectorsHtml(g: Game) {
-  if (!g.researched('ticket')) return '';
+  if (!g.researched('ticket') || !systemOn(g, 'staff')) return '';
   const n = g.inspectors;
-  const workers = Array.from({ length: INSPECTOR_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}">${portrait(77 + i * 13, 28)}</span>`).join('');
+  const workers = Array.from({ length: INSPECTOR_MAX }, (_, i) => `<span class="cw${i < n ? ' on' : ''}" title="${staffTip(INSPECTORS[i])}">${portrait(77 + i * 13, 28)}</span>`).join('');
   return `<div class="ct-crew"><img src="${ICON('bld_statue')}" alt="" />
     <div title="Erwischen ${Math.round(catchRate(n) * 100)} % der Schwarzfahrer · ${FINE} € je Erwischtem · bisher ${(g.stats.caught ?? 0).toLocaleString('de-AT')} von ${(g.stats.dodgers ?? 0).toLocaleString('de-AT')}"><b>Kontrolleure</b></div>
     <div class="cw-list">${workers}</div>
@@ -243,13 +251,23 @@ export function contractsHtml(g: Game) {
     return `<div class="ct-row${c.status === 'active' ? '' : ' off'}">
       <div class="ct-name" title="${TRAFFIC_LABEL[trafficClass(o)]} · ${o.category}"><span class="dot" style="background:${o.color}"></span><b>${o.name}</b></div>
       <div${night ? ' title="Nachtlinien: je Nacht 1 Zug pro Richtung"' : ''}>${takt}</div>
-      <div>${price('short')}</div>
-      <div>${price('long')}</div>
+      <div class="ct-pp">${price('short')}</div>
+      <div class="ct-pp">${price('long')}<button class="btn ct-auto${c.auto ? ' on' : ''}" data-auto="${o.id}" title="Automatik: Preise immer fair halten (verstellen schaltet sie aus)">A</button></div>
       <div class="ct-sat" title="Zufriedenheit ${sat} %"><div class="bar"><div style="width:${sat}%;background:${sat < 35 ? '#d9534f' : o.color}"></div></div></div>
-      <div class="ct-status">${status}${c.status === 'active' && o.needsStop && o.kind !== 'freight' ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Pflege</button>` : ''}${c.status === 'active' && canBoost(o, g.sim.taktOf(o.id)) ? `<button class="btn ct-svc${c.boost ? ' on' : ''}" data-boost="${o.id}" data-tt="Verstärkerzüge: In der Stoßzeit (6–9 und 16–19 Uhr) schickt ${o.name} zusätzlich einen Zug zwischen zwei Regelzügen – mehr Halte, mehr Einnahmen, aber auch mehr Betrieb. Nur einschalten, wenn der Bahnhof genug Bahnsteige hat.">${c.boost ? '✓' : '○'} Verstärker</button>` : ''}</div>
+      <div class="ct-status">${status}${c.status === 'active' && o.foreign ? foreignModeBtn(g, o.id) : ''}${c.status === 'active' && o.needsStop && o.kind !== 'freight' && !o.foreign ? `<button class="btn ct-svc${c.service ? ' on' : ''}" data-svc="${o.id}" data-tt="Abstellen &amp; Pflege: ${o.turnback ? 'jeder Wendezug' : 'jeder zweite Zug endet hier,'} wird abgestellt (Remise bevorzugt), gereinigt, gewaschen oder repariert und fährt zurück. Je Abstellung ${PARK_FEE.siding}–${PARK_FEE.remise} € plus Pflege-Preise.">${c.service ? '✓' : '○'} Pflege</button>` : ''}${c.status === 'active' && canBoost(o, g.sim.taktOf(o.id)) ? `<button class="btn ct-svc${c.boost ? ' on' : ''}" data-boost="${o.id}" data-tt="Verstärkerzüge: In der Stoßzeit (6–9 und 16–19 Uhr) schickt ${o.name} zusätzlich einen Zug zwischen zwei Regelzügen – mehr Halte, mehr Einnahmen, aber auch mehr Betrieb. Nur einschalten, wenn der Bahnhof genug Bahnsteige hat.">${c.boost ? '✓' : '○'} Verstärker</button>` : ''}</div>
     </div>`;
   }).join('');
   return crewHtml(g) + inspectorsHtml(g) + `<div class="ct-row ct-headrow"><span>Unternehmen</span><span>Takt</span><span>kurzer Zug</span><span>langer Zug</span><span>Zufriedenheit</span><span></span></div>` + rows;
+}
+
+/** Fremdbahn-Vertrag: Halten oder Durchfahren (RM-FR-MAP-09) */
+function foreignModeBtn(g: Game, op: OperatorId) {
+  const mode = g.contracts[op].mode ?? 'stop';
+  const can = g.researched('linkThru');
+  const tip = mode === 'stop'
+    ? `Halten: Züge der ${OPERATORS[op].name} halten bei dir, Fahrgäste steigen um (+${Math.round((g.researched('linkPax') ? 0.1 : 0.05) * 100)} % Fahrgäste für alle Züge).${can ? ' Klicken: Durchfahrt.' : ' Durchfahrt erst mit „Freie Fahrt für fremde Bahnen“ (Anschlussfragen).'}`
+    : `Durchfahren: Züge fahren ohne Halt über deine Gleise und zahlen ${Math.round(THROUGH_SHARE * 100)} % des Preises. Klicken: wieder halten.`;
+  return `<button class="btn ct-svc on" data-fmode="${op}" data-tt="${tip}"${!can && mode === 'stop' ? ' disabled' : ''}>${mode === 'stop' ? '⏸ Halten' : '⇥ Durchfahren'}</button>`;
 }
 
 /** Ausschreibung / Anfrage als Karten */
@@ -268,7 +286,7 @@ export function offerHtml(g: Game) {
       <div class="tc-row"><span>Antrieb</span><span>${op.traction === 'electric' ? '⚡ elektrisch' : op.traction === 'steam' ? '♨ Dampf' : '⛽ Diesel'}</span></div>
       <div class="tc-row"><span>Takt</span><span>${op.kind === 'night' ? 'nachts, 1–3 Linien' : `alle ${Math.max(g.minTakt, op.takt)} min`}</span></div>
       <div class="tc-row"><span>Preis</span><span>${fair('short')} € / ${fair('long')} € lang</span></div>
-      <div class="tc-row"><span>Halt</span><span>${op.needsStop ? (op.turnback ? 'endet hier, wendet' : 'hält bei dir') : 'fährt durch'}</span></div>
+      <div class="tc-row"><span>Halt</span><span>${op.foreign ? 'hält bei dir, Umsteiger' : op.needsStop ? (op.turnback ? 'endet hier, wendet' : 'hält bei dir') : 'fährt durch'}</span></div>
       <div class="of-space"></div>
       ${block ? `<div class="no of-block">${block}</div>` : `<button class="btn big" data-accept="${id}">${o.kind === 'tender' ? 'Wählen' : 'Annehmen'}</button>`}
     </div>`;
@@ -277,11 +295,13 @@ export function offerHtml(g: Game) {
   const first = OPERATORS[o.ops[0]];
   const who = o.kind === 'tender' ? VERBUND() : contactOf(first.id, first.name);
   let say = o.text;
-  if (o.kind === 'inquiry') say = `Grüß Gott, ${who.name} von ${first.name} hier! Wir würden gern bei Ihnen fahren – ${first.category}. Die Eckdaten sehen Sie unten. Kommen wir ins Geschäft?`;
+  const own = OP_OVERRIDES[first.id];
+  if (o.kind === 'inquiry') say = `Grüß Gott, ${who.name} von ${first.name} hier!${own?.motto ? ` ${own.motto} –` : ''} Wir würden gern bei Ihnen fahren – ${first.category}. Die Eckdaten sehen Sie unten. Kommen wir ins Geschäft?`;
+  if (o.kind === 'inquiry' && first.foreign) say = `Grüß Gott, ${who.name} von der ${first.name}! Unsere Strecke hängt jetzt an Ihren Gleisen. Sollen unsere Züge bei Ihnen halten? Unsere Fahrgäste steigen um – das bringt Ihnen mehr Kundschaft. Ob halten oder nur durchfahren, regeln wir im Vertrag.`;
   else if (/Regional/.test(o.title)) say = 'Gratulation zur Bahnhofseröffnung! Wir vergeben jetzt den Regionalverkehr. Drei Bahnunternehmen haben sich beworben – Sie dürfen EINES auswählen.';
   else if (/Güter/.test(o.title)) say = 'Auch der Güterverkehr wird neu vergeben. Güterzüge fahren bei Ihnen durch und zahlen für die Trasse. Wählen Sie EIN Unternehmen.';
   else if (/Wende/.test(o.title)) say = 'Wir suchen einen Partner für Wendezüge: Diese Züge enden bei Ihnen und fahren wieder zurück. Wen nehmen Sie?';
-  const call = `<div class="call ${o.kind}"><div class="call-pic">${portrait(who.seed, 54)}</div>
+  const call = `<div class="call ${o.kind}"><div class="call-pic">${portrait(who.seed, 54)}${own && o.kind === 'inquiry' ? crest(own, 26) : ''}</div>
     <div class="call-body"><div class="call-who"><b>${who.name}</b><small>${who.role} · ${who.org}</small></div><div class="call-say">„${say}“</div></div>
     <span class="call-tag">${o.kind === 'tender' ? '✉ BRIEF' : '☎ ANRUF'}</span></div>`;
   return `<h1 class="${o.kind === 'tender' ? '' : 'blue'}">${o.title.toUpperCase()}</h1>${call}

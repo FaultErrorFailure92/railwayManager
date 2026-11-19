@@ -72,6 +72,8 @@ export interface Edge {
   shunt?: boolean;
   /** Ladegleis eines Privatbahn-Betriebs */
   industry?: string;
+  /** Ein-/Ausfahrt einer Fremdbahn (Unternehmen) – sonst Hauptstrecke */
+  line?: string;
   /** abzweigend über eine Schnellfahrweiche */
   fast: boolean;
   /** nicht gerade (Bogen, Diagonale, normaler Weichenabzweig) – für Hochgeschwindigkeitszüge gesperrt */
@@ -179,17 +181,22 @@ export class Network {
     const right = MAP_W * TILE;
 
     // --- Ein-/Ausfahrten an jedem Streckengleis, das bis zu beiden Kartenrändern reicht
-    for (const r of g.mainRows) {
+    // Fremdbahnen (RM-FR-MAP-09) bekommen eigene Ein-/Ausfahrten, gekennzeichnet mit ihrem Unternehmen
+    for (const r of [...g.mainRows, ...g.foreignRows]) {
       if (!g.get(0, r)?.track || !g.get(g.w - 1, r)?.track) continue;
       const my = rowY(r);
+      const line = g.foreignAtRow(r)?.op;
       const inE = makeEdge(`IN_E:${r}`, 'E', `IN_E:${r}`, port('E', 'S', 0, r), [{ x: -160, y: my }, { x: 0, y: my }], []);
       const inW = makeEdge(`IN_W:${r}`, 'W', `IN_W:${r}`, port('W', 'S', MAP_W, r), [{ x: right + 160, y: my }, { x: right, y: my }], []);
       inE.signalAtEnd = inW.signalAtEnd = true;
+      const outE = makeEdge(`OUT_E:${r}`, 'E', port('E', 'S', MAP_W, r), `OUT_E:${r}`, [{ x: right, y: my }, { x: right + 400, y: my }], []);
+      const outW = makeEdge(`OUT_W:${r}`, 'W', port('W', 'S', 0, r), `OUT_W:${r}`, [{ x: 0, y: my }, { x: -400, y: my }], []);
+      if (line) inE.line = inW.line = outE.line = outW.line = line;
       this.add(inE);
       this.add(inW);
       this.entries.push(inE, inW);
-      this.add(makeEdge(`OUT_E:${r}`, 'E', port('E', 'S', MAP_W, r), `OUT_E:${r}`, [{ x: right, y: my }, { x: right + 400, y: my }], []));
-      this.add(makeEdge(`OUT_W:${r}`, 'W', port('W', 'S', 0, r), `OUT_W:${r}`, [{ x: 0, y: my }, { x: -400, y: my }], []));
+      this.add(outE);
+      this.add(outW);
     }
 
     // --- gerade Gleise
@@ -378,6 +385,19 @@ export class Network {
     const r = k.split(':')[1];
     const map: Record<string, string> = { IN_E: 'OUT_W', IN_W: 'OUT_E', OUT_E: 'IN_W', OUT_W: 'IN_E' };
     return this.edges.get(`${map[k.split(':')[0]]}:${r}`);
+  }
+
+  /** alle Kanten, die von diesen Ports aus erreichbar sind (Breitensuche – viel schneller als alle Wege aufzuzählen) */
+  reach(starts: string[]): Set<Edge> {
+    const seen = new Set<string>(starts), out = new Set<Edge>(), todo = [...starts];
+    while (todo.length) {
+      const p = todo.pop()!;
+      for (const e of this.out.get(p) ?? []) {
+        out.add(e);
+        if (!seen.has(e.to)) { seen.add(e.to); todo.push(e.to); }
+      }
+    }
+    return out;
   }
 
   /** Wege von einem Port bis zu einer Kante, die `goal` erfüllt (z.B. Bahnsteigkante), auch in Stumpfgleise */

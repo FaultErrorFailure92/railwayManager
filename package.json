@@ -6,11 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:demo": "tsc --noEmit && VITE_DEMO=1 vite build --outDir dist-demo",
     "preview": "vite preview",
     "sprites": "python3 tools/gen_sprites.py",
     "test": "vitest run",
     "test:watch": "vitest",
-    "balance": "node tools/balance.mjs"
+    "balance": "node tools/balance.mjs",
+    "perf": "node tools/perf.mjs",
+    "atlas": "python3 tools/pack_atlas.py",
+    "desktop:dev": "cargo tauri dev",
+    "desktop:build": "cargo tauri build",
+    "desktop:steam": "cargo tauri build --features steam",
+    "steam:depot": "node tools/steam-depot.mjs"
   },
   "dependencies": {
     "@fontsource/vt323": "5.2.7",

@@ -5,13 +5,15 @@ import { Game } from './game/Game';
 import { adoptSlots, backupBroken, listSlots, loadSave, rawSave, writeSave } from './game/storage';
 import { applySetup, type NewGameSetup } from './game/FreePlay';
 import { flushLife } from './game/Lifetime';
-import { activeProfile, createProfile, listProfiles } from './game/Profiles';
+import { activeProfile, createProfile, listProfiles, profilesInitialized } from './game/Profiles';
 import { downloadReport, installCrashGuard, reportError } from './game/crash';
 import { GameScene, UiState } from './render/GameScene';
 import { Hud } from './ui/Hud';
 import { currentMap, setMap } from './world/maps';
+import { prepareMap } from './game/CustomMaps';
 import { Music } from './render/Music';
 import { applySettings } from './game/settings';
+import { isDesktop, pushStore, setPresence, unlockAchievement } from './platform/Platform';
 
 applySettings();
 
@@ -34,9 +36,11 @@ try {
   sessionStorage.removeItem('rm_setup');
   if (raw) setup = JSON.parse(raw) as NewGameSetup;
 } catch { /* egal */ }
+// eigene Karte (RM-FR-MOD-04): aus dem Spielstand oder aus der Bibliothek
+prepareMap(mapId, freshStart ? undefined : saved?.customMap);
 setMap(mapId);
 // Musik: Thema der Karte (RM-FR-UI-10)
-Music.play(currentMap().id);
+Music.play(currentMap().base ?? currentMap().id);
 try {
   game = new Game(saved);
 } catch (e) {
@@ -53,7 +57,8 @@ installCrashGuard(() => (game.company ? game.save() : undefined), showCrash);
 
 /** Update auf Profile (RM-FR-PROF-02): bisherige Firma wird zum ersten Profil, alte Spielstände gehören dazu */
 function adoptOldSaves(g: Game) {
-  if (!listProfiles().length) {
+  // nur beim allerersten Umstieg auf Profile – nicht nachdem das letzte Profil gekündigt wurde
+  if (!listProfiles().length && !profilesInitialized()) {
     const slot = listSlots()[0];
     const company = g.company || slot?.company;
     if (!company) return;
@@ -77,7 +82,7 @@ document.getElementById('cr-report')!.onclick = () => downloadReport();
 document.getElementById('cr-reload')!.onclick = () => location.reload();
 game.startMission();
 const ui: UiState = { tool: 'select', variant: {}, message: '', hoverTrain: null, hoverPerson: null, mouse: { x: 0, y: 0 }, menu: true, stationClick: null };
-const scene = new GameScene(game, ui);
+let scene = new GameScene(game, ui);
 
 async function start() {
   // Pixelschrift laden, bevor Phaser Texte rendert
@@ -95,14 +100,59 @@ async function start() {
     roundPixels: true,
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     scene,
+    fps: { limit: 1000 },
   });
+  saveBattery(phaser, game, ui);
   const hud = new Hud(game, ui, () => (scene.sys?.isActive() ? scene : undefined), !!saved || demo, freshStart && !demo);
 
+  // Spielstand laden ohne Neuladen (RM-FR-PERF-04)
+  hud.onLoad = () => {
+    const s = loadSave();
+    if (!s) return false;
+    const t0 = performance.now();
+    try {
+      prepareMap(s.mapId, s.customMap);
+      setMap(s.mapId);
+      game.adopt(new Game(s));
+    } catch (e) {
+      console.warn('Spielstand konnte nicht geladen werden', e);
+      return false;
+    }
+    adoptOldSaves(game);
+    game.startMission();
+    if (isDesktop()) game.achievements.forEach(unlockAchievement);
+    Music.play(currentMap().base ?? currentMap().id);
+    Object.assign(ui, { tool: 'select', message: '', hoverTrain: null, hoverPerson: null, stationClick: null });
+    phaser.scene.remove('game');
+    scene = new GameScene(game, ui);
+    phaser.scene.add('game', scene, true);
+    (window as unknown as { rm: { scene: GameScene } }).rm.scene = scene;
+    console.info(`Spielstand geladen in ${Math.round(performance.now() - t0)} ms`);
+    return true;
+  };
+
   // automatisch speichern
-  setInterval(() => { if (game.company) writeSave(game.save()); flushLife(game); }, 30_000);
-  window.addEventListener('beforeunload', () => { if (game.company) writeSave(game.save()); flushLife(game); });
+  setInterval(() => { if (game.company) writeSave(game.save()); flushLife(game); void pushStore(); }, 30_000);
+  window.addEventListener('beforeunload', () => { if (game.company) writeSave(game.save()); flushLife(game); void pushStore(); });
+  // Desktop-App (RM-FR-STEAM-04/05): bisherige Erfolge nachmelden, Rich Presence
+  if (isDesktop()) {
+    game.achievements.forEach(unlockAchievement);
+    setInterval(() => setPresence(game.company ? `${currentMap().name} · Tag ${Math.floor(game.sim.time / 86400) + 1}` : 'im Menü'), 60_000);
+  }
 
   // Für Tests/Debugging in der Konsole
   (window as unknown as { rm: unknown }).rm = { game, ui, phaser, scene, hud };
 }
 start();
+
+/** Akku schonen (RM-FR-PERF-05): weniger Bilder bei Pause, im Menü oder ohne Eingabe */
+function saveBattery(phaser: Phaser.Game, g: Game, u: { menu: boolean }) {
+  let lastInput = performance.now();
+  const touch = () => { lastInput = performance.now(); };
+  for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) window.addEventListener(ev, touch, { passive: true });
+  setInterval(() => {
+    const quiet = performance.now() - lastInput;
+    const fps = quiet < 3000 ? 0 : g.paused ? 15 : u.menu || quiet > 60_000 ? 30 : 0;
+    (phaser.loop as unknown as { _limitRate: number })._limitRate = fps ? 1000 / fps : 0;
+  }, 500);
+}

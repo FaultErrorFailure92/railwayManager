@@ -5,6 +5,154 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.41', date: '19.11.2026', title: 'Schneller laden & Desktop-App',
+    items: [
+      { kind: 'besser', icon: 'bld_lockers', text: 'Spielstände laden ohne Neustart der Seite – auch auf eine andere Karte, in unter einer Sekunde' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Die Simulation rechnet in festen Schritten: gleiches Spiel bei jeder Bildrate, bei viel Betrieb wird es kurz langsamer statt zu ruckeln' },
+      { kind: 'besser', icon: 'tool_flag', text: 'Alle Bilder in einem Textur-Atlas: weniger Dateien beim Start, weniger Arbeit für die Grafikkarte' },
+      { kind: 'neu', icon: 'tool_flag', text: 'Vorbereitet: Desktop-App für Windows und macOS mit Spielständen als Datei (Steam Cloud) und Steam-Erfolgen' },
+    ],
+  },
+  {
+    version: '0.40', date: '18.11.2026', title: 'Doppelt so viel Land',
+    items: [
+      { kind: 'neu', icon: 'tool_flag', text: 'Die Welt ist quer zur Strecke doppelt so groß: oben und unten neues Land mit Dörfern, Seen, Wäldern und Bergen – Platz für große Rangierbahnhöfe' },
+      { kind: 'besser', icon: 'bld_lockers', text: 'Alte Spielstände laden weiter: Dein Bahnhof bleibt, wo er war, die Züge fahren weiter, ringsum wächst neues Land' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Schneller: Bauen und Rückgängig-Merken brauchen weniger Rechenzeit, Züge vor einer belegten Einfahrt warten ohne teure Wegsuche' },
+    ],
+  },
+  {
+    version: '0.39', date: '18.11.2026', title: 'Kein Stau im Gegenverkehr',
+    items: [
+      { kind: 'fix', icon: 'signal_E', text: 'Zweigleisig: Züge fahren nur noch auf ihrem Richtungsgleis ein und wenden dort, wo es auf dem Richtungsgleis zurückgeht – kein Stau mehr durch Gegenverkehr, auch mit Verstärkerzügen' },
+      { kind: 'besser', icon: 'piece_curve_mergeAbove', text: 'Fremdbahnen kommen in der Kampagne ab Kapitel 3 (Industrierevier), lassen sich im freien Spiel ausschalten und melden sich in „Was ist los?“' },
+      { kind: 'besser', icon: 'bld_station', text: 'Demobahnhof wieder mit S-Bahn-Verstärkern' },
+    ],
+  },
+  {
+    version: '0.38', date: '18.11.2026', title: 'Kartenwerkstatt',
+    items: [
+      { kind: 'neu', icon: 'tool_flag', text: 'Kartenwerkstatt (Hauptmenü): eigene Karten aus jeder Vorlage – Name, Zeitung, Endpunkte, Startkapital, Wetter' },
+      { kind: 'neu', icon: 'bld_tree0', text: 'Landschaft in der Vorschau bauen: Dörfer, Seen und Flüsse setzen, ziehen und entfernen, Wälder und Felsränder einstellen, neu würfeln' },
+      { kind: 'neu', icon: 'tool_road', text: 'Strecken: Straßen setzen, Sägewerk und Bergwerk an/aus und verschieben, Fremdbahnen Nord und Süd wählen' },
+      { kind: 'neu', icon: 'bld_station2', text: 'Unternehmen gehören jetzt zur Karte: wer mitspielt, Namen und eigene Unternehmen – der Unternehmens-Editor ist umgezogen, deine bisherigen Unternehmen findest du in „Donautal (meine Unternehmen)“' },
+      { kind: 'neu', icon: 'bld_lockers', text: 'Prüfen mit Ampel, Spielen im freien Spiel, Karte samt Unternehmen als Datei weitergeben – der Spielstand trägt die Karte mit' },
+    ],
+  },
+  {
+    version: '0.37', date: '18.11.2026', title: 'Fremde Bahnen',
+    items: [
+      { kind: 'neu', icon: 'piece_curve_mergeAbove', text: 'Fremdbahnen: Auf jeder Karte führen eine oder zwei fremde Strecken im Bogen nahe an deinem Bahnhof vorbei. Ihre Züge fahren dort schon als Kulisse' },
+      { kind: 'neu', icon: 'piece_branch_mergeAbove', text: 'Anschließen: Land kaufen, Weiche auf die Fremdbahn und Gleis zu deinem Bahnsteig – oder einen Bahnsteig direkt an ihre Strecke. Dann ruft der Betreiber an und bietet einen Anschlussvertrag an' },
+      { kind: 'neu', icon: 'bld_shelter', text: 'Im Vertrag: Halten (Fahrgäste steigen um, +5 % Fahrgäste für alle Züge) oder Durchfahren über deine Gleise (Trassengebühr), dazu Takt und Preis wie gewohnt' },
+      { kind: 'neu', icon: 'ri_haggle', text: 'Vierter Forschungsbaum „Abteilung Anschlussfragen“: Formular A38 (1. Anschluss), Knotenpunkt-Träume (2. Anschluss), Durchfahrt-Verträge, mehr Umsteiger und höhere Gebühren' },
+      { kind: 'besser', icon: 'bld_station', text: 'Demobahnhof zeigt jetzt alles: Haltepunkt „Demohausen Nord“ an der Fremdbahn (Halten), Umfahrungsgleis an der Südbahn (Durchfahren), Werksanschluss zum Sägewerk, Straße zur Gemeindestraße, Bahnsteigdächer, Zugzielanzeiger, Kontrolleure und Nachtzug' },
+      { kind: 'fix', icon: 'bld_sawmill', text: 'Privatbahn: Erreicht der Werkszug sein Ladegleis aus einer Richtung nicht (Weiche nur in eine Richtung), fällt die Fahrt aus, statt leer über die ganze Strecke zu fahren' },
+    ],
+  },
+  {
+    version: '0.36', date: '18.11.2026', title: 'Eigene Bahnen',
+    items: [
+      { kind: 'neu', icon: 'bld_station2', text: 'Unternehmens-Editor (Hauptmenü → Unternehmen): eigene Bahnunternehmen aus Vorlagen anlegen – Name, Kürzel, Farbe, Wappen, Motto und Ansprechperson' },
+      { kind: 'neu', icon: 'track', text: 'Eigene Farbe = neue Lackierung: Die Züge fahren in deiner Farbe' },
+      { kind: 'neu', icon: 'bld_kiosk', text: 'Freies Spiel: wählen, welche Unternehmen mitspielen, und eigene auf den Platz einer Vorlage setzen' },
+      { kind: 'neu', icon: 'bld_lockers', text: 'Unternehmen als Datei exportieren und importieren – zum Weitergeben, auch im Browser' },
+    ],
+  },
+  {
+    version: '0.35', date: '18.11.2026', title: 'Nachtschicht',
+    items: [
+      { kind: 'neu', icon: 'bld_canopy', text: 'Bahnsteigdach (zählt bei Regen und Schnee doppelt) und Zugzielanzeiger für mehr Komfort am Bahnsteig' },
+      { kind: 'neu', icon: 'tool_road', text: 'Öffentliche Straßen mit Verkehr passend zur Karte (Traktor, Jeep, Schneepflug, Taxi …): Bahnübergänge schließen, sobald ein Zug kommt. Gleise über die Straße kosten einen Bahnübergang. Eine eigene Straße vom Bahnhof zum Straßennetz bringt +5 % und mehr Laufkundschaft' },
+      { kind: 'neu', icon: 'bld_office', text: 'Großstadt: Eine Hochbahn führt quer über den Bahnhof – darunter Gleise ja, Gebäude nein, und die Pfeiler stehen im Weg. Oben pendelt die U-Bahn' },
+      { kind: 'neu', icon: 'bld_station3', text: 'Web-Demo: eigene Ausgabe mit Kapitel 1, Hinweis auf die Vollversion und übertragbaren Spielständen' },
+      { kind: 'besser', icon: 'signal_E', text: 'Zweigleisige Strecke: Der Netzbetreiber stellt alle 16 Felder Blocksignale auf freier Strecke – Züge fahren dicht hintereinander statt am Kartenrand zu warten (Demobahnhof: Pünktlichkeit von rund 60 % auf über 80 %)' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Kleine Bildschirme: Bahnhofsübersicht und Zugliste unten bleiben lesbar, Einstellungen lassen sich scrollen' },
+      { kind: 'fix', icon: 'bld_lockers', text: 'Bank: Beträge in der Kredit-Tabelle fehlten, wenn „Genaue Zahlen“ aus war' },
+    ],
+  },
+  {
+    version: '0.34', date: '17.11.2026', title: 'Finale: Großstadt',
+    items: [
+      { kind: 'neu', icon: 'bld_cityA', text: 'Kapitel 7: Großstadt – S-Bahn-Takt, Anschlüsse, Fernzüge und am Ende der Hauptbahnhof. Das Finale der Kampagne' },
+      { kind: 'neu', icon: 'bld_office', text: 'Neue Karte mit Stadthäusern, Wohnblöcken, Bürotürmen und einem Kanal – auch im freien Spiel' },
+      { kind: 'neu', icon: 'bld_statue', text: 'Neuer Stempel „Großstadtlegende“ und ein Abschlussbrief für die ganze Kampagne' },
+    ],
+  },
+  {
+    version: '0.33', date: '17.11.2026', title: 'Akte und Ausweis',
+    items: [
+      { kind: 'neu', icon: 'bld_statue', text: 'Die Dienstakte ist jetzt eine echte Mappe mit Reitern: Personalien, Laufbahn und Auszeichnungen' },
+      { kind: 'neu', icon: 'bld_station', text: 'Dienstausweis als Karte mit Foto, Chip und Unterschrift – beim Ändern füllst du ihn direkt aus' },
+      { kind: 'besser', icon: 'signal_E', text: 'Kampagne: Anschlüsse ab der Pannonischen Ebene, Störungen ab dem Schneeland' },
+    ],
+  },
+  {
+    version: '0.32', date: '17.11.2026', title: 'Klick, Akku & Schritt für Schritt',
+    items: [
+      { kind: 'besser', icon: 'track', text: 'Gleise rasten beim Bauen hörbar ein, Abriss poltert (Lautstärke in den Einstellungen)' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Akku schonen: Bei Pause, im Menü oder ohne Eingabe zeichnet das Spiel weniger Bilder' },
+      { kind: 'besser', icon: 'bld_station', text: 'Schneller: Es wird nur noch gezeichnet, was im Bild ist' },
+      { kind: 'neu', icon: 'bld_statue', text: 'Kampagne: Personal kommt erst im Schneeland, Disposition in der Alpenbahn, Bank-Kredit und Förderungen in der Wüstenbahn – vorher bleibt es aufgeräumt' },
+    ],
+  },
+  {
+    version: '0.31', date: '17.11.2026', title: 'Demobahnhof zweigleisig & weniger Zahlen',
+    items: [
+      { kind: 'fix', icon: 'bld_remise', text: 'Demobahnhof: Abstellgleis, Waschanlage und Remise liegen jetzt neben der Strecke (eigene Gleiswechsel). Nach dem zweigleisigen Ausbau führt das 2. Streckengleis nicht mehr über die Abstellanlage – kein Stau mehr' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Zahlen sparsam: Neben Balken stehen keine Zahlen mehr (Zugkarte, Partner), genaue Werte beim Drüberfahren – „Genaue Zahlen“ in den Einstellungen holt sie zurück' },
+    ],
+  },
+  {
+    version: '0.30', date: '17.11.2026', title: 'Jahreszeiten, Filter, Tablet & Controller',
+    items: [
+      { kind: 'neu', icon: 'bld_pine0', text: 'Jahreszeiten: alle 7 Spieltage Frühling, Sommer, Herbst oder Winter – mit eigenem Farbton, Wetter (Schnee im Winter, Regen im Herbst) und Verkehr (Ausflügler im Sommer)' },
+      { kind: 'neu', icon: 'bld_clock', text: 'Darstellungsfilter in den Einstellungen: Röhrenbildschirm, Game-Boy-Grün oder Sepia' },
+      { kind: 'neu', icon: 'tool_cursor', text: 'Tablet: mit zwei Fingern verschieben und zoomen' },
+      { kind: 'neu', icon: 'tool_cursor', text: 'Controller: Stick verschiebt die Karte, LB/RB zoomen, A = Pause, X = schneller, Y = Fahrplan, B/Start = zurück bzw. Menü' },
+    ],
+  },
+  {
+    version: '0.29', date: '17.11.2026', title: 'Kopieren, Tastenbelegung & Laufkundschaft',
+    items: [
+      { kind: 'neu', icon: 'track', text: 'Kopieren und Vorlagen (Baumenü 9): Bereich aufziehen, als Vorlage woanders einfügen – die letzten drei Kopien bleiben gespeichert' },
+      { kind: 'neu', icon: 'bld_clock', text: 'Tastenbelegung in den Einstellungen: Fahrplan, Forschung, Verträge, Postfach, Vorspulen, Ebenen, Drehen … frei belegbar' },
+      { kind: 'besser', icon: 'signal_E', text: 'Farbenblind-Modus: Signale zeigen zusätzlich ■ (Halt) oder ▲ (Fahrt)' },
+      { kind: 'fix', icon: 'bld_kiosk', text: 'Läden verdienen auch ohne Zug: Laufkundschaft aus dem Ort kauft tagsüber ein (mehr bei größerem Bahnhof, Park- und Busanbindung)' },
+      { kind: 'fix', icon: 'piece_xover_up', text: 'Demobahnhof: „Doppelt hält besser“ war erforscht, aber das 2. Streckengleis fehlte – der Anschluss an die Kreuzungsstelle war unmöglich. Jetzt erforschst du es im Auftrag; ältere Stände bekommen das Gleis nachgebaut' },
+      { kind: 'fix', icon: 'bld_bench', text: 'Letztes Profil gekündigt: nach dem Neuladen kam es wieder – jetzt startet das Onboarding' },
+    ],
+  },
+  {
+    version: '0.28', date: '17.11.2026', title: 'Stempel, Zufallskarten & Großprojekte',
+    items: [
+      { kind: 'neu', icon: 'bld_statue', text: 'Auszeichnungen in der Dienstakte: jeder Erfolg und jede Laufbahn-Auszeichnung (Kapitel, Sterne, Herausforderungen, Dienstjahre) bekommt einen Stempel – 54 insgesamt' },
+      { kind: 'neu', icon: 'tool_flag', text: 'Zufallskarten im freien Spiel: Startwert eintippen oder würfeln – gleicher Startwert, gleiche Karte' },
+      { kind: 'neu', icon: 'bld_station3', text: 'Großprojekte als Langzeitziele (Rangierbahnhof, Schnellfahrstrecke, Netz) und Neustart-Bonus: je Langzeitziel 1 000 € fürs nächste freie Spiel' },
+      { kind: 'neu', icon: 'bld_bench', text: 'Geschichte: Vorstand, Bank, Verkehrsverbund und Lokalzeitung schreiben zwischen den Kampagnen-Aufträgen' },
+      { kind: 'besser', icon: 'bld_lockers', text: 'Automatik: Vertragspreise („A“) und Ladenpreise („Auto“) bleiben von selbst fair – verstellen schaltet die Automatik aus' },
+      { kind: 'besser', icon: 'bld_clock', text: 'Einstellungen: Farbenblind-Modus (Ampeln mit Zeichen) und Töne als Symbol' },
+    ],
+  },
+  {
+    version: '0.27', date: '17.11.2026', title: 'Kampagne bis Kapitel 6',
+    items: [
+      { kind: 'neu', icon: 'bld_station3', text: 'Kampagne: Kapitel 3 Industrierevier, 4 Schneeland, 5 Alpenbahn und 6 Wüstenbahn spielbar – je fünf eigene Aufträge' },
+      { kind: 'neu', icon: 'bld_statue', text: '41 Erfolge statt 15 – von „Pünktlich wie die Eisenbahn“ bis „Schwarzkappler des Monats“' },
+      { kind: 'neu', icon: 'tool_shovel', text: 'Personal mit Namen: Instandhalter und Kontrolleure haben eine Eigenschaft (schnell, gründlich, gesprächig …), die ihre Arbeit beeinflusst' },
+      { kind: 'neu', icon: 'bld_lockers', text: 'Förderungen: Land, EU oder Verkehrsverbund zahlen vorab für Barrierefreiheit, Fahrdraht oder Busanbindung – klappt es nicht rechtzeitig, wird zurückgefordert' },
+      { kind: 'neu', icon: 'bld_bench', text: 'Stammgäste: Frau Huber, Herr Novak, Oma Gertrude & Co. fahren täglich zur selben Zeit und schreiben Dankes- oder Beschwerdebriefe' },
+      { kind: 'neu', icon: 'bld_clock', text: 'Tägliche Herausforderung: jeden Tag eine andere, für alle gleich' },
+      { kind: 'neu', icon: 'tool_flag', text: 'Sandkasten im freien Spiel: Geld ohne Ende, keine Pleite, Forschung sofort' },
+    ],
+  },
+  {
+    version: '0.26.1', date: '17.11.2026', title: 'Kreuzungsstellen',
+    items: [
+      { kind: 'fix', icon: 'piece_xover_up', text: 'Nach dem zweigleisigen Ausbau baut der Netzbetreiber seine Kreuzungsstellen zügig ab – auch auf deinem Gelände. Danach kannst du dort anschließen und Gleiswechsel bauen' },
+    ],
+  },
+  {
     version: '0.26', date: '17.11.2026', title: 'Herausforderungen, Kapitel 2 & Disposition',
     items: [
       { kind: 'neu', icon: 'bld_station3', text: 'Kapitel 2 „Pannonische Ebene“ ist spielbar: Güter und Takt, fünf eigene Aufträge' },

@@ -4,14 +4,16 @@ import type { ToolId } from './Missions';
 export type ResearchId = 'access' | 'wire' | 'siding' | 'double' | 'wash' | 'remise' | 'stations' | 'fastSwitch' | 'workshop' | 'hump' | 'shunt' | 'switchHeat' | 'crew' | 'crew2'
   | 'crossing' | 'railBridge' | 'road' | 'station2' | 'station3' | 'deco' | 'dwell' | 'estw' | 'diagSwitch'
   | 'bench' | 'light' | 'green' | 'clock' | 'water' | 'monument' | 'art' | 'season' | 'cat'
-  | 'kiosk' | 'cafe' | 'wc' | 'inn' | 'ads' | 'lockers' | 'souvenir' | 'haggle' | 'specials' | 'ticket';
+  | 'kiosk' | 'cafe' | 'wc' | 'inn' | 'ads' | 'lockers' | 'souvenir' | 'haggle' | 'specials' | 'ticket'
+  | 'link1' | 'link2' | 'linkThru' | 'linkPax' | 'linkFee';
 
-/** drei Forschungsbäume */
-export type ResearchTree = 'ops' | 'deco' | 'biz';
+/** vier Forschungsbäume (der vierte, „Anschlussfragen“, begrenzt die Fremdbahn-Anschlüsse: RM-FR-PROG-06) */
+export type ResearchTree = 'ops' | 'deco' | 'biz' | 'link';
 export const TREES: { id: ResearchTree; name: string; sub: string; icon: string }[] = [
   { id: 'ops', name: 'Stellwerk', sub: 'Gleise, Signale, Technik', icon: 'signal_E' },
   { id: 'deco', name: 'Verschönerungsverein', sub: 'Bahnhof und Deko', icon: 'bld_flowers' },
   { id: 'biz', name: 'Kaufmännische Abteilung', sub: 'Geld verdienen', icon: 'bld_kiosk' },
+  { id: 'link', name: 'Abteilung Anschlussfragen', sub: 'Fremdbahnen anbinden', icon: 'piece_curve_mergeAbove' },
 ];
 
 export interface ResearchDef {
@@ -63,10 +65,10 @@ export const RESEARCH: ResearchDef[] = [
   R('ops', 'estw', 'Elektronisches Stellwerk', 'Störungen halb so lang', 'Computer statt Hebel: Störungen sind doppelt so schnell behoben, auch ohne Trupp', 'ri_estw', 3, 1, 7000, 9, 6, ['hump']),
   R('ops', 'crew2', 'Vorsorgeuntersuchung', 'Vorbeugende Wartung', 'Regelmäßige Inspektionen: Weichen und Signale fallen nur noch halb so oft aus', 'piece_xover_down', 3, 3, 5000, 7, 5, ['crew']),
   // ------------------------------------------------ Verschönerungsverein
-  R('deco', 'bench', 'Sitzfleisch', 'Sitzbank, Wartehalle', 'Wartende werden geduldiger', 'bld_bench', 0, 0, 400, 1, 1),
+  R('deco', 'bench', 'Sitzfleisch', 'Sitzbank, Wartehalle, Bahnsteigdach', 'Wartende werden geduldiger', 'bld_bench', 0, 0, 400, 1, 1),
   R('deco', 'light', 'Es werde Licht', 'Laternen', 'Bahnsteig- und Straßenlaternen leuchten in der Nacht', 'bld_lamp', 0, 1, 800, 2, 1),
   R('deco', 'green', 'Grüner Daumen', 'Blumenbeete, Bäume, Büsche', 'Ein bisschen Natur macht Wartende froher', 'bld_flowers', 0, 2, 800, 2, 1),
-  R('deco', 'clock', 'Pünktlich wie die Uhr', 'Bahnhofsuhr', 'Wer die Zeit sieht, wartet geduldiger', 'bld_clock', 1, 0, 1200, 2, 2, ['bench']),
+  R('deco', 'clock', 'Pünktlich wie die Uhr', 'Bahnhofsuhr, Zugzielanzeiger', 'Wer Zeit und Ziel sieht, wartet geduldiger', 'bld_clock', 1, 0, 1200, 2, 2, ['bench']),
   R('deco', 'stations', 'Mehr Bahnhof wagen', 'bis zu 4 Empfangsgebäude', 'Weitere Empfangsgebäude mit eigenem Namen', 'bld_station', 1, 1, 4000, 6, 4, ['bench']),
   R('deco', 'water', 'Wasserspiele', 'Brunnen', 'Plätschern beruhigt: Wartende sind froher', 'bld_fountain', 1, 2, 1500, 3, 2, ['green']),
   R('deco', 'art', 'Kunst am Bau', 'Wandbild, weniger Vandalismus', 'Ein buntes Wandbild – Sprayer haben Respekt: halb so viel Vandalismus', 'bld_mural', 2, 0, 2500, 4, 3, ['clock']),
@@ -90,6 +92,12 @@ export const RESEARCH: ResearchDef[] = [
   R('biz', 'souvenir', 'Andenken-Wahnsinn', 'Souvenirladen', 'Kitsch verkauft sich – bei Volksfesten dreimal so gut', 'bld_souvenir', 3, 1, 4000, 6, 3, ['lockers']),
   R('biz', 'ticket', 'Schwarzkappler', 'Kontrolleure', 'Wo kontrolliert wird, gibt es Schwarzfahrer – und Strafgeld. Kontrolleure stellst du unter Verträge ein', 'bld_statue', 2, 3, 3500, 3, 5, ['lockers']),
   R('biz', 'specials', 'Sonderzug-Agentur', 'mehr Sonderzüge', 'Öfter Anfragen für Sonderzüge, und die Prämien sind 50 % höher', 'ri_specials', 3, 2, 4000, 6, 3, ['haggle']),
+  // ------------------------------------------------ Abteilung Anschlussfragen (Fremdbahnen, RM-FR-MAP-09)
+  R('link', 'link1', 'Formular A38', '1 Fremdbahn-Anschluss', 'Der Passierschein ist da: Eine Fremdbahn darf bei dir anschließen. Weiche auf ihre Strecke, Gleis zu deinem Bahnhof – dann ruft der Betreiber an', 'piece_branch_mergeAbove', 0, 0, 4000, 6, 4),
+  R('link', 'linkThru', 'Freie Fahrt für fremde Bahnen', 'Durchfahrt-Verträge', 'Fremdbahn-Züge dürfen ohne Halt über deine Gleise fahren – kein Bahnsteig nötig, dafür nur 60 % des Preises', 'piece_curve_divUp', 1, 0, 5000, 7, 4, ['link1']),
+  R('link', 'linkPax', 'Umsteigen ohne Umwege', 'mehr Umsteiger', 'Abgestimmte Anschlüsse: Jede haltende Fremdbahn bringt +10 % statt +5 % Fahrgäste für alle Züge', 'bld_shelter', 1, 1, 3500, 5, 3, ['link1']),
+  R('link', 'linkFee', 'Trassenpreis-Tango', '+25 % Fremdbahn-Gebühren', 'Hart verhandelt: Fremdbahnen zahlen ein Viertel mehr für Halt und Durchfahrt', 'ri_haggle', 2, 0, 4500, 6, 3, ['linkThru']),
+  R('link', 'link2', 'Knotenpunkt-Träume', '2. Fremdbahn-Anschluss', 'Dein Bahnhof wird zum Knoten: Eine zweite Fremdbahn darf anschließen', 'piece_branch_mergeBelow', 2, 1, 8000, 10, 6, ['linkPax']),
   // alt
   R('deco', 'deco', 'Mehr Deko', '', 'alter Spielstand', 'bld_fountain', 0, 0, 0, 0, 0, [], { hidden: true }),
 ];

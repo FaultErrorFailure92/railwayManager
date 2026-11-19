@@ -14,10 +14,10 @@ describe('„Was ist los?“ (RM-FR-CPX-03)', () => {
   it('Störung erscheint rot ganz oben, Lösung schickt den Störtrupp', () => {
     const { g } = demoGame();
     g.inbox.push({ id: 99, time: 0, kind: 'letter', title: 'x', from: 'y', html: '', read: false });
-    const k = g.grid.key(118, 31);
+    const k = g.grid.key(118, 63);
     g.faults.push({ k, kind: 'signal', since: g.sim.time });
     const list = problems(g);
-    expect(list[0]).toMatchObject({ id: `fault${k}`, level: 'rot', at: { x: 118, y: 31 } });
+    expect(list[0]).toMatchObject({ id: `fault${k}`, level: 'rot', at: { x: 118, y: 63 } });
     expect(list.at(-1)?.level).toBe('info');
     const m = g.money;
     list[0].fix!.run!(g);

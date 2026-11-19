@@ -1,13 +1,21 @@
 /**
  * Fenster aus dem Hauptmenü: Profile (RM-FR-PROF-02), Kampagne (RM-FR-MODE-02), freies Spiel einrichten (RM-FR-MODE-06).
  */
-import { CHALLENGES } from '../game/Challenges';
+import { CHALLENGES, dailyChallenge } from '../game/Challenges';
+import { ALL_MEDALS, syncMedals } from '../game/Medals';
 import { FREE_SLIDERS, freeDefaults, type FreeCfg, type NewGameSetup } from '../game/FreePlay';
 import { activeProfile, chapterOpen, CHAPTERS, createProfile, listProfiles, mapOpen, updateProfile, type Player, type Profile, chapterStars } from '../game/Profiles';
 import { lifeLines } from '../game/Lifetime';
 import { listSlots } from '../game/storage';
-import { MAPS, type MapDef } from '../world/maps';
+import { MAIN_ROW, MAP_H } from '../config';
+import { isCustomMap, isRandomMap, MAPS, RANDOM_PREFIX, randomMap, type MapDef } from '../world/maps';
 import { avatar, AVATARS } from './portrait';
+import { overridesFor, TEMPLATES, type CustomCompany } from '../game/Companies';
+import { checkMap, loadMaps, toMapDef, type CustomMap } from '../game/CustomMaps';
+import { MapEditor } from './MapEditor';
+import { OP_DEFAULTS, OPERATORS, type OperatorId } from '../sim/Operators';
+import { idCard, idNumber } from './IdCard';
+import { DEMO, fullOnly } from '../game/Edition';
 
 const ICON = (name: string) => `assets/gen/icons/${name}.png`;
 
@@ -33,6 +41,21 @@ export class Menus {
 
   constructor(private hooks: MenuHooks) {
     $('ls-close').onclick = () => $('lifestats').classList.add('hidden');
+    $('fs-ops').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-op]') as HTMLElement | null;
+      if (!b || !this.cfg || (e.target as HTMLElement).closest('select')) return;
+      const id = b.dataset.op as OperatorId, off = new Set(this.cfg.off ?? []);
+      if (off.has(id)) off.delete(id); else off.add(id);
+      this.cfg.off = [...off];
+      this.renderFree();
+    });
+    $('fs-ops').addEventListener('change', (e) => {
+      const sel = (e.target as HTMLElement).closest('select[data-pick]') as HTMLSelectElement | null;
+      if (!sel) return;
+      const id = sel.dataset.pick as OperatorId;
+      if (sel.value) this.pick[id] = sel.value; else delete this.pick[id];
+    });
+    $('lifestats').addEventListener('click', (e) => this.akteClick(e));
     $('acc-btn').onclick = (e) => { e.stopPropagation(); this.renderAccount(); $('acc-menu').classList.toggle('hidden'); };
     document.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('#m-account')) $('acc-menu').classList.add('hidden'); });
     $('acc-menu').addEventListener('click', (e) => {
@@ -80,10 +103,14 @@ export class Menus {
     $('fs-maps').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-map]') as HTMLButtonElement | null;
       if (!b || b.disabled || !this.cfg) return;
-      const m = MAPS.find((x) => x.id === b.dataset.map)!;
-      // Startgeld folgt der Karte, solange es nicht verstellt wurde
-      if (this.cfg.money === MAPS.find((x) => x.id === this.cfg!.map)?.startMoney) this.cfg.money = m.startMoney;
-      this.cfg.map = m.id;
+      if (b.dataset.map === 'random') {
+        const v = ($('fs-seed') as HTMLInputElement | null)?.value.trim();
+        const seed = Number(v) > 0 ? Math.floor(Number(v)) : Math.floor(Math.random() * 99999) + 1;
+        this.cfg.map = `${RANDOM_PREFIX}${seed}`;
+        this.renderFree();
+        return;
+      }
+      this.chooseMap(b.dataset.map!);
       this.renderFree();
     });
     $('fs-sliders').addEventListener('input', (e) => {
@@ -97,15 +124,24 @@ export class Menus {
     $('fs-growth').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-growth]') as HTMLElement | null;
       if (!b || !this.cfg) return;
-      this.cfg.growth = b.dataset.growth as FreeCfg['growth'];
+      if (b.dataset.growth === 'sandbox') this.cfg.sandbox = !this.cfg.sandbox;
+      else if (b.dataset.growth === 'foreign') this.cfg.noForeign = !this.cfg.noForeign;
+      else this.cfg.growth = b.dataset.growth as FreeCfg['growth'];
       this.renderFree();
     });
-    $('fs-reset').onclick = () => { if (this.cfg) { const m = MAPS.find((x) => x.id === this.cfg!.map)!; this.cfg = freeDefaults(m.id, m.startMoney); this.renderFree(); } };
+    $('fs-reset').onclick = () => {
+      if (!this.cfg) return;
+      const id = this.cfg.map;
+      this.cfg = freeDefaults(MAPS[0].id, MAPS[0].startMoney);
+      this.chooseMap(id);
+      this.renderFree();
+    };
     $('fs-start').onclick = () => {
       const p = activeProfile();
       if (!p || !this.cfg) return;
       $('freesetup').classList.add('hidden');
-      hooks.start(setupFor(p, { mode: 'free', map: this.cfg.map, cfg: { ...this.cfg } }));
+      const custom = overridesFor(this.ownMap(this.cfg.map)?.companies ?? [], this.pick);
+      hooks.start(setupFor(p, { mode: 'free', map: this.cfg.map, cfg: { ...this.cfg, custom: Object.keys(custom).length ? custom : undefined } }));
     };
   }
 
@@ -140,6 +176,7 @@ export class Menus {
       const pic = map ? mapPic(map) : '<i style="inset:0;width:auto;height:auto;background:#3a3a44"></i>';
       if (!open) {
         // gesperrt: nur kleine Kachel, Details beim Drüberfahren
+        if (fullOnly(i)) { tiles.push(`<div class="cp-tile full" title="${esc(c.topic)} – in der Vollversion&#10;${(TEASE[i] ?? '').replace(/"/g, '&quot;')}"><div class="cp-pic">${pic}</div><b>${i + 1} · ${esc(c.title)}</b><small>Vollversion</small></div>`); return; }
         tiles.push(`<div class="cp-tile" title="${esc(c.topic)} – erst Kapitel ${i} schaffen&#10;${(TEASE[i] ?? '').replace(/"/g, '&quot;')}"><div class="cp-pic">${pic}</div><b>${i + 1} · ${esc(c.title)}</b></div>`);
         return;
       }
@@ -156,7 +193,8 @@ export class Menus {
   /** Herausforderungen (RM-FR-MODE-08) */
   openChallenges() {
     const p = activeProfile();
-    $('ch-list').innerHTML = CHALLENGES.map((c) => {
+    const daily = dailyChallenge();
+    $('ch-list').innerHTML = [daily, ...CHALLENGES].map((c) => {
       const best = p?.challenges?.[c.id];
       return `<div class="cp-row ch-row${best ? ' done' : ''}"><div class="ch-time">${c.hours} h</div>
         <div><b>${esc(c.title)}</b><small>${esc(c.short)}</small>${best ? `<small class="ok">Bestzeit ${Math.floor(best / 60)}:${String(best % 60).padStart(2, '0')} h</small>` : ''}</div>
@@ -182,14 +220,66 @@ export class Menus {
   }
 
   // ------------------------------------------------------------ Dienstakte (Statistik)
+  private akte: { p?: Profile; tab: 'pers' | 'life' | 'stamps'; inGame: boolean } = { tab: 'pers', inGame: false };
+
   openStats(p: Profile, inGame = false) {
-    const who = [p.player.title, p.player.name].filter(Boolean).join(' ') || 'Betriebsleitung';
-    const lines = lifeLines(p);
-    $('ls-body').innerHTML = `<div class="doc-card on">${avatar(p.player.avatar, 64)}<div><b>${esc(who)}</b><small>Betriebsleitung der ${esc(p.company)}</small>
-        <small>Im Dienst seit ${new Date(p.created).toLocaleDateString('de-AT')} · Kampagne ${p.chapters.length}/${CHAPTERS.length} Kapitel</small></div><span class="doc-stamp">VERTRAULICH</span></div>
-      <div class="ls-list">${lines.map((l) => `<div class="ls-item"><img src="${ICON(l.icon)}" alt="" /><div><small>${esc(l.label)}</small><b>${esc(l.value)}</b>${l.quip ? `<small><i>${esc(l.quip)}</i></small>` : ''}</div></div>`).join('')}</div>
-      <p class="doc-foot">${inGame ? 'Änderungen am Profil nur über das Hauptmenü (rechts oben) – Dienstweg ist Dienstweg. ' : ''}Gezählt wird über alle Spiele dieses Profils. Gez. Personalabteilung.</p>`;
+    // Laufbahn-Auszeichnungen nachtragen (Kampagne, Herausforderungen …)
+    if (syncMedals(p.id).length) p = listProfiles().find((x) => x.id === p.id) ?? p;
+    this.akte = { p, tab: this.akte.p?.id === p.id ? this.akte.tab : 'pers', inGame };
+    this.renderAkte();
     $('lifestats').classList.remove('hidden');
+  }
+
+  /** Dienstakte als Mappe mit Reitern: Personalien, Laufbahn, Auszeichnungen */
+  private renderAkte() {
+    const { p, tab, inGame } = this.akte;
+    if (!p) return;
+    const medals = p.medals ?? {};
+    const got = ALL_MEDALS.filter((m) => medals[m.id]).length;
+    const tabs: [typeof tab, string][] = [['pers', 'Personalien'], ['life', 'Laufbahn'], ['stamps', `Auszeichnungen ${got}/${ALL_MEDALS.length}`]];
+    $('ls-tabs').innerHTML = tabs.map(([id, label]) => `<button class="ak-tab${id === tab ? ' on' : ''}" data-lstab="${id}">${esc(label)}</button>`).join('');
+    let body = '';
+    if (tab === 'pers') {
+      const stars = p.stars ?? {};
+      const chapters = CHAPTERS.filter((c) => c.ready).map((c, i) => {
+        const done = p.chapters.includes(c.map), st = stars[c.map] ?? 0;
+        return `<tr class="${done ? '' : 'no'}"><td>${i + 1}.</td><td>${esc(c.title)}</td><td class="ak-stars">${done ? '★'.repeat(st) + '☆'.repeat(3 - st) : '–'}</td></tr>`;
+      }).join('');
+      body = `<div class="ak-clip">${idCard({ company: p.company, player: p.player, id: p.id, created: p.created })}<span class="ak-paperclip"></span></div>
+        <table class="ak-form">
+          <tr><th>Personalnummer</th><td>${idNumber(p.id)}</td></tr>
+          <tr><th>Dienststelle</th><td>${esc(p.company)}</td></tr>
+          <tr><th>Im Dienst seit</th><td>${new Date(p.created).toLocaleDateString('de-AT')}</td></tr>
+          <tr><th>Kampagne</th><td>${p.chapters.length} von ${CHAPTERS.length} Kapiteln</td></tr>
+        </table>
+        <table class="ak-chap">${chapters}</table>
+        ${inGame ? '' : '<div class="dc-btns"><button class="btn" data-lsedit="1">Änderungsantrag stellen</button></div>'}`;
+    }
+    else if (tab === 'life') {
+      body = `<div class="ls-list">${lifeLines(p).map((l) => `<div class="ls-item"><img src="${ICON(l.icon)}" alt="" /><div><small>${esc(l.label)}</small><b>${esc(l.value)}</b>${l.quip ? `<small><i>${esc(l.quip)}</i></small>` : ''}</div></div>`).join('')}</div>
+        <p class="doc-foot">Gezählt wird über alle Spiele dieses Profils. Gez. Personalabteilung.</p>`;
+    }
+    else {
+      const stamps = ALL_MEDALS.map((m, i) => {
+        const at = medals[m.id];
+        const rot = ((i * 37) % 19) - 9;
+        return at
+          ? `<div class="stamp ${m.kind}" style="--rot:${rot}deg" title="${esc(m.info)} · ${new Date(at).toLocaleDateString('de-AT')}"><b>${esc(m.name)}</b><small>${new Date(at).toLocaleDateString('de-AT')}</small></div>`
+          : `<div class="stamp none" title="${esc(m.info)}"><b>?</b><small>${esc(m.info)}</small></div>`;
+      }).join('');
+      body = `<div class="stamps" title="Rote Stempel: Laufbahn über alle Spiele · blaue Stempel: Erfolge aus einzelnen Spielen">${stamps}</div>`;
+    }
+    $('ls-body').innerHTML = `<span class="ak-holes"></span><div class="ak-head"><small>AKTE ${idNumber(p.id)}</small><span class="doc-stamp">VERTRAULICH</span></div>${body}`;
+    $('ls-body').scrollTop = 0;
+  }
+
+  private akteClick(e: Event) {
+    const b = (e.target as HTMLElement).closest('[data-lstab],[data-lsedit]') as HTMLElement | null;
+    if (!b || !this.akte.p) return;
+    if (b.dataset.lstab) { this.akte.tab = b.dataset.lstab as typeof this.akte.tab; this.renderAkte(); return; }
+    const p = this.akte.p;
+    $('lifestats').classList.add('hidden');
+    this.editDoc(p, () => { this.renderProfiles(); const np = listProfiles().find((x) => x.id === p.id); if (np) this.openStats(np); });
   }
 
   // ------------------------------------------------------------ Profil ändern / löschen (Dokumente)
@@ -236,6 +326,12 @@ export class Menus {
     if (!b) return;
     this.readOnboard();
     if (b.dataset.av !== undefined) { this.ob.player.avatar = Number(b.dataset.av); this.renderOnboard(); return; }
+    if (b.dataset.ob === 'av-prev' || b.dataset.ob === 'av-next') {
+      const n = AVATARS.length;
+      this.ob.player.avatar = (this.ob.player.avatar + (b.dataset.ob === 'av-next' ? 1 : n - 1)) % n;
+      this.renderOnboard();
+      return;
+    }
     if (b.dataset.ob === 'dice') { this.ob.company = NAMES[Math.floor(Math.random() * NAMES.length)]; this.renderOnboard(); return; }
     if (b.dataset.ob === 'back') { this.ob.step--; this.renderOnboard(); return; }
     if (b.dataset.ob === 'cancel') { $('onboard').classList.add('hidden'); return; }
@@ -269,8 +365,8 @@ export class Menus {
   private otherDoc() {
     const o = this.ob, p = this.doc.profile!;
     const who = [o.player.title, o.player.name].filter(Boolean).join(' ') || 'Betriebsleitung';
-    if (this.doc.kind === 'edit') return `<div class="ob-step">FORMULAR B-17/Ö-Ä · ÄNDERUNGSANTRAG</div><h2>Profil ändern</h2>
-      ${fields(o)}<div class="ob-quip" id="ob-quip">Änderungen werden nach Abstempeln sofort wirksam. Ausnahmsweise.</div>
+    if (this.doc.kind === 'edit') return `<div class="ob-step">FORMULAR B-17/Ö-Ä · ÄNDERUNGSANTRAG</div><h2>Dienstausweis ändern</h2>
+      ${idCard({ company: o.company, player: o.player, id: p.id, created: p.created }, true)}<div class="ob-quip" id="ob-quip">Direkt auf dem Ausweis ausfüllen. Wird nach Abstempeln sofort wirksam. Ausnahmsweise.</div>
       <div class="dc-btns"><button class="btn" data-ob="cancel">Abbrechen</button><button class="btn big" data-ob="save">Abstempeln</button></div>`;
     const saves = listSlots(p.id).length;
     return `<div class="ob-step">PERSONALABTEILUNG · KÜNDIGUNGSSCHREIBEN</div><h2>Dienstverhältnis beenden?</h2>
@@ -303,9 +399,7 @@ export class Menus {
       <p>Ihr Foto für den Dienstausweis:</p>
       <div class="pl-avatars">${AVATARS.map((_, i) => `<button class="pl-av${i === o.player.avatar ? ' on' : ''}" data-av="${i}">${avatar(i, 40)}</button>`).join('')}</div>${nav('Weiter')}`;
     else {
-      const who = [o.player.title, o.player.name].filter(Boolean).join(' ') || 'Betriebsleitung';
-      html = `<h2>Ihr Dienstausweis</h2><div class="ob-card">${avatar(o.player.avatar, 72)}<div><small>BAHNHOFSMANAGER · DIENSTAUSWEIS</small><b>${esc(who)}</b><small>Betriebsleitung der ${esc(o.company)}</small>
-        <small>Ausgestellt: ${new Date().toLocaleDateString('de-AT')} · Gültig bis: Pension</small><small>Berechtigt zu: Weichen stellen, Kaffee trinken, Verspätungen erklären</small></div><span class="ob-stamp">GENEHMIGT</span></div>
+      html = `<h2>Ihr Dienstausweis</h2><div class="idc-wrap" title="Berechtigt zu: Weichen stellen, Kaffee trinken, Verspätungen erklären">${idCard({ company: o.company, player: o.player })}<span class="ob-stamp">GENEHMIGT</span></div>
         <p>Den Ausweis (und alles andere) finden Sie im Hauptmenü rechts oben.</p>${nav('Dienst antreten!')}`;
     }
     $('ob-box').innerHTML = head + html;
@@ -313,9 +407,11 @@ export class Menus {
   }
 
   // ------------------------------------------------------------ freies Spiel
-  openFree() {
+  openFree(mapId?: string) {
     if (!this.cfg) this.cfg = freeDefaults(MAPS[0].id, MAPS[0].startMoney);
-    if (!mapOpen(activeProfile(), this.cfg.map)) { this.cfg.map = MAPS[0].id; this.cfg.money = MAPS[0].startMoney; }
+    if (mapId) this.chooseMap(mapId);
+    const own = this.ownMap(this.cfg.map);
+    if (isCustomMap(this.cfg.map) ? !own || !this.ownOpen(own) : !mapOpen(activeProfile(), this.cfg.map)) { this.cfg.map = MAPS[0].id; this.cfg.money = MAPS[0].startMoney; this.cfg.off = []; this.pick = {}; }
     this.renderFree();
     $('freesetup').classList.remove('hidden');
   }
@@ -328,11 +424,74 @@ export class Menus {
       const ch = CHAPTERS.findIndex((c) => c.map === m.id);
       return `<button class="btn fs-map${m.id === cfg.map ? ' on' : ''}" data-map="${m.id}"${open ? '' : ' disabled'}
         title="${open ? esc(m.info) : `Freispielen: Kapitel ${ch} der Kampagne schaffen`}"><b>${open ? '' : '🔒 '}${esc(m.name)}</b><small>${esc(m.theme)} · ${m.difficulty}</small></button>`;
+    }).join('') + (() => {
+      // Zufallskarte (RM-FR-END-02): nur mit freigespielten Kapiteln sinnvoll – ab Kapitel 1 geschafft
+      const open = !!p?.chapters.length && !DEMO;
+      const seed = isRandomMap(cfg.map) ? cfg.map.slice(RANDOM_PREFIX.length) : '';
+      return `<div class="btn fs-map fs-rand${isRandomMap(cfg.map) ? ' on' : ''}${open ? '' : ' off'}" title="${open ? 'Zufällige Karte aus einem Startwert – Startwert eintippen oder leer lassen, dann „Würfeln“. Den Startwert kannst du weitergeben.' : 'Freispielen: Kapitel 1 der Kampagne schaffen'}">
+        <b>${open ? '' : '🔒 '}Zufallskarte</b><span><input id="fs-seed" inputmode="numeric" maxlength="6" placeholder="Startwert" value="${seed}"${open ? '' : ' disabled'} /><button class="btn" data-map="random"${open ? '' : ' disabled'}>Würfeln</button></span></div>`;
+    })() + this.ownMaps().map((c) => {
+      const open = this.ownOpen(c);
+      const base = MAPS.find((m) => m.id === c.base);
+      return `<button class="btn fs-map fs-own${c.id === cfg.map ? ' on' : ''}" data-map="${c.id}"${open ? '' : ' disabled'}
+        title="${open ? `Eigene Karte (Vorlage ${esc(base?.name ?? c.base)}) – bearbeiten in der Kartenwerkstatt` : 'Vorlage noch nicht freigespielt oder die Karte hat Fehler (Kartenwerkstatt → Prüfen)'}"><b>${open ? '✎ ' : '🔒 '}${esc(c.name)}</b><small>eigene · ${c.difficulty}</small></button>`;
     }).join('');
-    $('fs-sliders').innerHTML = FREE_SLIDERS.map((s) => `<div class="fs-row" title="${s.hint}"><label>${s.label}<b>${s.fmt(cfg[s.key])}</b></label>
+    const bonus = p?.bonus ?? 0;
+    $('fs-sliders').innerHTML = (bonus ? `<div class="fs-bonus" title="Je erreichtem Langzeitziel 1 000 € – wird beim nächsten Start einmal gutgeschrieben">Neustart-Bonus aus früheren Spielen: <b>+${bonus.toLocaleString('de-AT')} €</b></div>` : '') + FREE_SLIDERS.map((s) => `<div class="fs-row" title="${s.hint}"><label>${s.label}<b>${s.fmt(cfg[s.key])}</b></label>
       <input type="range" data-key="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${cfg[s.key]}" /></div>`).join('');
     $('fs-growth').innerHTML = `<button class="btn${cfg.growth === 'tier' ? ' on' : ''}" data-growth="tier" title="Neue Unternehmen erst, wenn der Bahnhof wächst">mit dem Bahnhof</button>
-      <button class="btn${cfg.growth === 'instant' ? ' on' : ''}" data-growth="instant" title="Alle Unternehmen melden sich von Anfang an">sofort voll</button>`;
+      <button class="btn${cfg.growth === 'instant' ? ' on' : ''}" data-growth="instant" title="Alle Unternehmen melden sich von Anfang an">sofort voll</button>
+      <button class="btn${cfg.sandbox ? ' on' : ''}" data-growth="sandbox" title="Sandkasten: Geld ohne Ende, keine Pleite, Forschung sofort – zum entspannten Bauen">Sandkasten</button>
+      <button class="btn${cfg.noForeign ? '' : ' on'}" data-growth="foreign" title="Fremdbahnen: fremde Strecken zum Anschließen und der Forschungsbaum „Anschlussfragen“ – ausschalten für ein einfacheres Spiel">Fremdbahnen</button>`;
+    this.renderFreeOps();
+  }
+
+  // ------------------------------------------------------------ Unternehmen beim Start wählen (RM-FR-MOD-02)
+  private pick: Partial<Record<OperatorId, string>> = {};
+  /** eigene Karten aus der Kartenwerkstatt */
+  private ownMaps(): CustomMap[] { return loadMaps(); }
+  private ownMap(id: string) { return isCustomMap(id) ? this.ownMaps().find((c) => c.id === id) : undefined; }
+  /** spielbar: Vorlage freigespielt und keine Fehler */
+  private ownOpen(c: CustomMap) { return mapOpen(activeProfile(), c.base) && !DEMO && !checkMap(c).some((x) => x.level === 'error'); }
+
+  /** Karte wählen: Startgeld folgt der Karte, solange es nicht verstellt wurde; eigene Karten bringen ihre Unternehmen mit */
+  private chooseMap(id: string) {
+    const cfg = this.cfg!;
+    const before = this.ownMap(cfg.map)?.startMoney ?? MAPS.find((x) => x.id === cfg.map)?.startMoney;
+    const own = this.ownMap(id);
+    const next = own?.startMoney ?? MAPS.find((x) => x.id === id)?.startMoney;
+    if (next === undefined) return;
+    if (cfg.money === before) cfg.money = next;
+    cfg.map = id;
+    cfg.off = own ? [...own.off] : [];
+    this.pick = own ? { ...own.use } : {};
+  }
+
+  private renderFreeOps() {
+    const cfg = this.cfg!;
+    const ownMap = this.ownMap(cfg.map);
+    const m: MapDef | undefined = ownMap ? toMapDef(ownMap) : isRandomMap(cfg.map) ? randomMap(Number(cfg.map.slice(RANDOM_PREFIX.length)) || 1) : MAPS.find((x) => x.id === cfg.map);
+    if (!m) return;
+    const ids = [...new Set([...m.tenderRegio, ...m.tenderFreight, ...m.inquiries])].filter((id) => TEMPLATES.includes(id));
+    const own: CustomCompany[] = ownMap?.companies ?? [];
+    const off = new Set(cfg.off ?? []);
+    // mindestens ein Regional- und ein Güterunternehmen, sonst gibt es keine Ausschreibung
+    const lastOf = (list: OperatorId[]) => list.filter((x) => !off.has(x)).length <= 1;
+    $('fs-ops').innerHTML = ids.map((id) => {
+      const o = OPERATORS[id], name = m.names?.[id] ?? OP_DEFAULTS[id].name, on = !off.has(id);
+      const locked = on && ((m.tenderRegio.includes(id) && lastOf(m.tenderRegio)) || (m.tenderFreight.includes(id) && lastOf(m.tenderFreight)));
+      const mine = own.filter((c) => c.base === id);
+      const sel = mine.length && on ? `<select data-pick="${id}" title="Eigenes Unternehmen auf diesem Platz"><option value="">Original</option>${mine.map((c) => `<option value="${c.id}"${this.pick[id] === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : '';
+      return `<div class="fs-op${on ? ' on' : ''}"><button class="btn" data-op="${id}"${locked ? ' disabled title="Mindestens ein Unternehmen pro Ausschreibung muss mitspielen"' : ` title="${on ? 'Spielt mit – anklicken zum Abwählen' : 'Spielt nicht mit'}"`}>${on ? '✓' : '–'}</button>
+        <span class="fs-op-dot" style="background:${OP_DEFAULTS[id].color}"></span><span class="fs-op-name" title="${esc(o.category)}">${esc(name)}</span>${sel}</div>`;
+    }).join('');
+  }
+
+  // ------------------------------------------------------------ Kartenwerkstatt (RM-FR-MOD-01 … 05)
+  private editor?: MapEditor;
+  openMaps() {
+    this.editor ??= new MapEditor((id) => this.openFree(id));
+    this.editor.open();
   }
 }
 
@@ -340,12 +499,6 @@ export class Menus {
 const idx = (map: string) => { const i = CHAPTERS.findIndex((c) => c.map === map); return i < 0 ? 99 : i; };
 
 /** Formularfelder für Firma/Spieler (Onboarding und Änderungsantrag) */
-function fields(o: { company: string; player: Player }) {
-  return `<label class="doc-field"><span>Firma</span><span class="ob-row"><input id="ob-company" maxlength="28" value="${esc(o.company)}" /><button class="btn" data-ob="dice" title="Namen würfeln">🎲</button></span></label>
-    <label class="doc-field"><span>Anrede, Name</span><span class="pl-row"><select id="ob-title"><option value="">–</option><option value="Frau"${o.player.title === 'Frau' ? ' selected' : ''}>Frau</option><option value="Herr"${o.player.title === 'Herr' ? ' selected' : ''}>Herr</option></select>
-      <input id="ob-name" maxlength="24" placeholder="Dein Name" value="${esc(o.player.name)}" /></span></label>
-    <div class="doc-field"><span>Lichtbild</span><div class="pl-avatars">${AVATARS.map((_, i) => `<button class="pl-av${i === o.player.avatar ? ' on' : ''}" data-av="${i}">${avatar(i, 36)}</button>`).join('')}</div></div>`;
-}
 
 const TEASE = [
   'Ein Bahnsteig, ein Schild, eine Bank. Der Rest liegt bei Ihnen.',
@@ -370,13 +523,14 @@ function mapPic(m: MapDef) {
   const W = 64, H = 16, px: string[] = [];
   const ground = m.ground === 'sand' ? '#d8b878' : m.ground === 'snow' ? '#e4ebf4' : `color-mix(in srgb, #6c9a3c 80%, #${m.tint.toString(16).padStart(6, '0')})`;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const gx = x * 4, gy = y * 4;
+    const gx = x * 4, gy = Math.round(y * (MAP_H / H));
     let c = '';
     if (m.rocks.some((r) => gx >= r.x0 && gx < r.x1 && gy >= r.y0 && gy < r.y1 && (r.edge === 'N' ? gy < r.y0 + (r.y1 - r.y0) * 0.7 : gy > r.y0 + (r.y1 - r.y0) * 0.3))) c = '#8f887c';
     if (m.lakes.some((l) => ((gx - l.x) / (l.rx + 1)) ** 2 + ((gy - l.y) / (l.ry + 1)) ** 2 <= 1)) c = '#4a7fc4';
     if (m.rivers.some((rv) => Math.abs(gx - rv.x) <= 2)) c = '#4a7fc4';
-    if (gy === 28 || gy === 32) c = '#5a4632';
+    if (gy === MAIN_ROW - 3 || gy === MAIN_ROW + 1) c = '#5a4632';
     if (m.industries.some((i) => Math.abs(gx - i.x) <= 3 && Math.abs(gy - i.y) <= 3)) c = '#c0392b';
+    if (!c && m.city && m.villages.some((v) => Math.abs(gx - v.x) <= 10 && Math.abs(gy - v.y) <= 6) && (x + y) % 3) c = (x * 7 + y) % 5 ? '#a9a49a' : '#6d8aa8';
     if (c) px.push(`<i style="left:${x * 3}px;top:${y * 4}px;background:${c}"></i>`);
   }
   return `<i style="inset:0;width:auto;height:auto;background:${ground}"></i>${px.join('')}`;

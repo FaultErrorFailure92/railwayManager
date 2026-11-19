@@ -1,6 +1,7 @@
 import { industries } from './industries';
+import { foreignLines, lineLayout, type ForeignLine } from './foreign';
 import { currentMap } from './maps';
-import { MAIN_ROW, MAP_H, MAP_W, OLD_OFFSET, PARCEL, PARCEL_BASE_PRICE, PARCEL_STEP_PRICE, PASSING_LOOPS, SECOND_ROW, START_PARCELS } from '../config';
+import { MAIN_ROW, MAP_H, MAP_W, OLD_OFFSET, PARCEL, PARCEL_BASE_PRICE, PARCEL_STEP_PRICE, PASSING_LOOPS, ROW0, SECOND_ROW, START_PARCELS } from '../config';
 
 /** Bodenart */
 export const GRASS = 0, WATER = 1, ROCK = 2;
@@ -106,8 +107,79 @@ export class Grid {
       for (let px = START_PARCELS.x0; px <= START_PARCELS.x1; px++) this.owned[py * this.pw + px] = true;
     }
     this.addPassingLoops();
+    this.placeForeignLines(true);
+    this.addPublicRoads();
     this.generateLandscape();
     this.placeIndustries();
+  }
+
+  /** Zelle -> Fremdbahn (Kennung = Unternehmen), RM-FR-MAP-09 */
+  readonly foreignCells = new Map<number, string>();
+  /** Fremdbahnen, die auf dieser Karte liegen (in alten Spielständen nur, wo Platz war) */
+  readonly foreignLaid: ForeignLine[] = [];
+  /** Reihen der Fremdbahnen an den Kartenrändern */
+  get foreignRows() { return this.foreignLaid.map((l) => l.row); }
+  foreignAtRow(row: number) { return this.foreignLaid.find((l) => l.row === row); }
+
+  /**
+   * Fremdbahnen verlegen (neue Karte) oder nach dem Laden wiedererkennen.
+   * Alte Spielstände bekommen sie nachgerüstet, wenn die Felder frei und nicht gekauft sind.
+   */
+  placeForeignLines(fresh = false) {
+    for (const l of foreignLines()) {
+      if (this.foreignLaid.includes(l)) continue;
+      const { straight, pieces } = lineLayout(l, this.w);
+      const cells = [...straight.map((c) => this.key(c.x, c.y)), ...pieces.flatMap((p) => this.footprint(p.key, p.x, p.y).map((c) => this.key(c.x, c.y)))];
+      if (cells.some((k) => k < 0 || k >= this.cells.length)) continue;
+      const at = (p: { key: string; x: number; y: number }) => { const id = this.get(p.x, p.y)?.piece; return id != null && this.pieces.get(id)?.key === p.key ? id : null; };
+      const laid = pieces.every((p) => at(p) !== null) && straight.every((c) => this.get(c.x, c.y)!.track);
+      if (!laid) {
+        if (!fresh) {
+          // nachrüsten nur auf fremdem, freiem Land
+          const blocked = cells.some((k) => {
+            const c = this.cells[k], { x, y } = this.xy(k);
+            return this.isOwned(x, y) || c.track || c.piece !== null || c.platform || (c.building !== null && !this.buildings.get(c.building)?.decor);
+          });
+          if (blocked) continue;
+        }
+        for (const k of cells) {
+          const c = this.cells[k];
+          if (c.building !== null) this.removeBuilding(c.building);
+          c.road = false;
+        }
+        for (const p of pieces) this.fixedPieces.add(this.addPiece(p.key, p.x, p.y).id);
+        for (const c of straight) Object.assign(this.get(c.x, c.y)!, { track: true, fixed: true, platform: false });
+        this.get(l.x0, l.low)!.signalW = true;
+        this.get(l.x1, l.low)!.signal = true;
+      } else {
+        for (const p of pieces) this.fixedPieces.add(at(p)!);
+      }
+      for (const k of cells) {
+        this.foreignCells.set(k, l.op);
+        if (this.terrain[k] === ROCK) this.terrain[k] = GRASS;
+      }
+      this.foreignLaid.push(l);
+    }
+  }
+
+  /** Fremdbahnen, die nicht mehr ganz liegen (z. B. nach dem Laden eines sehr alten Spielstands), wieder entfernen */
+  dropBrokenForeign() {
+    for (const l of [...this.foreignLaid]) {
+      const { straight, pieces } = lineLayout(l, this.w);
+      const ok = straight.every((c) => this.get(c.x, c.y)!.track)
+        && pieces.every((p) => { const id = this.get(p.x, p.y)?.piece; return id != null && this.pieces.get(id)?.key === p.key; });
+      if (ok) continue;
+      for (const p of pieces) {
+        const id = this.get(p.x, p.y)?.piece;
+        if (id != null && this.fixedPieces.has(id)) { this.removePiece(id); this.fixedPieces.delete(id); }
+      }
+      for (const c of straight) {
+        const cell = this.get(c.x, c.y)!;
+        if (cell.fixed && !this.isOwned(c.x, c.y)) Object.assign(cell, { track: false, fixed: false, signal: false, signalW: false });
+      }
+      for (const [k, op] of [...this.foreignCells]) if (op === l.op) this.foreignCells.delete(k);
+      this.foreignLaid.splice(this.foreignLaid.indexOf(l), 1);
+    }
   }
 
   /** Zelle -> Betrieb (Ladegleis) */
@@ -145,11 +217,15 @@ export class Grid {
     // Felsgebiete (Gebirge): Nordwesten und Südosten, weich verrauscht
     const ranges = M.rocks;
     const ph = Array.from({ length: 6 }, () => rnd() * 6.3);
+    // Rauschen in Koordinaten der früheren, halb so hohen Karte (ly), damit alte Spielstände dasselbe Gelände haben (RM-FR-MAP-12)
     for (const r of ranges) {
+      // Tiefe wie früher: Nordrand ab Reihe 0 der alten Karte, Südrand bis zu ihrem Ende; darüber hinaus (neue Streifen) tiefer im Gebirge
+      const oy0 = r.edge === 'N' ? ROW0 : r.y0, oy1 = r.edge === 'S' ? ROW0 + 64 : r.y1;
       for (let y = r.y0; y < r.y1; y++) {
+        const ly = y - ROW0;
         for (let x = r.x0; x < r.x1; x++) {
-          const depth = r.edge === 'N' ? 1 - y / (r.y1 - r.y0) : (y - r.y0) / (r.y1 - r.y0);
-          const n = Math.sin(x * 0.21 + ph[0]) * 0.25 + Math.sin(x * 0.07 + y * 0.3 + ph[1]) * 0.2 + Math.sin(y * 0.5 + ph[2]) * 0.1;
+          const depth = r.edge === 'N' ? 1 - (y - oy0) / (oy1 - oy0) : (y - oy0) / (oy1 - oy0);
+          const n = Math.sin(x * 0.21 + ph[0]) * 0.25 + Math.sin(x * 0.07 + ly * 0.3 + ph[1]) * 0.2 + Math.sin(ly * 0.5 + ph[2]) * 0.1;
           const side = Math.min(1, (x - r.x0) / 8, (r.x1 - x) / 8);
           if (depth * side + n > M.rockLevel) T[this.key(x, y)] = ROCK;
         }
@@ -160,7 +236,7 @@ export class Grid {
       for (let y = l.y - l.ry - 2; y <= l.y + l.ry + 2; y++) {
         for (let x = l.x - l.rx - 2; x <= l.x + l.rx + 2; x++) {
           if (!this.inside(x, y)) continue;
-          const d = ((x - l.x) / l.rx) ** 2 + ((y - l.y) / l.ry) ** 2 + Math.sin(x * 1.3 + y * 0.7) * 0.15;
+          const d = ((x - l.x) / l.rx) ** 2 + ((y - l.y) / l.ry) ** 2 + Math.sin(x * 1.3 + (y - ROW0) * 0.7) * 0.15;
           if (d <= 1) T[this.key(x, y)] = WATER;
         }
       }
@@ -168,7 +244,8 @@ export class Grid {
     // Flüsse (quer zur Strecke, von Nord nach Süd)
     for (const rv of M.rivers) {
       for (let y = 0; y < this.h; y++) {
-        const c = rv.x + rv.a * Math.sin(y * 0.14 + rv.x) + rv.b * Math.sin(y * 0.05 + 1);
+        const ly = y - ROW0;
+        const c = rv.x + rv.a * Math.sin(ly * 0.14 + rv.x) + rv.b * Math.sin(ly * 0.05 + 1);
         for (let x = Math.floor(c - 3); x <= Math.ceil(c + 3); x++) {
           if (this.inside(x, y) && !core(x) && Math.abs(x - c) <= rv.w) T[this.key(x, y)] = WATER;
         }
@@ -176,7 +253,7 @@ export class Grid {
     }
     // Startgebiet und alte Karte flach halten
     // (andere Karten: nur ein Band um die Strecke, damit die Berge bleiben)
-    const band = M.id === 'donau' ? 99 : 9;
+    const band = M.id === 'donau' || (M.id.startsWith('eigen-') && M.base === 'donau') ? 99 : 9;
     for (let y = 0; y < this.h; y++) {
       if (Math.abs(y - MAIN_ROW) > band) continue;
       for (let x = CORE.x0; x <= CORE.x1; x++) T[this.key(x, y)] = GRASS;
@@ -191,7 +268,16 @@ export class Grid {
 
   /** Zelle gehört zu einer Kreuzungsstelle des Netzbetreibers */
   isLoopCell(x: number, y: number) {
-    return (y === MAIN_ROW || y === SECOND_ROW) && PASSING_LOOPS.some(([a, b]) => x >= a && x <= b + 2);
+    if (y !== MAIN_ROW && y !== SECOND_ROW) return false;
+    const loop = PASSING_LOOPS.find(([a, b]) => x >= a && x <= b + 2);
+    // nach dem zweigleisigen Ausbau: abgebaute Kreuzungsstellen sind normale Strecke
+    return !!loop && (!this.mainRows.includes(SECOND_ROW) || this.loopStanding(loop));
+  }
+
+  /** Kreuzungsstelle steht noch (Weichen des Netzbetreibers vorhanden) */
+  loopStanding([a, b]: [number, number]) {
+    const fixedAt = (x: number) => { const pc = this.get(x, MAIN_ROW)?.piece; return pc != null && this.fixedPieces.has(pc); };
+    return fixedAt(a) || fixedAt(b);
   }
 
   /** nach dem Laden: Weichen der Kreuzungsstellen wieder als fest markieren */
@@ -274,6 +360,34 @@ export class Grid {
     return blocked;
   }
 
+  /**
+   * Blocksignale des Netzbetreibers auf der zweigleisigen Strecke (Linksverkehr): alle 16 Felder ein Signal je Richtung,
+   * nur auf freier Strecke (keine Weichen, Signale oder Bahnsteige in der Nähe) und außerhalb noch stehender Kreuzungsstellen. So können Züge dicht hintereinander fahren.
+   * Liefert die Zahl neuer Signale.
+   */
+  addBlockSignals(): number {
+    if (!this.mainRows.includes(SECOND_ROW)) return 0;
+    let n = 0;
+    for (let x = 8; x < this.w - 8; x += 16) {
+      if (PASSING_LOOPS.some(([a, b]) => x >= a - 3 && x <= b + 5 && this.loopStanding([a, b]))) continue;
+      for (const [y, east] of [[MAIN_ROW, true], [SECOND_ROW, false]] as const) {
+        const c = this.get(x, y)!;
+        if (!c.track || c.piece !== null || c.road || c.platform) continue;
+        // freie Strecke: keine Weichen, Signale oder Bahnsteige in der Nähe (dein Bahnhof bleibt unangetastet)
+        let busy = false;
+        for (let d = -6; d <= 6 && !busy; d++) {
+          const q = this.get(x + d, y);
+          if (!q || !q.track || q.piece !== null || q.signal || q.signalW || q.siding || q.shunt) busy = true;
+          for (const dy of [-1, 1]) if (this.get(x + d, y + dy)?.platform) busy = true;
+        }
+        if (busy) continue;
+        if (east) c.signal = true; else c.signalW = true;
+        n++;
+      }
+    }
+    return n;
+  }
+
   // ------------------------------------------------------------ Gleisteile
   footprint(key: string, x: number, y: number): XY[] {
     const d = PIECES[key] ?? BUILDINGS[key];
@@ -339,10 +453,32 @@ export class Grid {
     this.buildings.delete(id);
   }
 
+  /** öffentliche Straße (RM-FR-MAP-08): auf Wiese über die ganze Kartenhöhe, kreuzt die Strecke mit Bahnübergang */
+  isPublicRoad(x: number, y: number) { return !!currentMap().roads?.includes(x) && !!this.get(x, y)?.road; }
+  private addPublicRoads() {
+    for (const x of currentMap().roads ?? []) {
+      for (let y = 0; y < this.h; y++) {
+        const c = this.get(x, y);
+        if (!c || this.terrain[this.key(x, y)] !== GRASS || c.piece !== null || c.platform || c.building !== null) continue;
+        c.road = true;
+      }
+    }
+  }
+
+  /** Hochbahn über der Zelle (RM-FR-MAP-11): 0 keine, 1 Fahrbahn oben (darunter Gleise erlaubt), 2 Pfeiler (blockiert) */
+  viaductAt(x: number, y: number): 0 | 1 | 2 {
+    for (const v of currentMap().viaducts ?? []) {
+      if (x !== v.x || y < v.y0 || y > v.y1) continue;
+      return v.piers.includes(y) ? 2 : 1;
+    }
+    return 0;
+  }
+
   private free(x: number, y: number, w: number, h: number) {
     for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
+      if (this.viaductAt(x + dx, y + dy)) return false;
       const c = this.get(x + dx, y + dy);
-      if (!c || c.track || c.building !== null || Math.abs(y + dy - MAIN_ROW - 0.5) < 3) return false;
+      if (!c || c.track || c.piece !== null || c.road || c.building !== null || Math.abs(y + dy - MAIN_ROW - 0.5) < 3) return false;
       if (this.terrain[this.key(x + dx, y + dy)] !== GRASS) return false;
     }
     return true;
@@ -357,7 +493,7 @@ export class Grid {
     const rockFree = (x: number, y: number, w: number, h: number) => {
       for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
         const c = this.get(x + dx, y + dy);
-        if (!c || c.building !== null || c.track || T[this.key(x + dx, y + dy)] !== ROCK) return false;
+        if (!c || c.building !== null || c.track || c.piece !== null || T[this.key(x + dx, y + dy)] !== ROCK) return false;
       }
       return true;
     };
@@ -372,7 +508,9 @@ export class Grid {
       if (rockFree(x, y, 1, 1) && rnd() < 0.5) this.addBuilding(rnd() < 0.5 ? 'bld_rock0' : 'bld_rock1', x, y, true);
     }
     // Wälder: dichte Flecken
-    const forests = Array.from({ length: currentMap().forests }, () => ({ x: rnd() * this.w, y: rnd() < 0.5 ? rnd() * 22 : 41 + rnd() * 23, r: 3 + rnd() * 7 }));
+    // Wälder abseits der Strecke, verteilt über die ganze Höhe (doppelt so viele Flecken wie auf der früheren, halb so hohen Karte)
+    const north = MAIN_ROW - 9, south = MAIN_ROW + 10;
+    const forests = Array.from({ length: Math.round((currentMap().forests * this.h) / 64) }, () => ({ x: rnd() * this.w, y: rnd() < 0.5 ? rnd() * north : south + rnd() * (this.h - south), r: 3 + rnd() * 7 }));
     for (let y = 0; y < this.h; y++) {
       for (let x = 0; x < this.w; x++) {
         let p = 0.02;
@@ -391,8 +529,9 @@ export class Grid {
     }
     // Dörfer
     for (const v of currentMap().villages) {
-      for (let i = 0; i < 8; i++) {
-        const x = Math.round(v.x + (rnd() - 0.5) * 12), y = Math.round(v.y + (rnd() - 0.5) * 7);
+      const n = currentMap().villageSize ?? 8, spread = n > 8 ? 1.5 : 1;
+      for (let i = 0; i < n; i++) {
+        const x = Math.round(v.x + (rnd() - 0.5) * 12 * spread), y = Math.round(v.y + (rnd() - 0.5) * 7 * spread);
         const hs = currentMap().houses;
         const key = hs ? hs[Math.floor(rnd() * hs.length)] : rnd() < 0.5 ? 'bld_houseA' : 'bld_houseB';
         const d = BUILDINGS[key];

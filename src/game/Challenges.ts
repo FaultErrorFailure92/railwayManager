@@ -47,11 +47,27 @@ export const CHALLENGES: Challenge[] = [
   },
 ];
 
-export function challengeById(id: string) { return CHALLENGES.find((c) => c.id === id); }
+/** Tägliche Herausforderung (RM-FR-END-03): für alle am selben Tag dieselbe, mit festem Zufall */
+export function dailyKey(d = new Date()) { return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; }
+export function dailyChallenge(key = dailyKey()): Challenge {
+  const n = Number(key);
+  const base = CHALLENGES[n % CHALLENGES.length];
+  // Startgeld je Tag 100 / 80 / 67 % der Vorlage
+  const tight = 1 + ((n >> 3) % 3) * 0.25;
+  return { ...base, id: `daily-${key}`, title: `Heute: ${base.title}`, short: `${base.short} · Startgeld ${Math.round(100 / tight)} %`, money: Math.round(base.money / tight / 1000) * 1000 };
+}
+/** fester Zufall für die tägliche Herausforderung */
+export function seedDaily(key: string) {
+  let a = Number(key) >>> 0;
+  Math.random = () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+export function challengeById(id: string) { return id.startsWith('daily-') ? dailyChallenge(id.slice(6)) : CHALLENGES.find((c) => c.id === id); }
 
 /** Herausforderung beginnen (nach dem Aufbau des Bahnhofs) */
 export function startChallenge(g: Game, id: string) {
   const c = challengeById(id)!;
+  if (id.startsWith('daily-')) g.addLog('Tägliche Herausforderung: heute für alle gleich', 'info');
   g.mode = 'challenge';
   g.money = c.money;
   c.setup?.(g);

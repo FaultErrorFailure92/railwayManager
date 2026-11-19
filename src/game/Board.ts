@@ -1,5 +1,6 @@
 import type { Game } from './Game';
 import { currentMap } from '../world/maps';
+import { OP_OVERRIDES, type OperatorId } from '../sim/Operators';
 
 /** Briefe vom Bahnvorstand: Begrüßung und ab und zu Lob oder Tadel */
 export const BOARD_NAME = 'Hofrat Dr. Ferdinand Fahrplan';
@@ -18,7 +19,7 @@ export function welcomeLetter(g: Game): Letter {
   return {
     mood: 'info', title: 'Willkommen an Bord!',
     text: `<p>${g.salutation(`Sehr geehrte Betriebsleitung der ${g.company}`)}</p>
-<p>der Vorstand der <b>${g.company}</b> freut sich, Ihnen die Strecke im <b>${m.name}</b> anvertrauen zu dürfen. Sie erhalten ein Startkapital von <b>${eur(m.startMoney)}&nbsp;€</b> – bitte gehen Sie sorgsam damit um, die Bank ist nicht für ihre Geduld bekannt.</p>
+<p>der Vorstand der <b>${g.company}</b> freut sich, Ihnen die Strecke im <b>${m.name}</b> anvertrauen zu dürfen. ${g.sandbox ? 'Im <b>Sandkasten</b> spielt Geld keine Rolle – bauen Sie nach Herzenslust.' : `Sie erhalten ein Startkapital von <b>${eur(g.money)}&nbsp;€</b> – bitte gehen Sie sorgsam damit um, die Bank ist nicht für ihre Geduld bekannt.`}</p>
 <p>Unsere Erwartungen sind einfach: pünktliche Züge, zufriedene Fahrgäste und schwarze Zahlen. Bauen Sie zuerst einen Bahnsteig samt Bahnhof, dann kommen die ersten Züge von ganz allein.</p>
 <p>Ich werde Ihnen hin und wieder schreiben. Hoffentlich meistens Erfreuliches.</p>`,
   };
@@ -79,6 +80,8 @@ const ROLE = ['Leitung Fahrplan', 'Vertrieb', 'Betriebsleitung', 'Geschäftsfüh
 
 /** feste Ansprechperson je Bahnunternehmen */
 export function contactOf(op: string, opName: string): Sender {
+  const own = OP_OVERRIDES[op as OperatorId];
+  if (own) return { name: own.rep, role: own.role, org: opName, seed: own.seed };
   let h = 0;
   for (const c of op) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return { name: `${TITLE[h % TITLE.length]}${FIRST[(h >> 3) % FIRST.length]} ${LAST[(h >> 7) % LAST.length]}`, role: ROLE[(h >> 11) % ROLE.length], org: opName, seed: h };

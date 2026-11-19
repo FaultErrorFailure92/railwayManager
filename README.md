@@ -32,9 +32,12 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 
 - **Profile:** Firma und Spieler werden einmal angelegt (Onboarding mit Dienstausweis). Spielstände, Kampagnen-Fortschritt,
   freigespielte Karten und die **Dienstakte** (Statistik über alle Spiele) gehören zum Profil. Verwaltung rechts oben im Hauptmenü.
-- **Kampagne:** 7 Kapitel, eines je Karte, nur freigeschaltete sind spielbar. Kapitel 1 (Donautal, mit Einschulung) und
-  Kapitel 2 (Pannonische Ebene: Güter und Takt) sind fertig, die weiteren vorbereitet. Jedes Kapitel bekommt 1–3 Sterne.
-- **Herausforderungen:** Morgenspitze, Sturmtief, Sparkurs – fertiger Bahnhof, Ziel, Zeitlimit, Bestzeit im Profil.
+- **Kampagne:** 7 Kapitel, eines je Karte, nur freigeschaltete sind spielbar. Alle 7 Kapitel sind spielbar (Donautal mit
+  Einschulung, Pannonische Ebene, Industrierevier, Schneeland, Alpenbahn, Wüstenbahn und als Finale die Großstadt). Jedes Kapitel bekommt 1–3 Sterne.
+- **Herausforderungen:** Morgenspitze, Sturmtief, Sparkurs und eine tägliche Herausforderung – fertiger Bahnhof, Ziel, Zeitlimit, Bestzeit im Profil.
+- **Sandkasten:** freies Spiel ohne Geld, Pleite und Forschungsgrenzen. **Zufallskarten** aus einem Startwert.
+- **Kartenwerkstatt:** eigene Karten aus Vorlagen (Landschaft, Straßen, Werke, Fremdbahnen) mit eigenen Bahnunternehmen; als Datei teilbar.
+- **Dienstakte:** Statistik über alle Spiele und Auszeichnungen als Stempel (Erfolge und Laufbahn).
 - **Freies Spiel:** Einstellseite mit Karte (nur freigespielte), Startkapital, Fahrgastaufkommen, Störungen, Verspätungen von außen,
   Pleite-Grenze und Verkehrswachstum; sieben Langzeitziele mit Prämie.
 - **Karten:** Donautal, Alpenbahn, Pannonische Ebene, Industrierevier, Wüstenbahn und Schneeland –
@@ -44,11 +47,11 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 - **Zugverkehr:** Regional-, Fern-, S-Bahn-, Nacht-, Museums-, Hochgeschwindigkeits- und Güterzüge, Wendezüge,
   Linksverkehr auf zweigleisiger Strecke, Sonderzüge, Stoßzeiten mit Verstärkerzügen, Verspätungen von außen.
 - **Betrieb:** Blocksignale mit Fahrstraßenreservierung, Abstellgleise, Remise, Werkstatt, Waschanlage, Abrollberg,
-  Privatbahnen, **Anschlüsse** zwischen Zügen (auch abwarten lassen), Weg-Zeit-Diagramm mit **Disposition** (Bahnsteig und Abfahrt je Zug per Ziehen, Konflikte rot). Bahnhöfe mit Kürzel, Zugstatus mit Ort („fährt in Dmh ein“).
+  Privatbahnen, **Fremdbahnen** zum Anschließen (Halten oder Durchfahren per Vertrag), **Anschlüsse** zwischen Zügen (auch abwarten lassen), Weg-Zeit-Diagramm mit **Disposition** (Bahnsteig und Abfahrt je Zug per Ziehen, Konflikte rot). Bahnhöfe mit Kürzel, Zugstatus mit Ort („fährt in Dmh ein“).
 - **Ereignisse:** Tag und Nacht, Wetter, Störungen und Großstörungen, Abnutzung von Weichen und Signalen,
   besondere Tage (Feiertag, Heimspiel, Streik …), Zeitung, Briefe vom Vorstand und von der Bank.
 - **Wirtschaft:** Ausschreibungen, Verträge mit Preis und Takt, Läden, Personal, Bank mit Kredit, Pleite-Grenze.
-- **Fortschritt:** Aufträge, Forschungsbaum, Tagesziele, Bahnhofsstufen (Haltepunkt bis Hauptbahnhof), Bewertung, Erfolge.
+- **Fortschritt:** Aufträge, vier Forschungsbäume, Tagesziele, Bahnhofsstufen (Haltepunkt bis Hauptbahnhof), Bewertung, Erfolge.
 - **Oberfläche:** untere Leiste mit Übersichtskarte (Zoom, Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung), Baumenü
   (Gruppe → Typ → Variante, drehen mit R) und Infos (Zugverkehr, Meldungen, Partner – Details per Klick); „Was ist los?“ mit Lösungen per Klick,
   Bahn-ABC, Musik und Geräusche.
@@ -69,6 +72,9 @@ Anforderungen stehen in `docs/requirements/railway-manager.sdoc` (StrictDoc).
 | Ü | Ebenen weiterschalten |
 | F / E / V / P | Fahrplan / Entwickeln (Forschung) / Verträge / Postfach |
 | N | Vorspulen bis zum nächsten Halt |
+| | Alle Buchstaben-Tasten sind in den Einstellungen umbelegbar |
+| Controller | Stick = Karte, LB/RB = Zoom, A = Pause, X = schneller, Y = Fahrplan, B/Start = zurück/Menü |
+| Tablet | zwei Finger = verschieben und zoomen, lange drücken = Fahrgast |
 | H / F1 | Hilfe |
 | F5 / Strg+S | Schnellspeichern |
 | Esc | Werkzeug weglegen, sonst Pause/Hauptmenü |

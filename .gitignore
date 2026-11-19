@@ -2,3 +2,5 @@ node_modules
 dist
 .DS_Store
 aufgaben.md
+steam-depot
+__pycache__

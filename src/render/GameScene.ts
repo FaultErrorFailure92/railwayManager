@@ -1,16 +1,18 @@
 import Phaser from 'phaser';
 import { settings } from '../game/settings';
-import { COST, MAP_H, MAP_W, PARCEL, START_PARCELS, TILE } from '../config';
+import { COST, MAIN_ROW, MAP_H, MAP_W, PARCEL, START_PARCELS, TILE } from '../config';
 import { Game } from '../game/Game';
 import { elements, wearOf } from '../game/Wear';
 import type { ToolId } from '../game/Missions';
 import manifest from '../gen/manifest.json';
+import { ATLAS, ATLAS_OK } from './atlas';
+import { SimClock } from '../game/SimClock';
 import { toScreen, toWorld } from '../iso';
 import type { Train } from '../sim/Simulation';
 import { ROCK, WATER } from '../world/Grid';
 import { isStation, SHOPS } from '../world/buildings';
 import { Animals, preloadAnimals } from './Animals';
-import { SORT_DESTS } from '../sim/Operators';
+import { OP_DEFAULTS, OP_OVERRIDES, OPERATORS, SORT_DESTS, type OperatorId } from '../sim/Operators';
 import { BUILD_MENU, BUILDINGS } from '../world/buildings';
 import { pointOnEdge } from '../world/Network';
 import { PIECES, PIECES_BY_GROUP } from '../world/pieces';
@@ -54,6 +56,11 @@ export const VARIANTS: Partial<Record<ToolId, Variant[]>> = {
     ...['bld_remise', 'bld_workshop', 'bld_wash', 'bld_hump'].map((k) => ({ key: k, label: BUILDINGS[k].label, icon: k, cost: BUILDINGS[k].cost, info: BUILDINGS[k].effect })),
     ...SORT_DESTS.map((d, i) => ({ key: `mark_sort${i}`, label: `Richtungsgleis ${d.name}`, icon: `mark_sort${i}`, cost: COST.marker, info: 'Wagen dieser Farbe rollen hierher' })),
   ],
+  // Kopieren und Vorlagen (RM-FR-BUILD-13)
+  copy: [
+    { key: 'copy', label: 'Bereich kopieren', icon: 'tool_cursor', info: 'Fläche aufziehen: eigene Gleise, Weichen, Signale, Bahnsteige und Fahrdraht werden Vorlage 1' },
+    ...[1, 2, 3].map((i) => ({ key: `tpl${i}`, label: `Vorlage ${i} einfügen`, icon: 'track', info: 'Klicken: links oben einfügen. Die neueste Kopie ist immer Vorlage 1' })),
+  ],
 };
 
 export interface UiState {
@@ -95,7 +102,7 @@ const D_GROUND = -100000;
 const D_TRACK = -50000;
 const D_OVERLAY = 90000;
 const D_UI = 100000;
-const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility', 'road', 'remove'];
+const DRAG_TOOLS: ToolId[] = ['platform', 'track', 'diag', 'wire', 'access', 'facility', 'road', 'remove', 'copy'];
 /** Gebäude mit Infofenster beim Anklicken */
 const PANEL_BUILDING = (k?: string) => !!k && (isStation(k) || !!SHOPS[k]);
 /** Nebel: ab so vielen Feldern Abstand zur eigenen Fläche, voll nach weiteren … */
@@ -106,12 +113,13 @@ const LABEL_PX = { price: 22, station: 16, cost: 16, platform: 14, fx: 16, fxBig
 
 export class GameScene extends Phaser.Scene {
   private builtVersion = -1;
+  private clock = new SimClock((d) => this.g.tick(d));
   private overlayKey = '';
   private staticObjs: (Phaser.GameObjects.Image | Phaser.GameObjects.Text)[] = [];
   private downAt: XY | null = null;
   private animals!: Animals;
   private buildingImgs = new Map<number, { key: string; x: number; y: number; rot?: boolean; img: Phaser.GameObjects.Image }>();
-  private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W'; sh?: boolean }[] = [];
+  private signals: { img: Phaser.GameObjects.Image; k: number; dir: 'E' | 'W'; sh?: boolean; mark?: Phaser.GameObjects.Text }[] = [];
   private trainSprites = new Map<number, Phaser.GameObjects.Image[]>();
   private lastTrainPos = new Map<number, XY>();
   private overlay!: Phaser.GameObjects.Graphics;
@@ -146,10 +154,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
+    // beim Laden ohne Neuladen (RM-FR-PERF-04) sind die Bilder schon da
+    if (this.textures.exists('people')) return;
     // Ladebildschirm füttern
     const bar = document.getElementById('ld-bar');
     this.load.on('progress', (v: number) => { if (bar) bar.style.width = `${Math.round(v * 100)}%`; });
-    for (const [name, s] of Object.entries(SPRITES)) this.load.image(name, `assets/gen/${s.file}`);
+    // alle Einzelbilder in einem Textur-Atlas (RM-FR-PERF-02): ein Bild, weniger Texturwechsel beim Zeichnen
+    if (ATLAS_OK) this.load.atlas(ATLAS, `assets/atlas/${ATLAS}.png`, `assets/atlas/${ATLAS}.json`);
+    else for (const [name, s] of Object.entries(SPRITES)) this.load.image(name, `assets/gen/${s.file}`);
     const pm = manifest.people;
     this.load.spritesheet('people', `assets/gen/${pm.file}`, { frameWidth: pm.w, frameHeight: pm.h });
     const em = manifest.emotes;
@@ -169,7 +181,7 @@ export class GameScene extends Phaser.Scene {
     this.overlay = this.add.graphics().setDepth(D_OVERLAY);
     this.layerGfx = this.add.graphics().setDepth(D_OVERLAY + 1);
     this.hintGfx = this.add.graphics().setDepth(D_OVERLAY + 1);
-    this.hintArrow = this.add.image(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
+    this.hintArrow = this.img(0, 0, 'arrow').setOrigin(0.5, 1).setDepth(D_UI + 5).setVisible(false);
     this.ghost = this.add.graphics().setDepth(D_UI);
     this.costTag = this.add.text(0, 0, '', {
       fontFamily: FONT, fontSize: `${LABEL_PX.cost}px`, color: '#9dff8a', backgroundColor: '#140c06dd', padding: { x: 3, y: 0 },
@@ -203,6 +215,7 @@ export class GameScene extends Phaser.Scene {
     const s = SPRITES.ground_0;
     const gk = currentMap().ground ? `ground_${currentMap().ground}_` : 'ground_';
     const water = (x: number, y: number) => !g.inside(x, y) || g.isWater(x, y);
+    const atlas = this.textures.exists(ATLAS);
     for (let cx = 0; cx < totalW; cx += CHUNK) {
       const w = Math.min(CHUNK, totalW - cx);
       const rt = this.add.renderTexture(left + cx, 0, w, h).setOrigin(0).setDepth(D_GROUND);
@@ -220,7 +233,8 @@ export class GameScene extends Phaser.Scene {
             frame = `water_${m}`;
           } else if (t === ROCK) frame = `rock_${hash % 4}`;
           else frame = `${gk}${hash % n}`;
-          rt.batchDrawFrame(frame, undefined, px, p.y + s.oy);
+          if (atlas) rt.batchDrawFrame(ATLAS, frame, px, p.y + s.oy);
+          else rt.batchDrawFrame(frame, undefined, px, p.y + s.oy);
         }
       }
       rt.endDraw();
@@ -229,10 +243,115 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** eigene Lackierung (RM-FR-MOD-01): Farbton der Vorlage auf die eigene Farbe drehen, Helligkeit bleibt */
+  private painted = new Map<string, string>();
+  private paintKey(op: OperatorId, base: string) {
+    const own = OP_OVERRIDES[op];
+    if (!own || own.color === OP_DEFAULTS[op].color) return base;
+    const key = `${base}_p${own.color.slice(1)}`;
+    if (this.painted.get(base) === key && this.textures.exists(key)) return key;
+    if (!this.textures.exists(key)) {
+      const fr = this.textures.exists(base) ? this.textures.getFrame(base) : this.textures.getFrame(ATLAS, base);
+      const w = fr.cutWidth, h = fr.cutHeight;
+      const tex = this.textures.createCanvas(key, w, h);
+      if (!tex) return base;
+      const ctx = tex.getContext();
+      ctx.drawImage(fr.source.image as HTMLImageElement, fr.cutX, fr.cutY, w, h, 0, 0, w, h);
+      const img = ctx.getImageData(0, 0, w, h);
+      const from = hsl(OP_DEFAULTS[op].color), to = hsl(own.color);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue;
+        const [h, sat, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
+        // nur die Lackfarbe (ähnlicher Farbton, deutlich bunt) – Fenster, Dach und Fahrwerk bleiben
+        if (sat < 0.22 || Math.min(Math.abs(h - from[0]), 1 - Math.abs(h - from[0])) > 0.07) continue;
+        const nl = Math.max(0, Math.min(1, l + (to[2] - from[2]) * 0.7));
+        const [r, g, b] = hslToRgb(to[0], Math.min(1, to[1] * (sat / Math.max(0.01, from[1]))), nl);
+        d[i] = r; d[i + 1] = g; d[i + 2] = b;
+      }
+      ctx.putImageData(img, 0, 0);
+      tex.refresh();
+    }
+    this.painted.set(base, key);
+    return key;
+  }
+
+  /** Bahnübergänge und Autos auf den öffentlichen Straßen (RM-FR-MAP-08) */
+  private crossings: { k: number; img: Phaser.GameObjects.Image; closed: boolean }[] = [];
+  private roadSegs?: { x: number; y0: number; y1: number }[];
+  private cars: { img: Phaser.GameObjects.Image; seg: number; y: number; dir: 1 | -1 }[] = [];
+  private moveTraffic(delta: number) {
+    const g = this.g.grid, sim = this.g.sim;
+    const shut = new Set<number>();
+    for (const c of this.crossings) {
+      const closed = sim.owner[c.k] !== 0;
+      if (closed) shut.add(c.k);
+      if (closed !== c.closed) { c.closed = closed; this.setTex(c.img, closed ? 'xing_closed' : 'xing_open'); }
+    }
+    if (!this.roadSegs) {
+      // zusammenhängendes Straßenstück rund um die Strecke je öffentlicher Straße
+      this.roadSegs = [];
+      for (const x of currentMap().roads ?? []) {
+        if (!g.get(x, MAIN_ROW)?.road) continue;
+        let y0 = MAIN_ROW, y1 = MAIN_ROW;
+        while (g.get(x, y0 - 1)?.road) y0--;
+        while (g.get(x, y1 + 1)?.road) y1++;
+        if (y1 - y0 >= 6) this.roadSegs.push({ x, y0, y1 });
+      }
+      const want = this.roadSegs.length * 4;
+      while (this.cars.length > want) this.cars.pop()!.img.destroy();
+      while (this.cars.length < want) {
+        const i = this.cars.length, seg = Math.floor(i / 4), sg = this.roadSegs[seg];
+        const kinds = currentMap().vehicles ?? ['auto_0', 'auto_1', 'auto_2', 'auto_3'];
+        this.cars.push({ img: this.img(0, 0, kinds[i % kinds.length]).setOrigin(0), seg, y: sg.y0 + ((i * 7.3) % (sg.y1 - sg.y0)), dir: i % 2 ? 1 : -1 });
+      }
+      this.cars.forEach((c, i) => { c.seg = Math.floor(i / 4); });
+    }
+    const run = !this.g.paused;
+    const step = (delta / 1000) * 1.6 * Math.min(4, this.g.speed);
+    const sp = SPRITES.auto_0;
+    for (const c of this.cars) {
+      const sg = this.roadSegs[c.seg];
+      if (!sg) { c.img.setVisible(false); continue; }
+      if (run) {
+        const ahead = Math.floor(c.y + c.dir * 0.9);
+        const blocked = shut.has(g.key(sg.x, ahead)) && !shut.has(g.key(sg.x, Math.floor(c.y)))
+          || this.cars.some((o) => o !== c && o.seg === c.seg && o.dir === c.dir && (o.y - c.y) * c.dir > 0 && (o.y - c.y) * c.dir < 1.1);
+        if (!blocked) c.y += c.dir * step;
+        if (c.y > sg.y1 + 0.9) c.y = sg.y0 - 0.5;
+        if (c.y < sg.y0 - 0.9) c.y = sg.y1 + 0.5;
+      }
+      const wx = sg.x * TILE + (c.dir === 1 ? -2.5 : 2.5), wy = c.y * TILE;
+      const p = toScreen(wx, wy);
+      c.img.setVisible(true).setPosition(p.x + sp.ox, p.y + sp.oy).setDepth(toScreen(wx + 8, wy + 8).y + 0.4);
+    }
+  }
+
+  /** Hochbahn-Zug (RM-FR-MAP-11): zwei Wagen pendeln über die Hochbahn, unabhängig vom Spielbetrieb */
+  private metro?: { cars: Phaser.GameObjects.Image[]; pos: number; dir: 1 | -1; wait: number };
+  private moveMetro(delta: number) {
+    const v = currentMap().viaducts?.[0];
+    if (!v) { if (this.metro) { this.metro.cars.forEach((c) => c.destroy()); this.metro = undefined; } return; }
+    if (!this.metro) this.metro = { cars: [0, 1].map(() => this.img(0, 0, 'viaduct_car').setOrigin(0)), pos: v.y0, dir: 1, wait: 0 };
+    const m = this.metro, len = 2;
+    if (this.g.paused) return;
+    if (m.wait > 0) m.wait -= delta * this.g.speed;
+    else {
+      m.pos += m.dir * delta * 0.004 * Math.min(4, this.g.speed);
+      if (m.pos > v.y1 - len + 1 || m.pos < v.y0) { m.pos = Math.max(v.y0, Math.min(v.y1 - len + 1, m.pos)); m.dir = m.dir === 1 ? -1 : 1; m.wait = 12000; }
+    }
+    const s = SPRITES.viaduct_car;
+    m.cars.forEach((c, i) => {
+      const y = m.pos + i;
+      const p = toScreen(v.x * TILE, y * TILE);
+      c.setPosition(p.x + s.ox, p.y + s.oy).setDepth(toScreen(v.x * TILE + 8, y * TILE + 8).y + 14.5);
+    });
+  }
+
   private place(name: string, wx: number, wy: number, depth: number) {
     const s = SPRITES[name];
     const p = toScreen(wx, wy);
-    const img = this.add.image(p.x + s.ox, p.y + s.oy, name).setOrigin(0).setDepth(depth);
+    const img = this.img(p.x + s.ox, p.y + s.oy, name).setOrigin(0).setDepth(depth);
     if (this.animCells.size) this.animate(img, name, Math.floor(wx / TILE), Math.floor(wy / TILE));
     return img;
   }
@@ -244,6 +363,8 @@ export class GameScene extends Phaser.Scene {
   /** Bau-Ereignisse aus dem Spiel abholen: Felder der Reihe nach animieren, Abriss staubt */
   private takeBuildEvents() {
     const evs = this.g.buildEvents.splice(0);
+    if (evs.some((e) => e.remove)) Sound.crunch();
+    if (evs.some((e) => !e.remove)) Sound.snap();
     if (!settings.anim) return;
     const now = this.time.now;
     for (const [k, t0] of this.animCells) if (now - t0 > 2000) this.animCells.delete(k);
@@ -293,6 +414,18 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Bild aus dem Textur-Atlas (RM-FR-PERF-02); eigene Texturen (z. B. Lackierung) haben Vorrang */
+  private img(x: number, y: number, name: string) {
+    return this.textures.exists(name) ? this.add.image(x, y, name) : this.add.image(x, y, ATLAS, name);
+  }
+
+  /** Bild tauschen – nur, wenn es sich ändert */
+  private setTex(img: Phaser.GameObjects.Image, name: string) {
+    if (this.textures.exists(name)) { if (img.texture.key !== name) img.setTexture(name); }
+    else if (img.texture.key !== ATLAS || img.frame.name !== name) img.setTexture(ATLAS, name);
+    return img;
+  }
+
   /** gedrehtes Gebäude: an der oberen Ecke gespiegelt (x und y tauschen) */
   private mirror(img: Phaser.GameObjects.Image, name: string, wx: number, wy: number) {
     const s = SPRITES[name];
@@ -330,7 +463,7 @@ export class GameScene extends Phaser.Scene {
     // Gleis: schräg gezogen = Diagonale (mit automatischer Kreuzung)
     if (t === 'track' && this.dragStart && h.y !== this.dragStart.y) return { cells: [this.dragStart, h], variant };
     // Abriss: Rechteck aufziehen
-    if (t === 'remove' && this.dragStart) {
+    if ((t === 'remove' || (t === 'copy' && variant === 'copy')) && this.dragStart) {
       const x0 = Math.min(this.dragStart.x, h.x), x1 = Math.max(this.dragStart.x, h.x);
       const y0 = Math.min(this.dragStart.y, h.y), y1 = Math.max(this.dragStart.y, h.y);
       const out: XY[] = [];
@@ -363,7 +496,27 @@ export class GameScene extends Phaser.Scene {
       }
       if (DRAG_TOOLS.includes(this.ui.tool)) this.dragStart = this.cellAt(p.x, p.y);
     });
+    // Tablet (RM-FR-Q-04): zweiter Finger – mit zwei Fingern verschieben und zoomen
+    this.input.addPointer(1);
+    let pinch: { d: number; mx: number; my: number } | null = null;
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      const p1 = this.input.pointer1, p2 = this.input.pointer2;
+      if (p1?.isDown && p2?.isDown) {
+        const d = Math.hypot(p1.x - p2.x, p1.y - p2.y), mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+        const cam = this.cameras.main;
+        if (pinch) {
+          cam.scrollX -= (mx - pinch.mx) / cam.zoom;
+          cam.scrollY -= (my - pinch.my) / cam.zoom;
+          // ganze Zoomstufen (Pixelgrafik): erst bei deutlicher Fingerbewegung
+          if (d / pinch.d > 1.3 && cam.zoom < 6) { cam.setZoom(cam.zoom + 1); pinch.d = d; }
+          else if (d / pinch.d < 0.77 && cam.zoom > 1) { cam.setZoom(cam.zoom - 1); pinch.d = d; }
+          pinch.mx = mx; pinch.my = my;
+        } else pinch = { d, mx, my };
+        // kein Bauen und kein Verschieben mit einem Finger, solange zwei liegen
+        this.dragStart = null; this.panLast = null; this.downAt = null; this.pressAt = null;
+        return;
+      }
+      if (pinch && !(p1?.isDown || p2?.isDown)) pinch = null;
       this.hoverCell = this.cellAt(p.x, p.y);
       this.ui.mouse = { x: p.x, y: p.y };
       this.ui.hoverTrain = this.trainAt(p.x, p.y);
@@ -377,6 +530,7 @@ export class GameScene extends Phaser.Scene {
       }
     });
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      if (pinch) { if (!this.input.pointer1?.isDown && !this.input.pointer2?.isDown) pinch = null; this.dragStart = null; return; }
       if (this.panLast) {
         this.panLast = null;
         const d = this.downAt;
@@ -413,6 +567,34 @@ export class GameScene extends Phaser.Scene {
       wheelAcc = 0;
       wheelBlock = now + 220;
     });
+  }
+
+  /**
+   * Controller (RM-FR-PAD-01): linker Stick verschiebt die Karte, LB/RB zoomen,
+   * A = Pause, X = schneller, Y = Fahrplan, B = Werkzeug weg, Start = Menü.
+   */
+  private padPrev: boolean[] = [];
+  private pollGamepad(dt: number) {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = [...pads].find((x) => x && x.connected);
+    if (!gp) return;
+    const cam = this.cameras.main;
+    const dz = (v: number) => (Math.abs(v) < 0.18 ? 0 : v);
+    const sx = dz(gp.axes[0] ?? 0) + dz(gp.axes[2] ?? 0), sy = dz(gp.axes[1] ?? 0) + dz(gp.axes[3] ?? 0);
+    const sp = (900 * dt * (settings.scroll / 100)) / cam.zoom;
+    cam.scrollX += sx * sp;
+    cam.scrollY += sy * sp;
+    const pressed = gp.buttons.map((b) => b.pressed);
+    const hit = (i: number) => pressed[i] && !this.padPrev[i];
+    const key = (k: string, code = '') => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, code }));
+    if (hit(4)) cam.setZoom(Math.max(1, cam.zoom - 1));
+    if (hit(5)) cam.setZoom(Math.min(6, cam.zoom + 1));
+    if (hit(0)) key(' ', 'Space');
+    if (hit(2)) key('+');
+    if (hit(3)) key(settings.keys.timetable);
+    if (hit(1)) key('Escape');
+    if (hit(9)) key('Escape');
+    this.padPrev = pressed;
   }
 
   /** Zug unter einem Bildschirmpunkt (oberster Wagen) */
@@ -505,8 +687,8 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number) {
     this.time0 = time;
     const dt = Math.min(delta, 1000) / 1000;
-    // bis 1 s nachholen, damit die Spielzeit auch bei wenigen FPS gleich schnell läuft
-    this.g.tick(dt);
+    // Simulation in festen Schritten (RM-FR-PERF-01)
+    this.clock.advance(dt);
 
     const cam = this.cameras.main;
     if (this.ui.menu) cam.scrollX += delta * 0.012;
@@ -520,7 +702,10 @@ export class GameScene extends Phaser.Scene {
 
     this.takeBuildEvents();
     if (this.builtVersion !== this.g.version) this.rebuildStatic();
+    this.moveMetro(delta);
+    this.moveTraffic(delta);
     this.checkLongPress();
+    this.pollGamepad(dt);
     // Beschriftungen auf fester Bildschirmgröße halten
     const inv = 1 / this.cameras.main.zoom;
     for (const l of this.fixedLabels) if (l.scaleX !== inv) l.setScale(inv);
@@ -535,16 +720,37 @@ export class GameScene extends Phaser.Scene {
     this.weatherFx.update(dt, this.cameras.main.worldView, this.cameras.main.zoom);
     this.updateMarkers();
     this.updateLayer();
+    this.cull();
     this.drawHint(dt);
     this.drawGhost();
     this.showFx();
+  }
+
+  /** Nur Sichtbares zeichnen (RM-FR-PERF-02): feste Bilder außerhalb des Ausschnitts ausblenden */
+  private cullKey = '';
+  private cullCount = -1;
+  private cull() {
+    const v = this.cameras.main.worldView;
+    const n = this.staticObjs.length + this.buildingImgs.size;
+    const key = `${Math.round(v.x / 32)},${Math.round(v.y / 32)},${Math.round(v.width / 32)},${Math.round(v.height / 32)}`;
+    if (key === this.cullKey && n === this.cullCount) return;
+    this.cullKey = key; this.cullCount = n;
+    const pad = 96, x0 = v.x - pad, y0 = v.y - pad, x1 = v.right + pad, y1 = v.bottom + pad;
+    const vis = (o: Phaser.GameObjects.Image | Phaser.GameObjects.Text) => {
+      const ox = o.x - o.displayOriginX, oy = o.y - o.displayOriginY;
+      o.setVisible(ox + o.displayWidth >= x0 && ox <= x1 && oy + o.displayHeight >= y0 && oy <= y1);
+    };
+    this.staticObjs.forEach(vis);
+    for (const b of this.buildingImgs.values()) vis(b.img);
   }
 
   private rebuildStatic() {
     this.builtVersion = this.g.version;
     this.staticObjs.forEach((o) => o.destroy());
     this.staticObjs = [];
-    this.signals.forEach((s) => s.img.destroy());
+    this.crossings = [];
+    this.roadSegs = undefined;
+    this.signals.forEach((s) => { s.img.destroy(); s.mark?.destroy(); });
     this.signals = [];
     const g = this.g.grid;
     const rail = (cc?: { track: boolean; piece: number | null }) => !!cc && (cc.track || cc.piece !== null);
@@ -556,6 +762,12 @@ export class GameScene extends Phaser.Scene {
           const r = (xx: number, yy: number) => !!g.get(xx, yy)?.road;
           const m = (r(x, y - 1) ? 1 : 0) | (r(x + 1, y) ? 2 : 0) | (r(x, y + 1) ? 4 : 0) | (r(x - 1, y) ? 8 : 0);
           this.staticObjs.push(this.place(`road_${m || 10}`, x * TILE, y * TILE, D_TRACK + x + y - 0.1));
+          // Bahnübergang (RM-FR-MAP-08): Schranken schließen, sobald ein Zug den Abschnitt reserviert hat
+          if (c.track || c.piece !== null) {
+            const img = this.place('xing_open', x * TILE, y * TILE, toScreen(x * TILE + 8, y * TILE + 8).y + 0.42);
+            this.staticObjs.push(img);
+            this.crossings.push({ k: g.key(x, y), img, closed: false });
+          }
         }
         if ((c.track || c.piece !== null) && g.isWater(x, y)) this.staticObjs.push(this.place('rail_bridge', x * TILE, y * TILE, D_TRACK + x + y + 0.2));
         if (c.platform) {
@@ -612,6 +824,15 @@ export class GameScene extends Phaser.Scene {
       }).setOrigin(0.5, 1).setResolution(2).setDepth(D_OVERLAY + 1));
       this.staticObjs.push(lbl);
     });
+    // Fremdbahnen (RM-FR-MAP-09): Namensschild am nahen Abschnitt – hier kann man anschließen
+    for (const l of g.foreignLaid) {
+      const op = OPERATORS[l.op];
+      const c = toScreen(((l.x0 + l.x1) / 2 + 0.5) * TILE, (l.low + 0.5) * TILE);
+      const lbl = this.fixedSize(this.add.text(c.x, c.y - 10, `${op.name} · Fremdbahn`, {
+        fontFamily: FONT, fontSize: `${LABEL_PX.platform}px`, color: '#ffffff', backgroundColor: `${op.color}dd`, padding: { x: 4, y: 0 },
+      }).setOrigin(0.5, 1).setResolution(2).setDepth(D_OVERLAY + 1));
+      this.staticObjs.push(lbl);
+    }
     this.rebuildExtras();
   }
 
@@ -665,6 +886,10 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+    // Hochbahn (RM-FR-MAP-11): Fahrbahn und Pfeiler über allem
+    for (const v of currentMap().viaducts ?? []) {
+      for (let y = v.y0; y <= v.y1; y++) this.staticObjs.push(this.place(v.piers.includes(y) ? 'viaduct_pier' : 'viaduct_deck', v.x * TILE, y * TILE, objDepth(v.x, y, 14)));
+    }
     // Bahnsteige ohne Zugang: Warnschild
     const seen = new Set<number>();
     g.cells.forEach((c, k) => {
@@ -683,7 +908,7 @@ export class GameScene extends Phaser.Scene {
       }
       const mid = g.xy(cl[Math.floor(cl.length / 2)]);
       const p = toScreen(mid.x * TILE + 8, mid.y * TILE + 8);
-      const img = this.add.image(p.x, p.y - 8, 'warn').setOrigin(0.5, 1).setDepth(D_OVERLAY + 3);
+      const img = this.img(p.x, p.y - 8, 'warn').setOrigin(0.5, 1).setDepth(D_OVERLAY + 3);
       this.tweens.add({ targets: img, y: p.y - 13, duration: 450, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
       this.staticObjs.push(img);
     });
@@ -768,7 +993,14 @@ export class GameScene extends Phaser.Scene {
       const next = g.inside(nx, y) ? own[g.key(nx, y)] : a;
       const go = a !== 0 && next === a && dirOf.get(a) === s.dir;
       const tex = s.sh ? (go ? 'shsig_green' : 'shsig_red') : go ? 'signal_green' : 'signal_red';
-      if (s.img.texture.key !== tex) s.img.setTexture(tex);
+      this.setTex(s.img, tex);
+      // Farbenblind-Modus (RM-FR-UI-13): Form zusätzlich zur Farbe – ■ Halt, ▲ Fahrt
+      if (settings.colorblind) {
+        if (!s.mark) s.mark = this.add.text(s.img.x, s.img.y - s.img.displayHeight - 2, '', { fontFamily: 'VT323, monospace', fontSize: '12px', color: '#ffffff', stroke: '#000000', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(s.img.depth + 1);
+        const t = go ? '▲' : '■';
+        if (s.mark.text !== t) s.mark.setText(t);
+        s.mark.setVisible(true);
+      } else s.mark?.setVisible(false);
     }
   }
 
@@ -835,10 +1067,10 @@ export class GameScene extends Phaser.Scene {
     let used = 0;
     const put = (key: string, wx: number, wy: number, alpha = 1) => {
       let img = this.markerPool[used];
-      if (!img) { img = this.add.image(0, 0, key).setOrigin(0).setDepth(D_OVERLAY + 4); this.markerPool.push(img); }
+      if (!img) { img = this.img(0, 0, key).setOrigin(0).setDepth(D_OVERLAY + 4); this.markerPool.push(img); }
       used++;
       const s = SPRITES[key], p = toScreen(wx, wy);
-      if (img.texture.key !== key) img.setTexture(key);
+      this.setTex(img, key);
       img.setPosition(Math.round(p.x + s.ox), Math.round(p.y + s.oy)).setAlpha(alpha).setVisible(true);
     };
     const sim = this.g.sim;
@@ -891,7 +1123,7 @@ export class GameScene extends Phaser.Scene {
       alive.add(t.id);
       let sprites = this.trainSprites.get(t.id);
       if (!sprites) {
-        sprites = t.cars.map(() => this.add.image(0, 0, 'track').setOrigin(0));
+        sprites = t.cars.map(() => this.img(0, 0, 'track').setOrigin(0));
         this.trainSprites.set(t.id, sprites);
       }
       t.cars.forEach((kind, i) => {
@@ -902,11 +1134,12 @@ export class GameScene extends Phaser.Scene {
         const o = Math.abs(dy) < 0.4 * Math.abs(dx) ? 0 : dx * dy > 0 ? 1 : 2;
         // Triebzug-Führerstand: Nase zeigt an beiden Zugenden nach außen
         const sk = kind === 'ecab' ? ((i === 0) === (dx > 0) ? 'ecabE' : 'ecabW') : kind;
-        const key = `car_${t.op.id}_${sk}_${o}`;
-        const s = SPRITES[key];
+        const base = `car_${t.op.id}_${sk}_${o}`;
+        const s = SPRITES[base];
+        const key = this.paintKey(t.op.id, base);
         const p = toScreen(c.x, c.y);
         const img = sprites![i];
-        if (img.texture.key !== key) img.setTexture(key);
+        this.setTex(img, key);
         img.setPosition(Math.round(p.x + s.ox), Math.round(p.y + s.oy)).setDepth(p.y + 0.2);
         const f = 1 - Math.max(0, t.dirt - 30) / 100 * 0.45;
         const hover = this.ui.hoverTrain === t.id;
@@ -1006,12 +1239,12 @@ export class GameScene extends Phaser.Scene {
     const ghostImg = (i: number, name: string, wx: number, wy: number) => {
       let img = this.ghostImgs[i];
       if (!img) {
-        img = this.add.image(0, 0, 'track').setOrigin(0).setAlpha(0.65).setDepth(D_UI - 1);
+        img = this.img(0, 0, 'track').setOrigin(0).setAlpha(0.65).setDepth(D_UI - 1);
         this.ghostImgs.push(img);
       }
       const s = SPRITES[name];
       const p = toScreen(wx, wy);
-      img.setTexture(name).setFlipX(false).setPosition(p.x + s.ox, p.y + s.oy).setVisible(true);
+      this.setTex(img, name).setFlipX(false).setPosition(p.x + s.ox, p.y + s.oy).setVisible(true);
     };
     if (tool === 'switch' || tool === 'curve' || tool === 'diag') {
       a.cells.forEach((c, i) => ghostImg(i, `piece_${a.variant}`, c.x * TILE, c.y * TILE));
@@ -1079,4 +1312,24 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: t, y: p.y - 28, alpha: 0, delay: big ? 1300 : 700, duration: 1100, ease: 'Sine.easeIn', onComplete: () => t.destroy() });
     }
   }
+}
+
+/** Farbumrechnung für die Lackierung */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const dd = mx - mn, s = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+  const h = mx === r ? (g - b) / dd + (g < b ? 6 : 0) : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4;
+  return [h / 6, s, l];
+}
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) return [l * 255, l * 255, l * 255];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t: number) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)];
+}
+function hsl(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  return rgbToHsl((n >> 16) & 255, (n >> 8) & 255, n & 255);
 }

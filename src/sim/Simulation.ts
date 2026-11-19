@@ -7,7 +7,7 @@ import { boostAt } from './demand';
 /** Aufgaben eines Zuges, der Reihe nach abgearbeitet */
 export type Job =
   | { k: 'stop'; board: boolean; alight: boolean }
-  | { k: 'exit'; dir?: Dir }
+  | { k: 'exit'; dir?: Dir; via?: boolean }
   | { k: 'park'; until: number; wash?: boolean; need?: ParkKind }
   | { k: 'hump' }
   | { k: 'load'; ind: string };
@@ -83,6 +83,10 @@ export interface Train {
   paid?: boolean;
   /** fährt ohne Vertrag nur durch */
   transit?: boolean;
+  /** Fremdbahn-Zug ohne Vertrag (RM-FR-MAP-09): fährt nur auf seiner Strecke, zählt nirgends */
+  deco?: boolean;
+  /** Fremdbahn mit Durchfahrt-Vertrag: fährt ohne Halt über deine Gleise */
+  via?: boolean;
   /** geschätzte Weiterfahrt nach dem aktuellen Ziel (nur für die Deadlock-Prüfung) */
   ahead?: Edge[];
   /** Grund, warum der Zug steht (für Anzeige) */
@@ -168,9 +172,31 @@ export class Simulation {
   maxPlatform = 0;
   /** Höchstgeschwindigkeit im abzweigenden Strang einer Weiche */
   switchV = (10 * TILE) / 60;
+  /** Fremdbahn-Vertrag: Züge halten bei dir oder fahren ohne Halt über deine Gleise (RM-FR-MAP-09) */
+  foreignMode: (id: OperatorId) => 'stop' | 'through' = () => 'stop';
+  /** Fremdbahn-Vertragszüge, die deinen Bahnsteig nicht erreichten: `op:dir` → Spielzeit (für „Was ist los?“) */
+  readonly foreignMissed = new Map<string, number>();
+  /** Fremdbahnen mit Ein-/Ausfahrt im aktuellen Netz */
+  private lineIds: string[] = [];
+  /** Fremdbahnen ohne Verbindung zu deinen Gleisen: ihre Züge stören niemanden, die Stau-Vorhersage lässt sie aus */
+  private isolatedLines = new Set<string>();
+  private isolated(t: Train) { return !!t.op.foreign && this.isolatedLines.has(t.op.id); }
+  private findLines(net: Network) {
+    this.lineIds = [...new Set(net.entries.map((e) => e.line).filter((l): l is string => !!l))];
+    this.isolatedLines = new Set(this.lineIds.filter((id) => ![...net.reach(net.entries.filter((en) => en.line === id).map((en) => en.to))]
+      .some((e) => e.cells.length > 0 && !this.onLineOf(net, e, id))));
+  }
+  private onLineOf(net: Network, e: Edge, id: string) {
+    if (!e.cells.length) return e.line === id;
+    return (e.path.length ? e.path : e.cells).every((k) => net.grid.foreignCells.get(k) === id);
+  }
+
+  /** Kante gehört ganz zur Strecke der Fremdbahn `id` */
+  onLine(e: Edge, id: string) { return this.onLineOf(this.net, e, id); }
 
   constructor(public net: Network, save?: SimSave) {
     this.owner = new Int32Array(net.grid.w * net.grid.h);
+    this.findLines(net);
     if (save) this.restore(save);
     else this.fillTimetable();
   }
@@ -292,6 +318,8 @@ export class Simulation {
       if (extras.includes('dine') && coaches.length >= 3) cars[coaches[Math.floor(coaches.length / 2)]] = 'dine';
     }
     const contract = this.contractActive(op.id) || !!op.special;
+    const foreign = !!op.foreign;
+    const via = foreign && contract && this.foreignMode(op.id) === 'through';
     const length = cars.length * CAR_LEN;
     const back: Dir = dir === 'E' ? 'W' : 'E';
     const vandal = at < this.vandalUntil && op.needsStop;
@@ -305,17 +333,20 @@ export class Simulation {
     let jobs: Job[];
     if (op.industry && contract) jobs = [{ k: 'load', ind: op.industry }, { k: 'exit', dir: back }];
     else if (op.kind === 'sort') jobs = [{ k: 'hump' }];
+    else if (via) jobs = [{ k: 'exit', via: true }];
     else if (!op.needsStop || !contract) jobs = [{ k: 'exit' }];
     else if (turn && layover) {
       jobs = [{ k: 'stop', alight: true, board: false }, { k: 'park', until: 0 }, { k: 'stop', alight: false, board: true }, { k: 'exit', dir: back }];
     } else if (op.turnback) jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit', dir: back }];
     else jobs = [{ k: 'stop', alight: true, board: true }, { k: 'exit' }];
     // Wendezug: hin zum Bahnhof (ca. Kartenmitte) und wieder zurück, plus 1 min zum Wenden
-    const stops = op.needsStop && contract;
+    const stops = op.needsStop && contract && !via;
     const ind = op.industry && contract ? industryById(op.industry) : undefined;
     // Privatbahn: bis zum Ladegleis (plus Anschlussgleis) und zurück
     const indDist = ind ? 2 * ((dir === 'E' ? ind.x1 : MAP_W - ind.x0) + Math.abs(ind.row - MAIN_ROW) * 2 + 10) * TILE : 0;
-    const dist = ind ? indDist : turn && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length;
+    // Fremdbahn: der Bogen ist länger als die gerade Strecke (Wenden im Bahnhof inklusive)
+    const arc = foreign ? 8 * TILE * 16 : 0;
+    const dist = (ind ? indDist : turn && stops ? MAP_W * TILE + 2 * length : MAP_W * TILE + 12 + length) + arc;
     const stopLoss = ind ? op.dwell + 2 * (op.vmax / (2 * ACC) + op.vmax / (2 * DEC)) + 600 + 60
       : stops ? op.dwell + op.vmax / (2 * ACC) + op.vmax / (2 * DEC) + 60 + (turn ? 60 : 0) : 0;
     const plannedSpawn = Math.round((at + (Math.random() * 4 - 2) * 60) / 60) * 60;
@@ -332,7 +363,9 @@ export class Simulation {
       state: 'queued', jobs, dwellLeft: 0, waiting: false,
       passengers, capacity, reserved: new Set(),
       dirt: Math.round(vandal ? rnd(75, 98) : rnd(5, 85)), wear: Math.round(rnd(0, 85)), layover,
-      transit: !contract && op.kind !== 'sort',
+      transit: !contract && op.kind !== 'sort' && !foreign,
+      deco: (foreign && !contract) || undefined,
+      via: via || undefined,
       ends: ends || undefined,
       extDelay: contract && this.extDelayChance > 0 && Math.random() < this.extDelayChance ? Math.round(rnd(3, 15)) * 60 : undefined,
     };
@@ -341,6 +374,8 @@ export class Simulation {
   // ------------------------------------------------------------ Netzänderung
   setNetwork(net: Network) {
     this.net = net;
+    this.exitCache.clear();
+    this.findLines(net);
     this.loopEdges.clear(); this.loopTwin.clear(); this.parkedCache.clear();
     for (const t of this.trains) {
       if (t.state === 'rolling' || t.state === 'stored') {
@@ -481,7 +516,8 @@ export class Simulation {
       if (acc) merged.push(acc);
       return merged;
     };
-    const list = extra && !this.trains.includes(extra.t) ? [...this.trains, extra.t] : this.trains;
+    const base = this.isolatedLines.size ? this.trains.filter((x) => !this.isolated(x)) : this.trains;
+    const list = extra && !base.includes(extra.t) ? [...base, extra.t] : base;
     for (const x of list) {
       const held = new Set<number>();
       if (extra && x === extra.t && extra.route && extra.end !== undefined) {
@@ -654,11 +690,12 @@ export class Simulation {
     const blocks = this.sectionBlocks(t.route, idx);
     for (const b of blocks) if (!this.blockFree(b, t.id)) return false;
     // Nur reservieren, wenn danach noch alle Züge der Reihe nach ans Ziel kommen (kein Stau entsteht)
-    const after = this.unsafeTrains({ t, blocks, legs: [t.route.slice(idx[0]), t.ahead ?? []], route: t.route, end: idx[idx.length - 1] });
-    if (after.has(t.id)) return false;
-    // andere Züge kämen danach nicht mehr weiter – nur zulassen, wenn sonst alles steht (gegenseitiges Höflichsein auflösen)
-    // andere Züge kämen danach nicht mehr weiter – dann lieber warten
-    if (this.worse(after)) return false;
+    if (!this.isolated(t)) {
+      const after = this.unsafeTrains({ t, blocks, legs: [t.route.slice(idx[0]), t.ahead ?? []], route: t.route, end: idx[idx.length - 1] });
+      if (after.has(t.id)) return false;
+      // andere Züge kämen danach nicht mehr weiter – dann lieber warten
+      if (this.worse(after)) return false;
+    }
     for (const b of blocks) this.reserve(t, b);
     t.committed = idx[idx.length - 1];
     return true;
@@ -690,8 +727,23 @@ export class Simulation {
         // Durchgangszüge: nur Bahnsteige, von denen es in Fahrtrichtung weitergeht (kein Stumpfgleis)
         const through = (c: Edge[][]) => {
           const nx = t.jobs[t.jobs.indexOf(job) + 1];
-          if (this.isTurn(t) || t.departure || nx?.k !== 'exit' || nx.dir) return c;
-          const f = c.filter((p) => this.net.paths(p[p.length - 1].to, el).length > 0);
+          const double = !t.op.foreign && this.net.grid.mainRows.includes(SECOND_ROW);
+          // Wendezug zweigleisig: lieber an einem Bahnsteig wenden, von dem es danach auf dem Richtungsgleis zurückgeht (RM-FR-OPS-15)
+          if (double && this.isTurn(t) && !t.turned) {
+            const back: Dir = t.dir === 'E' ? 'W' : 'E';
+            const ok = c.filter((p) => {
+              const rev = this.net.twin(p[p.length - 1]);
+              return !!rev && this.exitsFrom(t, rev.to).some((x) => edgeRow(x[x.length - 1].key) === this.preferredRow(back));
+            });
+            return ok.length ? ok : c;
+          }
+          if ((this.isTurn(t) && !t.turned) || t.departure || nx?.k !== 'exit' || (nx.dir && nx.dir !== t.dir)) return c;
+          const f = c.filter((p) => this.exitsFrom(t, p[p.length - 1].to).length > 0);
+          // zweigleisig: lieber Bahnsteige, von denen es auf dem eigenen Richtungsgleis weitergeht (sonst Gegenverkehr, RM-FR-OPS-15)
+          if (f.length && !t.op.foreign && this.net.grid.mainRows.includes(SECOND_ROW)) {
+            const own = f.filter((p) => this.exitsFrom(t, p[p.length - 1].to).some((x) => edgeRow(x[x.length - 1].key) === this.preferredRow(t.dir)));
+            if (own.length) return own;
+          }
           return f.length ? f : c;
         };
         const pref = t.anyPlatform ? undefined : t.platform ?? this.platformPref[`${t.op.id}:${t.dir}`] ?? this.platformPref[t.op.id];
@@ -716,10 +768,31 @@ export class Simulation {
         const end = this.net.pathsTo(from, (e) => e.industry === job.ind && !(this.net.out.get(e.to) ?? []).some((f) => f.industry === job.ind), el, 50);
         return end.length ? end : this.net.pathsTo(from, (e) => e.industry === job.ind, el, 50);
       }
-      case 'exit':
+      case 'exit': {
         if (job.dir && job.dir !== t.dir) return [];
-        return this.net.paths(from, el);
+        const own = this.exitsFrom(t, from);
+        if (!t.op.foreign) return own;
+        // Fremdbahn ohne Vertrag: möglichst auf der eigenen Strecke bleiben
+        if (t.deco) { const pure = own.filter((p) => p.every((e) => this.onLine(e, t.op.id))); return pure.length ? pure : own; }
+        // Durchfahrt-Vertrag: über deine Gleise
+        if (job.via) { const v = own.filter((p) => p.some((e) => !this.onLine(e, t.op.id))); return v.length ? v : own; }
+        return own;
+      }
     }
+  }
+
+  /** Wege zur Ausfahrt: Fremdbahn-Züge nur auf ihre Strecke, alle anderen nur auf die Hauptstrecke */
+  private exitCache = new Map<string, Edge[][]>();
+  private exitsFrom(t: Train, from: string): Edge[][] {
+    const el = this.electric(t), line = t.op.foreign ? t.op.id : undefined;
+    const key = `${from}|${el}|${line ?? ''}`;
+    let res = this.exitCache.get(key);
+    if (!res) {
+      const all = this.net.paths(from, el);
+      res = all.every((p) => p[p.length - 1].line === line) ? all : all.filter((p) => p[p.length - 1].line === line);
+      this.exitCache.set(key, res);
+    }
+    return res;
   }
 
   private score(t: Train, p: Edge[], job: Job) {
@@ -741,7 +814,7 @@ export class Simulation {
     }
     if (job.k === 'exit') {
       score += p.filter((e) => e.atPlatform).length * 200;
-      if (edgeRow(last.key) !== this.preferredRow(t.dir)) score += 800;
+      if (!t.op.foreign && edgeRow(last.key) !== this.preferredRow(t.dir)) score += 800;
     }
     return score;
   }
@@ -758,6 +831,7 @@ export class Simulation {
         const idx = this.section(p, 0);
         const first = this.sectionBlocks(p, idx);
         if (![...first].every((b) => this.blockFree(b, t.id))) continue;
+        if (this.isolated(t)) return p;
         if (++checks > 12) return null;
         const full = [...t.route.slice(0, fromIdx + 1), ...p];
         const after = this.unsafeTrains({ t, blocks: first, legs: [p, this.estimateAhead(t, p)], route: full, end: fromIdx + 1 + idx[idx.length - 1] });
@@ -765,6 +839,7 @@ export class Simulation {
         return p;
       }
       // Weg, auf dem der Zug sicher stecken bliebe (Gegenzug auf demselben Gleis), möglichst meiden
+      if (this.isolated(t)) return p;
       if (++checks > 12) break;
       const after = this.unsafeTrains({ t, blocks: new Set(), legs: [p, this.estimateAhead(t, p)] });
       if (!after.has(t.id)) return p;
@@ -817,7 +892,8 @@ export class Simulation {
   isTurn(t: Train) { return !!t.op.turnback || !!t.ends; }
 
   private canReverse(t: Train) {
-    return this.isTurn(t) || !!t.departure;
+    // Fremdbahn-Züge haben an beiden Enden einen Führerstand und dürfen überall wenden
+    return this.isTurn(t) || !!t.departure || !!t.op.foreign;
   }
 
   /** nächste Aufgabe anfahren; steht der Zug, darf er dafür auch wenden */
@@ -832,7 +908,12 @@ export class Simulation {
       if (this.replan(t, t.route.length - 1, false)) return;
     }
     // Ziel nicht erreichbar
-    if (job.k === 'stop') {
+    if (job.k === 'stop' && t.op.foreign) {
+      // Fremdbahn: kein Halt erreichbar – fährt still auf ihre Strecke zurück, ohne Strafe
+      t.deco = true;
+      t.jobs = [{ k: 'exit' }];
+      this.planNext(t);
+    } else if (job.k === 'stop') {
       t.missedStop = true;
       t.jobs.shift();
       this.note(`nostop:${t.op.id}`, `${t.number}: kein erreichbarer Bahnsteig (Zugang? Länge? Oberleitung?)`);
@@ -870,12 +951,14 @@ export class Simulation {
       this.time += dt;
       this.spawn('E');
       this.spawn('W');
+      // Fremdbahnen: eigene Warteschlange je Strecke, damit sie die Hauptstrecke nie aufhalten
+      for (const l of this.lineIds) { this.spawn('E', l); this.spawn('W', l); }
       for (const t of [...this.trains]) {
         if (t.state === 'rolling') this.rollWagon(t, dt);
         else if (t.state !== 'stored' && t.state !== 'done') this.moveTrain(t, dt);
       }
       this.sortDepartures();
-      if (Math.floor(this.time / 30) !== Math.floor((this.time - dt) / 30)) this.deadlock = this.findDeadlock();
+      if (Math.floor(this.time / 30) !== Math.floor((this.time - dt) / 30)) { this.deadlock = this.findDeadlock(); this.clearDeco(); }
       this.trains = this.trains.filter((t) => t.state !== 'done');
     }
     this.fillTimetable();
@@ -887,7 +970,8 @@ export class Simulation {
   /** verspäteter Zug, der nachfolgende Züge derselben Richtung aufhält */
   blockedBehind(t: Train) {
     if (!t.extDelay || t.letPass || this.ready(t) || !this.queue.includes(t)) return [];
-    return this.queue.filter((q) => q !== t && q.dir === t.dir && q.plannedSpawn >= t.plannedSpawn && q.plannedSpawn <= t.plannedSpawn + t.extDelay! + 60);
+    const line = (x: Train) => (x.op.foreign ? x.op.id : undefined);
+    return this.queue.filter((q) => q !== t && q.dir === t.dir && line(q) === line(t) && q.plannedSpawn >= t.plannedSpawn && q.plannedSpawn <= t.plannedSpawn + t.extDelay! + 60);
   }
 
   /** Zug neu leiten (z. B. nach Gleiswechsel) */
@@ -895,14 +979,30 @@ export class Simulation {
     if (t.state === 'running' && !t.rake) this.replan(t, t.committed, false);
   }
 
-  private spawn(dir: Dir) {
+  private spawn(dir: Dir, line?: string) {
     // Reihenfolge bleibt, außer ein verspäteter Zug lässt die nachfolgenden vor
-    const t = this.queue.find((q) => q.dir === dir && (this.ready(q) || !q.letPass));
+    const mine = (q: Train) => (q.op.foreign ? q.op.id : undefined) === line;
+    const t = this.queue.find((q) => q.dir === dir && mine(q) && (this.ready(q) || !q.letPass));
     if (!t || !this.ready(t)) return;
     let best: { entry: Edge; p: Edge[]; score: number; missed: boolean } | null = null;
     let anyBusy = false;
+    // zweigleisig: Züge kommen auf ihrem Richtungsgleis herein (Linksverkehr). Ist es belegt, warten sie –
+    // auf dem Gegengleis kämen sie dem Gegenverkehr entgegen und könnten einen Stau auslösen (RM-FR-OPS-15)
+    const pref = !line && this.net.grid.mainRows.includes(SECOND_ROW)
+      ? this.net.entries.find((e) => e.dir === dir && !e.line && edgeRow(e.key) === this.preferredRow(dir)) : undefined;
+    const busyEntry = (e: Edge) => this.trains.some((o) => o.route[0]?.key === e.key && o.s - o.length < e.len + 4);
+    // Richtungsgleis belegt: warten, ohne teure Wegsuche
+    if (pref && busyEntry(pref)) return;
+    const prefOk = (() => {
+      if (!pref) return false;
+      t.route = [pref];
+      const ok = !!this.bestPath(t, 0, false) || (() => { const s = t.jobs; t.jobs = [{ k: 'exit' }]; const p = !!this.bestPath(t, 0, false); t.jobs = s; return p; })();
+      t.route = [];
+      return ok;
+    })();
     for (const entry of this.net.entries) {
-      if (entry.dir !== dir) continue;
+      if (entry.dir !== dir || entry.line !== line) continue;
+      if (prefOk && entry !== pref) continue;
       const busy = this.trains.some((o) => o.route[0]?.key === entry.key && o.s - o.length < entry.len + 4);
       if (busy) { anyBusy = true; continue; }
       t.route = [entry];
@@ -910,10 +1010,12 @@ export class Simulation {
       let missed = false;
       if (!p && t.jobs[0]?.k !== 'exit') {
         // Ziel (Bahnsteig/Abrollberg) nicht erreichbar: durchfahren
-        const saved = t.jobs;
+        const saved = t.jobs, deco = t.deco;
         t.jobs = [{ k: 'exit' }];
+        if (t.op.foreign) t.deco = true;
         p = this.bestPath(t, 0, false);
         t.jobs = saved;
+        t.deco = deco;
         missed = true;
       }
       if (!p) continue;
@@ -922,16 +1024,32 @@ export class Simulation {
     }
     t.route = [];
     if (!best) {
-      if (!anyBusy && this.time - t.plannedSpawn > 600) this.note(`noroute:${t.op.id}`, `${t.number} kommt nicht durch – fehlt Oberleitung oder Gleis?`);
+      // Fremdbahn ohne Vertrag, die nicht losfahren kann: fällt still aus
+      if (t.deco && this.time - t.plannedSpawn > 1800) { this.queue.splice(this.queue.indexOf(t), 1); return; }
+      if (!anyBusy && !t.deco && this.time - t.plannedSpawn > 600) this.note(`noroute:${t.op.id}`, `${t.number} kommt nicht durch – fehlt Oberleitung oder Gleis?`);
       return;
     }
     this.queue.splice(this.queue.indexOf(t), 1);
+    // Privatbahn erreicht ihr Ladegleis aus dieser Richtung nicht (Weiche nur in eine Richtung): Fahrt fällt still aus
+    if (best.missed && t.op.industry && t.jobs[0]?.k === 'load') {
+      this.note(`indmiss:${t.op.id}:${dir}`, `${t.op.name}: Ladegleis aus ${dir === 'E' ? 'Westen' : 'Osten'} nicht erreichbar – diese Fahrten fallen aus`);
+      return;
+    }
     t.state = 'running';
-    if (best.missed) {
+    if (best.missed && t.op.foreign) {
+      // Fremdbahn erreicht deinen Bahnsteig nicht (z. B. Weiche nur für die Gegenrichtung): fährt auf ihrer Strecke vorbei, ohne Strafe
+      if (t.jobs[0]?.k === 'stop') this.foreignMissed.set(`${t.op.id}:${dir}`, this.time);
+      if (t.jobs[0]?.k === 'stop') this.note(`fmiss:${t.op.id}:${dir}`, `${t.op.name}: Züge aus ${dir === 'E' ? 'Westen' : 'Osten'} kommen nicht zu deinem Bahnsteig und fahren vorbei – Weiche in diese Richtung fehlt`);
+      t.deco = true;
+      t.passengers = 0;
+      t.jobs = [{ k: 'exit' }];
+    } else if (best.missed) {
       if (t.jobs[0].k === 'stop') { t.missedStop = true; this.note(`nostop:${t.op.id}`, `${t.number}: kein erreichbarer Bahnsteig (Zugang? Länge? Oberleitung?)`); }
       if (t.jobs[0].k === 'hump') this.note('nohump', `${t.number}: kein Abrollberg erreichbar – fährt durch`);
       t.jobs = [{ k: 'exit' }];
     }
+    // Durchfahrt-Vertrag, aber kein Weg über deine Gleise: zählt nicht
+    if (t.jobs[0]?.k === 'exit' && t.jobs[0].via && best.p.every((e) => this.onLine(e, t.op.id))) { t.deco = true; t.passengers = 0; }
     this.setRoute(t, [best.entry, ...best.p]);
     t.ahead = this.estimateAhead(t, best.p);
     t.v = t.op.vmax;
@@ -1410,6 +1528,21 @@ export class Simulation {
     return null;
   }
 
+  /** Fremdbahn-Züge ohne Vertrag sind nur Kulisse: stecken sie fest oder stehen sie in einem Stau, verschwinden sie still */
+  private clearDeco() {
+    const drop = this.trains.filter((t) => t.deco && t.state === 'running' && (this.deadlock?.includes(t.id)
+      || (t.waiting && t.waitSince !== undefined && this.time - t.waitSince > 1800)));
+    for (const t of drop) {
+      for (const k of t.reserved) if (this.owner[k] === t.id) this.owner[k] = 0;
+      t.reserved.clear();
+      t.state = 'done';
+    }
+    if (drop.length) {
+      this.trains = this.trains.filter((t) => t.state !== 'done');
+      if (this.deadlock?.some((id) => drop.some((t) => t.id === id))) this.deadlock = null;
+    }
+  }
+
   /** Zug aus dem Verkehr nehmen (Ausweg aus einem Stau) */
   cancelTrain(id: number) {
     const t = this.trains.find((x) => x.id === id);
@@ -1451,8 +1584,12 @@ export class Simulation {
     return i;
   }
 
+  /** letzte Freigabe je Zug: nur neu rechnen, wenn sich Zugschluss, Fahrstraße oder Reservierung geändert haben */
+  private relKey = new WeakMap<Train, { route: Edge[]; tail: number; committed: number; n: number }>();
   private release(t: Train) {
     const tail = this.edgeIndexAt(t, Math.max(0, t.s - t.length));
+    const last = this.relKey.get(t);
+    if (last && last.route === t.route && last.tail === tail && last.committed === t.committed && last.n === t.reserved.size) return;
     const needed = new Set<number>();
     for (let i = tail; i <= t.committed; i++) if (t.route[i].block >= 0) needed.add(t.route[i].block);
     for (const k of t.reserved) {
@@ -1461,6 +1598,7 @@ export class Simulation {
         t.reserved.delete(k);
       }
     }
+    this.relKey.set(t, { route: t.route, tail, committed: t.committed, n: t.reserved.size });
   }
 
   /** Kante + Distanz eines Punktes, `back` Einheiten hinter dem Zugkopf */

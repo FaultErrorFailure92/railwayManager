@@ -2,7 +2,7 @@ import type { Game } from './Game';
 import { currentMap } from '../world/maps';
 
 /** Richtzeit je Kapitel in Spieltagen */
-export const CHAPTER_PAR_DAYS: Record<string, number> = { donau: 8, ebene: 6 };
+export const CHAPTER_PAR_DAYS: Record<string, number> = { donau: 8, ebene: 6, revier: 7, schnee: 7, alpen: 7, wueste: 7, stadt: 9 };
 
 /** Kapitel bewerten (RM-FR-MODE-04): 1 Stern fürs Schaffen, je 1 für Pünktlichkeit und Tempo */
 export const PUNCT_STAR = 0.85;

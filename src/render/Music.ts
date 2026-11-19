@@ -32,6 +32,7 @@ export const THEMES: Record<string, Theme> = {
   ebene: { name: 'Weites Land', root: 57, scale: DORIAN, bpm: 100, meter: 4, prog: [0, 3, 0, 4], lead: 'square', bass: 'triangle', hat: true },
   revier: { name: 'Schicht im Schacht', root: 52, scale: MINOR, bpm: 96, meter: 4, prog: [0, 5, 2, 6], lead: 'sawtooth', bass: 'square', hat: true },
   wueste: { name: 'Oasenexpress', root: 52, scale: PHRYG_DOM, bpm: 88, meter: 4, prog: [0, 1, 0, 6], lead: 'square', bass: 'triangle', hat: true },
+  stadt: { name: 'Großstadtlichter', root: 57, scale: MINOR, bpm: 118, meter: 4, prog: [0, 5, 3, 4], lead: 'square', bass: 'sawtooth', hat: true },
   schnee: { name: 'Nordlicht', root: 53, scale: LYDIAN, bpm: 76, meter: 4, prog: [0, 1, 4, 0], lead: 'sine', bass: 'triangle', hat: false },
 };
 

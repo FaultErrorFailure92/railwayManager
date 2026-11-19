@@ -1,4 +1,6 @@
 import { COST, STATION_UPGRADE } from '../config';
+import { systemOn } from '../game/Systems';
+import { DEMO, STEAM_URL } from '../game/Edition';
 import { BIG_REPAIR_COST, CANCEL_COST, Game, fmtTime, REPAIR_COST, type LogEntry, type UiEvent } from '../game/Game';
 import { CHANGELOG, VERSION } from '../game/changelog';
 import { ACHIEVEMENTS } from '../game/Achievements';
@@ -17,12 +19,13 @@ import { findTerm, LEXICON } from '../game/Lexicon';
 import { firstPayment, loanLimit, loanOffers, repayLoan, takeLoan, totalInterest } from '../game/Loans';
 import { TIERS, tierChecks } from '../game/StationTiers';
 import { MENTOR, mentorLine, problems, type Problem } from '../game/Problems';
-import { fromUi, maxUiScale, setSettings, settings, toUi, UI_SCALES } from '../game/settings';
+import { DEFAULT_KEYS, FILTER_CSS, FILTERS, fromUi, KEY_ACTIONS, keyOf, maxUiScale, setSettings, settings, toUi, UI_SCALES, type DisplayFilter, type KeyAction } from '../game/settings';
 import { OPERATORS, type OperatorId } from '../sim/Operators';
 import { RESEARCH_BY_ID, ResearchId, ResearchTree, TREES } from '../game/Research';
 import { cancelRisk } from '../game/Contracts';
 import { Timetable } from './Timetable';
 import { trainStatus } from '../game/TrainStatus';
+import { SEASON_FILTER, SEASON_ICON, SEASON_NAME } from '../game/Seasons';
 import { setInspectors } from '../game/FareDodgers';
 import { autoCode, cleanCode } from '../game/StationCode';
 import { letPass } from '../game/Connections';
@@ -32,6 +35,8 @@ import { author, newsPhoto, paperName } from './press';
 import { BOARD } from '../game/Board';
 import { avatar, portrait } from './portrait';
 import { BUILDINGS, isStation, SHOPS } from '../world/buildings';
+import { toggleForeignMode } from '../game/Foreign';
+import { unlockAchievement } from '../platform/Platform';
 import { contractsHtml, contractsKey, offerHtml, researchHtml, researchKey, researchTabsHtml, researchTipHtml, statsHtml, statsKey, statsView, TRANSIT_FEE, type StatsTab } from './Screens';
 import type { Train } from '../sim/Simulation';
 import type { PersonCard } from '../render/People';
@@ -139,7 +144,7 @@ export class Hud {
       $(id).addEventListener('click', (e) => {
         const t = e.target as HTMLElement;
         const l = t.closest('[data-load]') as HTMLElement | null;
-        if (l && activateSlot(l.dataset.load!)) { saveState.disabled = true; location.reload(); }
+        if (l && activateSlot(l.dataset.load!)) this.loadActive();
         const d = t.closest('[data-del]') as HTMLElement | null;
         if (d) { deleteSlot(d.dataset.del!); this.renderSlots(id); }
         const x = t.closest('[data-export]') as HTMLElement | null;
@@ -214,6 +219,7 @@ export class Hud {
         if (!bl) return;
         if (b.dataset.bp === 'rename') this.askStation(bl.id, true);
         if (b.dataset.bp === 'upgrade') this.g.upgradeStation(bl.id);
+        if (b.dataset.bp === 'auto') this.g.toggleShopAuto(bl.key);
         if (b.dataset.bp === 'price') this.g.setShopPrice(bl.key, this.g.shopPrices[bl.key] + Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 2 : 1));
         this.detailActKey = '';
         return;
@@ -258,6 +264,7 @@ export class Hud {
     $('m-free').onclick = () => this.withProfile(() => this.menus.openFree());
     $('m-chal').onclick = () => this.withProfile(() => this.menus.openChallenges());
     $('m-stats').onclick = () => this.withProfile(() => this.menus.openStats(activeProfile()!));
+    $('m-companies').onclick = () => this.menus.openMaps();
     $('btn-mail').onclick = () => this.openInbox();
     $('ib-close').onclick = () => $('inbox').classList.add('hidden');
     $('ib-list').addEventListener('click', (e) => {
@@ -292,6 +299,11 @@ export class Hud {
       };
       $('quit-back').onclick = () => $('quit').classList.add('hidden');
     }
+    if (DEMO) {
+      $('m-demo-badge').classList.remove('hidden');
+      $('m-steam').classList.remove('hidden');
+      $('m-steam').onclick = () => window.open(STEAM_URL, '_blank', 'noopener');
+    }
     $('m-help').onclick = () => this.openHelp();
     $('p-help').onclick = () => this.openHelp();
     $('help-close').onclick = () => $('help').classList.add('hidden');
@@ -311,6 +323,44 @@ export class Hud {
     $('set-music').addEventListener('input', () => { setSettings({ music: Number(($('set-music') as HTMLInputElement).value) }); this.renderSettings(); });
     $('set-scroll').addEventListener('input', () => { setSettings({ scroll: Number(($('set-scroll') as HTMLInputElement).value) }); this.renderSettings(); });
     $('set-contrast').onclick = () => { setSettings({ contrast: !settings.contrast }); this.renderSettings(); };
+    $('set-cb').onclick = () => { setSettings({ colorblind: !settings.colorblind }); this.renderSettings(); };
+    $('set-filter').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-filter]') as HTMLElement | null;
+      if (b) { setSettings({ filter: b.dataset.filter as DisplayFilter }); this.renderSettings(); this.gameFilter = ''; }
+    });
+    // Tastenbelegung (RM-FR-UI-09): Knopf anklicken, dann Taste drücken
+    $('set-keys').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('[data-key-act],[data-key-reset]') as HTMLElement | null;
+      if (!b) return;
+      if (b.dataset.keyReset !== undefined) { setSettings({ keys: { ...DEFAULT_KEYS } }); this.renderSettings(); return; }
+      this.rebinding = b.dataset.keyAct as KeyAction;
+      b.textContent = '…';
+    });
+    window.addEventListener('keydown', (e) => {
+      if (!this.rebinding) return;
+      e.preventDefault(); e.stopPropagation();
+      const k = e.key.toLowerCase();
+      if (e.key !== 'Escape' && /^[a-zäöüß]$/.test(k)) {
+        const taken = (Object.entries(settings.keys) as [KeyAction, string][]).find(([a, v]) => v === k && a !== this.rebinding);
+        const keys = { ...settings.keys, [this.rebinding]: k };
+        if (taken) keys[taken[0]] = settings.keys[this.rebinding];
+        setSettings({ keys });
+      }
+      this.rebinding = null;
+      this.renderSettings();
+    }, true);
+    $('set-cues').onclick = () => { setSettings({ cues: !settings.cues }); this.renderSettings(); };
+    $('set-numbers').onclick = () => { setSettings({ numbers: !settings.numbers }); this.renderSettings(); };
+    // Töne als Symbol (RM-FR-UI-13)
+    let cueTimer = 0;
+    Sound.onCue((kind) => {
+      if (!settings.cues) return;
+      const c = $('cue');
+      c.textContent = kind === 'gong' ? '♪ Gong · Durchsage' : kind === 'whistle' ? '♪ Pfiff · Abfahrt' : '♪ Kasse';
+      c.classList.remove('hidden');
+      clearTimeout(cueTimer);
+      cueTimer = window.setTimeout(() => c.classList.add('hidden'), 1200);
+    });
     $('set-anim').onclick = () => { setSettings({ anim: !settings.anim }); this.renderSettings(); };
     window.addEventListener('resize', () => { if (!$('settings').classList.contains('hidden')) this.renderSettings(); });
 
@@ -336,7 +386,7 @@ export class Hud {
       if (t.closest('[data-decline]')) { this.g.declineOffer(); this.closeOffer(); }
     });
     $('btn-research').onclick = () => this.openScreen('research');
-    $('money-wrap').onclick = () => { if (this.g.company) this.openBank(); };
+    $('money-wrap').onclick = () => { if (this.g.company && systemOn(this.g, 'loan')) this.openBank(); };
     $('bank-close').onclick = () => $('bank').classList.add('hidden');
     $('bank-body').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('[data-loan],[data-repay]') as HTMLElement | null;
@@ -424,10 +474,14 @@ export class Hud {
         const step = Number(b.dataset.d) * ((e as MouseEvent).shiftKey ? 5 : 1);
         this.g.setPrice(op, cls, this.g.contracts[op].price[cls] + step);
       }
+      const au = t.closest('[data-auto]') as HTMLElement | null;
+      if (au) this.g.toggleAutoPrice(au.dataset.auto as keyof typeof OPERATORS);
       const sv = t.closest('[data-svc]') as HTMLElement | null;
       if (sv) this.g.toggleService(sv.dataset.svc as keyof typeof OPERATORS);
       const bo = t.closest('[data-boost]') as HTMLElement | null;
       if (bo) this.g.toggleBoost(bo.dataset.boost as keyof typeof OPERATORS);
+      const fm = t.closest('[data-fmode]') as HTMLElement | null;
+      if (fm) toggleForeignMode(this.g, fm.dataset.fmode as keyof typeof OPERATORS);
       const cr = t.closest('[data-crew]') as HTMLElement | null;
       if (cr) this.g.setCrew(this.g.crew + Number(cr.dataset.crew));
       const ip = t.closest('[data-insp]') as HTMLElement | null;
@@ -463,6 +517,8 @@ export class Hud {
         return;
       }
       if (!$('modal').classList.contains('hidden') || typing()) return;
+      if (this.rebinding) return;
+      const K = settings.keys;
       // Rückgängig / Wiederholen (Strg+Z, Strg+Y, Strg+Umschalt+Z; am Mac mit ⌘)
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
         e.preventDefault();
@@ -471,19 +527,20 @@ export class Hud {
       }
       if (this.screen) {
         const k = e.key.toLowerCase();
-        if (e.key === 'Escape' || (k === 'e' && this.screen === 'research') || (k === 'v' && this.screen === 'contracts') || (k === 'f' && this.screen === 'timetable')) this.closeScreen();
+        if (e.key === 'Escape' || (k === K.research && this.screen === 'research') || (k === K.contracts && this.screen === 'contracts') || (k === K.timetable && this.screen === 'timetable')) this.closeScreen();
         return;
       }
-      if (!this.ui.menu && e.key.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) { this.openScreen('research'); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'v') { this.openScreen('contracts'); return; }
-      if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey) { this.openHelp(); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'l' && !e.ctrlKey && !e.metaKey) { this.toggleIssues(); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'ü') { this.cycleLayer(); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey) { rotate(this.ui, this.g); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'p') { if ($('inbox').classList.contains('hidden')) this.openInbox(); else $('inbox').classList.add('hidden'); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey) { nextVariant(this.ui, this.g); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) { this.openScreen('timetable'); return; }
-      if (!this.ui.menu && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey) { this.toggleSkip(); return; }
+      const kk = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+      if (!this.ui.menu && kk === K.research && !mod) { this.openScreen('research'); return; }
+      if (!this.ui.menu && kk === K.contracts && !mod) { this.openScreen('contracts'); return; }
+      if (kk === K.help && !mod) { this.openHelp(); return; }
+      if (!this.ui.menu && kk === K.issues && !mod) { this.toggleIssues(); return; }
+      if (!this.ui.menu && kk === K.layers && !mod) { this.cycleLayer(); return; }
+      if (!this.ui.menu && kk === K.rotate && !mod) { rotate(this.ui, this.g); return; }
+      if (!this.ui.menu && kk === K.mail && !mod) { if ($('inbox').classList.contains('hidden')) this.openInbox(); else $('inbox').classList.add('hidden'); return; }
+      if (!this.ui.menu && kk === K.variant && !mod) { nextVariant(this.ui, this.g); return; }
+      if (!this.ui.menu && kk === K.timetable && !mod) { this.openScreen('timetable'); return; }
+      if (!this.ui.menu && kk === K.skip && !mod) { this.toggleSkip(); return; }
       if (e.key === 'Escape') {
         if (!$('pause').classList.contains('hidden')) { this.closePause(); return; }
         if (!$('inbox').classList.contains('hidden')) { $('inbox').classList.add('hidden'); return; }
@@ -595,6 +652,22 @@ export class Hud {
 
   private titleShow = new TitleShow($('menu'));
 
+  /** Spielstand ohne Neuladen übernehmen (RM-FR-PERF-04); main.ts setzt den Lader */
+  onLoad?: () => boolean;
+
+  /** aktiven Spielstand laden – ohne Neuladen der Seite, notfalls mit */
+  private loadActive() {
+    if (!this.onLoad?.()) { saveState.disabled = true; location.reload(); return; }
+    // alle Zwischenstände der Anzeige verwerfen
+    const self = this as unknown as Record<string, unknown>;
+    for (const k of Object.keys(self)) if (k.endsWith('Key') && typeof self[k] === 'string') self[k] = '';
+    this.lastQuest = -1;
+    this.minimap.reset();
+    for (const id of ['gameover', 'pause', 'dayend', 'm-slots', 'go-slots']) document.getElementById(id)?.classList.add('hidden');
+    this.pausedBeforeMenu = false;
+    this.closeMenu();
+  }
+
   private closeMenu() {
     this.titleShow.stop();
     $('menu').classList.add('hidden');
@@ -634,7 +707,8 @@ export class Hud {
   private removeProfile(p: Profile) {
     deleteProfileSlots(p.id);
     deleteProfile(p.id);
-    if (this.g.profileId === p.id) { saveState.disabled = true; clearSave(); location.reload(); return; }
+    // laufendes Spiel gehört dazu – oder es war das letzte Profil: neu starten (dann kommt wieder das Onboarding)
+    if (this.g.profileId === p.id || !listProfiles().length) { saveState.disabled = true; clearSave(); location.reload(); return; }
     this.menus.renderProfiles();
     this.refreshMenu();
   }
@@ -651,7 +725,7 @@ export class Hud {
     $('m-continue').style.display = running ? '' : 'none';
     this.menus.renderAccount();
     const cs = document.getElementById('m-campaign-sub');
-    if (cs) cs.textContent = p ? (p.chapters.length >= CHAPTERS.length ? 'alle Kapitel geschafft!' : `Kapitel ${p.chapters.length + 1} von ${CHAPTERS.length}`) : 'Kapitel für Kapitel zum Hauptbahnhof';
+    if (cs) cs.textContent = DEMO ? 'Kapitel 1: Donautal (Demo)' : p ? (p.chapters.length >= CHAPTERS.length ? 'alle Kapitel geschafft!' : `Kapitel ${p.chapters.length + 1} von ${CHAPTERS.length}`) : 'Kapitel für Kapitel zum Hauptbahnhof';
     const sub = document.getElementById('m-continue-sub');
     if (running && sub) sub.textContent = `${this.g.company} · Tag ${Math.floor(this.g.sim.time / 86400) + 1} · ${currentMap().name}`;
     // Abfahrtstafel: Uhr und Laufschrift
@@ -824,6 +898,10 @@ export class Hud {
     $('set-scroll-v').textContent = `${settings.scroll} %`;
     $('set-contrast').textContent = settings.contrast ? 'An' : 'Aus';
     $('set-contrast').classList.toggle('on', settings.contrast);
+    $('set-filter').innerHTML = FILTERS.map((f) => `<button class="btn${settings.filter === f.id ? ' on' : ''}" data-filter="${f.id}">${f.label}</button>`).join('');
+    $('set-keys').innerHTML = KEY_ACTIONS.map((a) => `<span class="sk"><button class="btn" data-key-act="${a.id}">${keyOf(a.id)}</button>${a.label}</span>`).join('')
+      + '<button class="btn sk-reset" data-key-reset>Standard</button>';
+    for (const [id, on] of [['set-cb', settings.colorblind], ['set-cues', settings.cues], ['set-numbers', settings.numbers]] as const) { $(id).textContent = on ? 'An' : 'Aus'; $(id).classList.toggle('on', on); }
     $('set-anim').textContent = settings.anim ? 'An' : 'Aus';
     $('set-anim').classList.toggle('on', settings.anim);
   }
@@ -900,8 +978,8 @@ export class Hud {
       ? `<div class="bk-loan">Laufender Kredit: Restschuld <b>${eur(l.rest)} €</b>, noch ${l.daysLeft} Tage, ${pct(l.rate)} Zinsen pro Tag.
          <button class="btn" data-repay${g.money < l.rest ? ' disabled' : ''}>Restschuld jetzt tilgen (${eur(l.rest)} €)</button></div>`
       : '';
-    const rows = loanOffers(g).map((o) => `<tr class="${o.ok ? '' : 'no'}"><td class="num">${eur(o.amount)} €</td><td>${o.days} Tage</td><td>${pct(o.rate)}</td>
-      <td class="num">${eur(firstPayment(o))} €</td><td class="num">${eur(totalInterest(o))} €</td>
+    const rows = loanOffers(g).map((o) => `<tr class="${o.ok ? '' : 'no'}"><td class="bk-amt">${eur(o.amount)} €</td><td>${o.days} Tage</td><td>${pct(o.rate)}</td>
+      <td class="bk-amt">${eur(firstPayment(o))} €</td><td class="bk-amt">${eur(totalInterest(o))} €</td>
       <td>${o.ok ? `<button class="btn" data-loan="${o.amount}:${o.days}">Aufnehmen</button>` : `<small>${o.why}</small>`}</td></tr>`).join('');
     $('bank-body').innerHTML = `<p class="bk-intro">Planbarer als der Überziehungskredit (${pct(0.03)} pro Tag): feste Laufzeit, tägliche Rate aus Tilgung und Zinsen. Höchstbetrag für deine Bahnhofsstufe: <b>${eur(loanLimit(g))} €</b>.</p>${status}
       <table class="bk-table"><tr><th>Betrag</th><th>Laufzeit</th><th>Zins/Tag</th><th>1. Rate</th><th>Zinsen gesamt</th><th></th></tr>${rows}</table>`;
@@ -921,12 +999,12 @@ export class Hud {
     if (tab === 'keys') {
       const keys: [string, string][] = [
         ['Maus ziehen', 'Karte verschieben'], ['W A S D / Pfeile', 'Karte verschieben'], ['Mausrad', 'Zoom'],
-        ['1–9', 'Baumenüs, danach Ziffer = Typ'], ['B', 'Gebäude'], ['R', 'drehen'], ['T', 'nächste Variante des Typs'],
+        ['1–9', 'Baumenüs, danach Ziffer = Typ'], ['B', 'Gebäude'], [keyOf('rotate'), 'drehen'], [keyOf('variant'), 'nächste Variante des Typs'],
         ['Abriss', 'Fläche aufziehen'], ['Rechtsklick', 'Abbrechen'], ['Esc', 'Werkzeug weg · Menü'],
         ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen (am Mac ⌘)'], ['F5 / Strg+S', 'Speichern'],
         ['Leertaste', 'Pause'], ['+ / −', 'Tempo'],
-        ['L', 'Was ist los?'], ['Ü', 'Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung'], ['F', 'Fahrplan'], ['E', 'Entwickeln (Forschung)'], ['V', 'Verträge'], ['P', 'Postfach'],
-        ['H / F1', 'Diese Hilfe'], ['?', 'Bahn-ABC zum Begriff im Tooltip'], ['Zug anfahren', 'Infos zum Zug, anklicken für Menü'],
+        [keyOf('issues'), 'Was ist los?'], [keyOf('layers'), 'Ebenen: Belegung, Fahrgäste, Stimmung, Instandhaltung'], [keyOf('timetable'), 'Fahrplan'], [keyOf('research'), 'Entwickeln (Forschung)'], [keyOf('contracts'), 'Verträge'], [keyOf('mail'), 'Postfach'], [keyOf('skip'), 'Vorspulen bis zum nächsten Halt'],
+        [`${keyOf('help')} / F1`, 'Diese Hilfe'], ['?', 'Bahn-ABC zum Begriff im Tooltip'], ['Zug anfahren', 'Infos zum Zug, anklicken für Menü'],
       ];
       $('help-body').innerHTML = `<div class="hp-keys">${keys.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('')}</div>`;
     } else {
@@ -1034,8 +1112,7 @@ export class Hud {
       if (!r.ok) { this.slotMsg(id, r.error, true); return; }
       const label = `Import · ${r.label ?? f.name.replace(/\.[^.]+$/, '')}`.slice(0, 80);
       if (!importSave(r.save, label)) { this.slotMsg(id, 'Speichern fehlgeschlagen – Speicher voll?', true); return; }
-      saveState.disabled = true;
-      location.reload();
+      this.loadActive();
     };
     input.click();
   }
@@ -1113,7 +1190,7 @@ export class Hud {
     const msg = this.ui.message;
     // Kosten zeigt das Spielfeld selbst – hier nur Probleme
     if (msg && (!/€$/.test(msg) || msg.startsWith('Zu wenig Geld'))) html += `<br><span class="no">${msg}</span>`;
-    const keys = [rot.n > 1 ? `R drehen ${rot.i + 1}/${rot.n}` : '', at.type.variants.length > 1 ? 'T nächste Variante' : ''].filter(Boolean);
+    const keys = [rot.n > 1 ? `${keyOf('rotate')} drehen ${rot.i + 1}/${rot.n}` : '', at.type.variants.length > 1 ? `${keyOf('variant')} nächste Variante` : ''].filter(Boolean);
     if (keys.length) html += `<br><small>${keys.join(' · ')}</small>`;
     if (tip.innerHTML !== html) tip.innerHTML = html;
     tip.style.display = 'block';
@@ -1294,6 +1371,9 @@ export class Hud {
     this.dayEndTimer = window.setTimeout(() => $('dayend').classList.add('hidden'), 12000);
   }
   private dayEndTimer = 0;
+  private gameFilter = '';
+  /** Tastenbelegung: wartet auf die neue Taste */
+  private rebinding: KeyAction | null = null;
 
   private stepSpeed(d: number) {
     const i = Math.max(0, Math.min(SPEEDS.length - 1, SPEEDS.indexOf(this.g.speed) + d));
@@ -1352,6 +1432,7 @@ export class Hud {
     let start: { x: number; y: number; id: number; axis?: 'x' | 'y' } | undefined;
     const find = (id: number) => [...this.g.sim.trains, ...this.g.sim.queue].find((t) => t.id === id);
     cv.addEventListener('mousedown', (e) => {
+      if (!systemOn(this.g, 'dispo')) return;
       const p = pos(e), id = tt.pick(p.x, p.y);
       tt.sel = id;
       start = id !== undefined ? { ...p, id } : undefined;
@@ -1393,7 +1474,10 @@ export class Hud {
 
   private dispoKey = '';
   private renderDispo() {
-    const g = this.g, tt = this.timetable;
+    const g = this.g, tt = this.timetable, on = systemOn(g, 'dispo');
+    $('tt-dispo-h').classList.toggle('hidden', !on);
+    $('tt-dispo').classList.toggle('hidden', !on);
+    if (!on) { tt.sel = undefined; return; }
     const slots = dispoSlots(g), conf = dispoConflicts(g, slots), runs = g.platformRuns();
     const sl = slots.find((s) => s.t.id === tt.sel && !s.alight);
     if (tt.sel !== undefined && !sl) tt.sel = undefined;
@@ -1430,7 +1514,7 @@ export class Hud {
   }
 
   private bar(v: number, color: string) {
-    return `<div class="bar"><div style="width:${Math.round(Math.max(0, Math.min(100, v)))}%;background:${color}"></div></div>`;
+    return `<div class="bar" title="${Math.round(v)} %"><div style="width:${Math.round(Math.max(0, Math.min(100, v)))}%;background:${color}"></div></div>`;
   }
 
   private personHover: { id: number | null; since: number } = { id: null, since: 0 };
@@ -1459,14 +1543,14 @@ export class Hud {
     const stuck = this.g.sim.stuck(t) && !!why;
     const timed = t.op.kind !== 'sort' && t.state !== 'rolling' && t.state !== 'stored';
     const rows = [`<div class="tc-cars">${cars}</div>`];
-    if (t.state !== 'queued') rows.push(`<div class="tc-row"><span>Tempo</span><span>${kmh} km/h</span></div>`);
+    if (t.state !== 'queued') rows.push(`<div class="tc-row num-row"><span>Tempo</span><span>${kmh} km/h</span></div>`);
     if (timed) rows.push(`<div class="tc-row"><span>Fahrplan</span><span class="${delay > 3 ? 'no' : 'ok'}">${delay > 0 ? `+${delay} min` : 'pünktlich'}</span></div>`);
     if (why) rows.push(`<div class="tc-row"><span>Wartet</span><span class="no">${why}</span></div>`);
     if (stuck) rows.push(`<div class="tc-help">! ${this.fixHint(why!)}</div>`);
-    if (isPax) rows.push(`<div class="tc-row"><span>Auslastung</span>${this.bar(load, load > 85 ? '#d9534f' : '#6cc04a')}<span>${t.passengers}/${t.capacity}</span></div>`);
+    if (isPax) rows.push(`<div class="tc-row"><span>Auslastung</span>${this.bar(load, load > 85 ? '#d9534f' : '#6cc04a')}<span class="num" title="${t.passengers} von ${t.capacity} Plätzen">${t.passengers}/${t.capacity}</span></div>`);
     rows.push(`<div class="tc-row"><span>Antrieb</span><span>${t.op.traction === 'electric' ? '⚡ elektrisch' : '⛽ Diesel'}</span></div>`);
-    rows.push(`<div class="tc-row"><span>Schmutz</span>${this.bar(t.dirt, '#9a7a4a')}<span>${Math.round(t.dirt)}</span></div>`);
-    rows.push(`<div class="tc-row"><span>Verschleiß</span>${this.bar(t.wear, '#b0623a')}<span>${Math.round(t.wear)}</span></div>`);
+    rows.push(`<div class="tc-row"><span>Schmutz</span>${this.bar(t.dirt, '#9a7a4a')}<span class="num">${Math.round(t.dirt)}</span></div>`);
+    rows.push(`<div class="tc-row"><span>Verschleiß</span>${this.bar(t.wear, '#b0623a')}<span class="num">${Math.round(t.wear)}</span></div>`);
     if (t.dest !== undefined) rows.push(`<div class="tc-row"><span>Ziel</span><span>Richtung ${['Nord', 'Süd', 'West'][t.dest]}</span></div>`);
     return this.oc({
       head: `<span class="dot" style="background:${t.op.color}"></span>`,
@@ -1525,6 +1609,7 @@ export class Hud {
           state: `Einnahmen +${bonus} %`, level: c.parking && c.bus ? 'ok' : 'gelb',
           rows: `<div class="tc-row"><span>Parkplatz</span><span class="${c.parking ? 'ok' : 'no'}">${c.parking ? '✓ angebunden (+10 %)' : '✗ nicht angebunden'}</span></div>
             <div class="tc-row"><span>Busterminal</span><span class="${c.bus ? 'ok' : 'no'}">${c.bus ? '✓ angebunden (+15 %)' : '✗ nicht angebunden'}</span></div>
+            <div class="tc-row" title="Eigene Straße vom Bahnhof bis zur Straße der Gemeinde: mehr Laufkundschaft und +5 % Einnahmen"><span>Straßennetz</span><span class="${c.street ? 'ok' : 'no'}">${c.street ? '✓ angebunden (+5 %)' : '✗ nicht angebunden'}</span></div>
             ${lvl < 3 && block ? `<div class="tc-help">${block}</div>` : ''}` });
         acts = `s${b.id}|${b.name}|${b.code}|${lvl}|${block}` + `<div class="bd-btns"><button class="btn" data-bp="rename">Umbenennen</button>${lvl < 3 ? `<button class="btn${block ? ' off' : ''}" data-bp="upgrade">Ausbauen · ${eur(STATION_UPGRADE[lvl + 1])} €</button>` : ''}</div>`;
       } else if (SHOPS[b.key]) {
@@ -1534,7 +1619,7 @@ export class Hud {
           rows: `<div class="tc-row"><span>Preis</span><span>${price.toFixed(2).replace('.', ',')} € (üblich ${sh.ref.toFixed(2).replace('.', ',')} €)</span></div>
             <div class="tc-row"><span>Kunden</span><span>${Math.round(rate * 100)} von 100 Fahrgästen</span></div>
             <div class="tc-row"><span>Umsatz</span><span>${(rate * price * 100).toFixed(0)} € je 100 Fahrgäste</span></div>` });
-        acts = `p${b.key}` + '<div class="bd-btns"><button class="btn" data-bp="price" data-d="-0.5">Preis −</button><button class="btn" data-bp="price" data-d="0.5">Preis +</button></div>';
+        acts = `p${b.key}${g.shopAuto[b.key] ? 'a' : ''}` + `<div class="bd-btns"><button class="btn" data-bp="price" data-d="-0.5">Preis −</button><button class="btn" data-bp="price" data-d="0.5">Preis +</button><button class="btn${g.shopAuto[b.key] ? ' on' : ''}" data-bp="auto" title="Automatik: immer der übliche Preis">Auto</button></div>`;
       } else this.detail = null;
     } else if (d?.kind === 'person') {
       const pc = this.scene()?.personCard(d.id);
@@ -1620,7 +1705,12 @@ export class Hud {
       $('company').dataset.tt = g.player.name ? `${g.player.title ? g.player.title + ' ' : ''}${g.player.name} · ${g.company} · Klick: Dienstakte` : g.company;
     }
     $('clock').textContent = fmtTime(sim.time);
-    $('day').textContent = `Tag ${Math.floor(sim.time / 86400) + 1}`;
+    const season = g.season;
+    $('day').textContent = `Tag ${Math.floor(sim.time / 86400) + 1} ${SEASON_ICON[season]}`;
+    $('day').title = SEASON_NAME[season];
+    // Farbton der Jahreszeit und Darstellungsfilter aufs Spielfeld (RM-FR-EVT-10, RM-FR-UI-15)
+    const filt = `${SEASON_FILTER[season]} ${FILTER_CSS[settings.filter]}`.trim();
+    if (filt !== this.gameFilter) { this.gameFilter = filt; $('game').style.filter = filt; }
     $('money').textContent = `${eur(g.money)} €`;
     $('money').style.color = g.money < 0 ? 'var(--bad)' : '';
     $('loan').classList.toggle('hidden', g.money >= 0);
@@ -1713,7 +1803,7 @@ export class Hud {
     // Auftrag
     const m = g.mission;
     const q = g.missionInfo();
-    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : g.mode === 'free' ? 'FREIES SPIEL' : g.mode === 'challenge' ? 'HERAUSFORDERUNG' : 'ALLE AUFTRÄGE ERLEDIGT';
+    $('q-count').textContent = m ? `AUFTRAG ${q.index + 1}/${q.total}` : g.mode === 'free' ? (g.sandbox ? 'SANDKASTEN' : 'FREIES SPIEL') : g.mode === 'challenge' ? 'HERAUSFORDERUNG' : 'ALLE AUFTRÄGE ERLEDIGT';
     $('q-title').textContent = q.title;
     $('q-short').textContent = q.short;
     // Checkliste: Teilschritte abhaken
@@ -1745,21 +1835,22 @@ export class Hud {
 
     // Seitenleiste
     const satHtml = Object.values(OPERATORS)
-      .filter((o) => sim.queue.some((x) => x.op === o) || sim.trains.some((x) => x.op === o))
+      .filter((o) => sim.queue.some((x) => x.op === o && !x.deco) || sim.trains.some((x) => x.op === o && !x.deco))
       .map((o) => {
         const val = Math.round(g.satisfaction[o.id]);
-        return `<div class="sat-row" data-op="${o.id}"><span>${o.name}</span><div class="bar"><div style="width:${val}%;background:${o.color}"></div></div><span>${val}</span></div>`;
+        return `<div class="sat-row" data-op="${o.id}"><span>${o.name}</span><div class="bar" title="Zufriedenheit ${val} %"><div style="width:${val}%;background:${o.color}"></div></div><span class="num">${val}</span></div>`;
       }).join('') || '<div class="bar-empty">Noch keine Vertragspartner – im Postfach warten Angebote.</div>';
     if ($('sat').innerHTML !== satHtml) $('sat').innerHTML = satHtml;
     const rows: string[] = [];
     let wagons = 0;
     for (const tr of sim.trains) {
+      if (tr.deco) continue; // Fremdbahn ohne Vertrag: nur Kulisse
       if (tr.state === 'rolling' || tr.state === 'stored') { wagons++; continue; }
       const st = this.status(tr);
       const arrow = this.g.sim.isTurn(tr) && !tr.turned ? '↩' : tr.dir;
       rows.push(this.row(tr.id, tr.op.color, tr.boost ? `${tr.number} V` : tr.number, arrow, st, tr.waiting && !!tr.note));
     }
-    for (const tr of sim.queue.slice(0, Math.max(3, 8 - rows.length))) {
+    for (const tr of sim.queue.filter((q) => !q.deco).slice(0, Math.max(3, 8 - rows.length))) {
       const late = sim.time - tr.plannedSpawn;
       rows.push(this.row(tr.id, tr.op.color, tr.boost ? `${tr.number} V` : tr.number, this.g.sim.isTurn(tr) ? '↩' : tr.dir,
         late > 0 ? `wartet +${Math.ceil(late / 60)} min` : fmtTime(tr.plannedSpawn), late > 60));
@@ -1833,6 +1924,7 @@ export class Hud {
       }
       if (ev.type === 'achievement') {
         const a = ACHIEVEMENTS.find((x) => x.id === ev.id);
+        unlockAchievement(ev.id);
         Sound.coin();
         if (a) this.showEvent(`<h1>ERFOLG!</h1><div class="ev-tools"><div class="ev-tool big"><span class="slot"><img src="${ICON(a.icon)}" alt="" /></span></div></div>
           <div class="ev-title">${a.name}</div><div class="ev-info">${a.info}</div>`);
@@ -1991,8 +2083,9 @@ export class Hud {
       const fin = el.id === 'money-wrap' || el.id === 'daycost-wrap';
       if (!fin && !el.dataset.tt) { tt.style.display = 'none'; return; }
       const text = fin ? '' : el.dataset.tt!;
-      this.ttTerm = fin ? (el.id === 'money-wrap' ? 'Kredit' : undefined) : findTerm(text)?.term;
-      tt.innerHTML = (fin ? `${this.financeHtml()}${el.id === 'money-wrap' ? '<small class="tt-abc">Klicken: Bank (Kredit)</small>' : ''}` : text.replace(/&/g, '&amp;').replace(/</g, '&lt;'))
+      const bank = el.id === 'money-wrap' && systemOn(this.g, 'loan');
+      this.ttTerm = fin ? (bank ? 'Kredit' : undefined) : findTerm(text)?.term;
+      tt.innerHTML = (fin ? `${this.financeHtml()}${bank ? '<small class="tt-abc">Klicken: Bank (Kredit)</small>' : ''}` : text.replace(/&/g, '&amp;').replace(/</g, '&lt;'))
         + (this.ttTerm ? `<small class="tt-abc">„?“ – ${this.ttTerm} im Bahn-ABC</small>` : '');
       tt.style.display = 'block';
       place(e);
@@ -2054,7 +2147,7 @@ export class Hud {
 
   private row(id: number, color: string, num: string, dir: string, status: string, late: boolean) {
     const arrow = dir === 'E' ? '→' : dir === 'W' ? '←' : dir;
-    return `<li data-id="${id}"><span class="dot" style="background:${color}"></span><span class="tnum">${num} ${arrow}</span><span class="tstat${late ? ' late' : ''}">${status}</span></li>`;
+    return `<li data-id="${id}"><span class="dot" style="background:${color}"></span><span class="tnum">${num} ${arrow}</span><span class="tstat${late ? ' late' : ''}" title="${status}">${status}</span></li>`;
   }
 }
 

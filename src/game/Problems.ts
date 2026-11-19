@@ -1,3 +1,4 @@
+import { grantById } from './Grants';
 /**
  * „Was ist los?“ (RM-FR-CPX-03): alle aktuellen Probleme mit Ampel, nach Dringlichkeit sortiert.
  * Jeder Eintrag: ein Satz, optional eine Stelle zum Hinspringen und eine Lösung mit einem Klick.
@@ -11,6 +12,7 @@ import { RESEARCH } from './Research';
 import { SPECIALS } from './SpecialDays';
 import { isCommuter, rush } from '../sim/demand';
 import { maintain, MAINT_COST, wearOf, wornElements } from './Wear';
+import { foreignProblems } from './Foreign';
 
 export type Level = 'rot' | 'gelb' | 'info';
 
@@ -112,7 +114,7 @@ export function problems(g: Game): Problem[] {
 
   // Züge, die lange warten
   for (const t of sim.trains) {
-    if (t.waitSince === undefined || !t.waiting) continue;
+    if (t.deco || t.waitSince === undefined || !t.waiting) continue;
     const min = Math.floor((sim.time - t.waitSince) / 60);
     if (min < 10) continue;
     out.push({ id: `wait${t.id}`, level: min >= 30 ? 'rot' : 'gelb', at: { train: t.id }, text: `${t.number} wartet seit ${min} min${t.note ? `: ${t.note}` : '.'}` });
@@ -142,7 +144,7 @@ export function problems(g: Game): Problem[] {
 
   // Verspätungen von außen (RM-FR-OPS-11)
   for (const t of sim.queue) {
-    if (!t.extDelay || sim.ready(t) || t.plannedSpawn > sim.time + 30 * 60) continue;
+    if (t.deco || !t.extDelay || sim.ready(t) || t.plannedSpawn > sim.time + 30 * 60) continue;
     const min = Math.round(t.extDelay / 60);
     const behind = sim.blockedBehind(t).filter((q) => q.plannedSpawn <= sim.time + 10 * 60);
     if (behind.length) {
@@ -187,6 +189,11 @@ export function problems(g: Game): Problem[] {
   }
 
   // Kredit
+  if (g.grant) {
+    const gr = grantById(g.grant.id);
+    const h = Math.max(0, Math.ceil((g.grant.until - sim.time) / 3600));
+    if (gr) out.push({ id: 'grant', level: h < 12 ? 'gelb' : 'info', text: `Förderung „${gr.title}“: ${gr.text} Noch ${h} h – sonst ${eur(g.grant.amount)} € zurück.` });
+  }
   if (g.loan) out.push({ id: 'loan', level: 'info', text: `Kredit: Restschuld ${eur(g.loan.rest)} €, noch ${g.loan.daysLeft} Tage – Rate täglich um Mitternacht.` });
 
   // besondere Tage
@@ -199,6 +206,7 @@ export function problems(g: Game): Problem[] {
   }
 
   // Post und Angebote
+  out.push(...foreignProblems(g));
   if (g.offers.open) out.push({ id: 'offer', level: 'info', text: `Offene Anfrage: ${g.offers.open.title}`, fix: { label: 'Ansehen', ui: 'offer' } });
   const unread = g.inbox.filter((e) => !e.read).length;
   if (unread) out.push({ id: 'mail', level: 'info', text: unread === 1 ? 'Ein ungelesener Brief im Postfach.' : `${unread} ungelesene Briefe im Postfach.`, fix: { label: 'Postfach öffnen', ui: 'inbox' } });

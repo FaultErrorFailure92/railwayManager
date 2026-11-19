@@ -50,7 +50,7 @@ export const STRATEGIES: Record<string, { text: string; setup: (g: Game) => void
 };
 
 /** reproduzierbarer Zufall */
-function mulberry32(seed: number) {
+export function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;

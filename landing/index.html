@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bahnhofsmanager – Pünktlichkeit ist eine Zier</title>
+<meta name="description" content="Pixel-Aufbauspiel: Führe einen Bahnhof vom Haltepunkt im Donautal bis zum Hauptbahnhof der Großstadt. Kostenlose Web-Demo." />
+<!--
+  Landing Page (RM-FR-PLAT-04). Keine Cookies, kein Tracking, keine externen Schriften oder Skripte.
+  Erwartete Struktur beim Hochladen:  /index.html (diese Datei), /img/…, /demo/ (Ausgabe von `npm run build:demo`),
+  /impressum.html und /datenschutz.html (aus public/).
+-->
+<style>
+  :root { --ink: #1b1d2a; --night: #12141f; --paper: #efe5c9; --gold: #ffd23f; --red: #c4342f; --green: #3f8f3a; --blue: #2c5f8a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--night); color: #e8e4d8; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; line-height: 1.5; }
+  img { image-rendering: pixelated; }
+  a { color: var(--gold); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  /* Kopf: Abfahrtstafel */
+  header { background: linear-gradient(#0b0d16, #1a1d2c); border-bottom: 6px solid var(--gold); }
+  .hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 32px; align-items: center; padding: 48px 20px 40px; }
+  .logo { display: flex; gap: 16px; align-items: center; }
+  .logo img { width: 72px; }
+  h1 { margin: 0; font-size: 44px; line-height: 1; letter-spacing: 3px; color: var(--gold); text-shadow: 4px 4px 0 #000; }
+  .tag { font-size: 20px; margin: 18px 0 6px; }
+  .sub { opacity: .8; margin: 0 0 24px; }
+  .btns { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 20px; font: inherit; font-size: 18px; font-weight: 700; text-decoration: none; color: #fff; background: var(--green);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,.35), 4px 4px 0 #000; }
+  .btn.steam { background: var(--blue); }
+  .btn:hover { filter: brightness(1.15); }
+  .board { background: #0b0e1a; border: 4px solid #2a2f45; box-shadow: 6px 6px 0 #000; font-size: 15px; }
+  .board .bh { display: flex; justify-content: space-between; padding: 8px 12px; color: #9aa3c0; letter-spacing: 2px; border-bottom: 2px solid #2a2f45; }
+  .board .row { display: grid; grid-template-columns: 60px 1fr auto; gap: 10px; padding: 7px 12px; border-bottom: 1px dashed #2a2f45; }
+  .board .row b { color: var(--gold); }
+  .board .late { color: #ff7a6b; }
+  .board .ok { color: #7bd88f; }
+  .ticker { overflow: hidden; white-space: nowrap; background: var(--gold); color: #000; font-weight: 700; padding: 4px 0; }
+  .ticker span { display: inline-block; padding-left: 100%; animation: tick 28s linear infinite; }
+  @keyframes tick { to { transform: translateX(-100%); } }
+  @media (prefers-reduced-motion: reduce) { .ticker span { animation: none; padding-left: 12px; } }
+
+  section { padding: 48px 0; }
+  h2 { font-size: 28px; color: var(--gold); letter-spacing: 2px; margin: 0 0 20px; }
+  .shot { width: 100%; display: block; border: 4px solid #000; box-shadow: 6px 6px 0 #000; }
+  .cap { opacity: .7; font-size: 14px; margin-top: 8px; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+  .card { background: #1d2133; padding: 16px; box-shadow: 4px 4px 0 #000; border-top: 4px solid var(--red); }
+  .card img { width: 48px; height: 48px; float: right; margin-left: 8px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; color: #fff; }
+  .card p { margin: 0; font-size: 14px; opacity: .85; }
+
+  .paper { background: var(--paper); color: #2b2418; }
+  .paper h2 { color: #6b2a1e; }
+  .quotes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .quote { background: #f8f1df; padding: 16px; box-shadow: inset 0 0 0 1px #cdb989, 4px 4px 0 rgba(0,0,0,.2); }
+  .quote p { margin: 0 0 8px; font-style: italic; }
+  .quote small { color: #8a7148; }
+
+  .chapters { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .ch { background: #1d2133; padding: 10px 8px; text-align: center; font-size: 13px; box-shadow: 3px 3px 0 #000; }
+  .ch b { display: block; font-size: 22px; color: var(--gold); }
+  .ch.demo { outline: 3px solid var(--green); }
+  .ch.demo::after { content: 'in der Demo'; display: block; color: #7bd88f; font-size: 11px; margin-top: 4px; }
+
+  .faq details { background: #1d2133; margin-bottom: 8px; padding: 12px 16px; box-shadow: 3px 3px 0 #000; }
+  .faq summary { cursor: pointer; font-weight: 700; }
+  .faq p { margin: 8px 0 0; opacity: .85; }
+
+  footer { border-top: 4px solid #2a2f45; padding: 24px 0 40px; font-size: 14px; opacity: .8; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+  @media (max-width: 760px) {
+    .hero { grid-template-columns: 1fr; }
+    h1 { font-size: 34px; }
+    .chapters { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hero">
+    <div>
+      <div class="logo"><img src="img/train.png" alt="" /><h1>BAHNHOFS<br />MANAGER</h1></div>
+      <p class="tag">Pünktlichkeit ist eine Zier. Weiter kommt man mit Weichen.</p>
+      <p class="sub">Ein Pixel-Aufbauspiel über einen Bahnhof, der wachsen will: Gleise legen, Signale stellen, Verträge aushandeln, Kaffee verkaufen – und dabei so tun, als wäre die Verspätung „betrieblich bedingt“.</p>
+      <div class="btns">
+        <a class="btn" href="demo/">▶ Demo im Browser spielen</a>
+        <a class="btn steam" href="https://store.steampowered.com/" rel="noopener">★ Auf Steam wünschen</a>
+      </div>
+    </div>
+    <div class="board" aria-label="Abfahrtstafel">
+      <div class="bh"><span>ABFAHRT</span><span>06:42</span></div>
+      <div class="row"><b>06:45</b><span>R 2041 Linz</span><span class="ok">pünktlich</span></div>
+      <div class="row"><b>06:52</b><span>S 7 Westbahnhof</span><span class="ok">pünktlich</span></div>
+      <div class="row"><b>07:03</b><span>WX 512 Wien</span><span class="late">+4 – Kuh am Gleis</span></div>
+      <div class="row"><b>07:10</b><span>Dampfbahn Wachau</span><span class="late">+15 – Heizer frühstückt</span></div>
+      <div class="row"><b>07:15</b><span>Ihr erster Zug</span><span class="ok">fährt ab, sobald Sie wollen</span></div>
+    </div>
+  </div>
+  <div class="ticker"><span>+++ Neu: Kapitel 7 Großstadt +++ Bahnhofskatze eingezogen, Kiosk-Umsatz um 12 % gestiegen +++ Vorstand fordert mehr Takt, Fahrgäste fordern mehr Bänke +++ Weichenheizung jetzt auch für Weichen +++</span></div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <img class="shot" src="img/shot-station.png" alt="Ein kleiner Bahnhof mit zwei Bahnsteigen, Parkplatz, Busterminal und Kiosk in isometrischer Pixelgrafik" />
+      <p class="cap">Demohausen um 6 Uhr früh. Die Katze schläft noch, der Kiosk hat schon offen.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Was man so macht</h2>
+      <div class="features">
+        <div class="card"><img src="img/signal_E.png" alt="" /><h3>Gleise &amp; Signale</h3><p>Weichen, Gleiswechsel, Bahnsteige, Fahrdraht. Der Fahrdienstleiter fährt automatisch – Sie sorgen dafür, dass er es kann.</p></div>
+        <div class="card"><img src="img/bld_station3.png" alt="" /><h3>Vom Haltepunkt zum Hauptbahnhof</h3><p>Ein Schild und eine Bank am Anfang. Uhrturm, Unterführung und vier Bahnsteiggleise am Ende.</p></div>
+        <div class="card"><img src="img/bld_kiosk.png" alt="" /><h3>Kiosk, Café, Wirtshaus</h3><p>Wartende kaufen Kaffee. Pünktliche Fahrgäste kaufen weniger Kaffee. Ein Dilemma.</p></div>
+        <div class="card"><img src="img/bld_hump.png" alt="" /><h3>Güter &amp; Rangieren</h3><p>Abrollberg, Richtungsgleise, Werksanschlüsse. Schwerkraft macht’s.</p></div>
+        <div class="card"><img src="img/bld_snowpine0.png" alt="" /><h3>Wetter &amp; Störungen</h3><p>Schnee friert Weichen ein, Signale fallen aus. Gut, wenn man Instandhalter mit Thermoskanne hat.</p></div>
+        <div class="card"><img src="img/bld_cat.png" alt="" /><h3>Bahnhofskatze</h3><p>Erforschbar. Macht alle froher. Nicht verhandelbar.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="paper">
+    <div class="wrap">
+      <h2>Stimmen aus der Lokalpresse*</h2>
+      <div class="quotes">
+        <div class="quote"><p>„Nach Jahren hält wieder ein Zug. Ein Pensionist hat aus Rührung den Bahnsteig gekehrt.“</p><small>Donau-Kurier</small></div>
+        <div class="quote"><p>„Die Schnellfahrweichen sind in Betrieb. Ein Kamelhändler soll gesagt haben: Das ist unfair.“</p><small>Oasen-Bote</small></div>
+        <div class="quote"><p>„Minus zwanzig Grad, und die Weichen frieren. Wer jetzt pünktlich fährt, wird im Ort als Held gefeiert.“</p><small>Nordlicht-Zeitung</small></div>
+      </div>
+      <p><small>* Zeitungen aus dem Spiel. Echte Kritiken folgen, sobald echte Kritiker pünktlich ankommen.</small></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Sieben Kapitel, sieben Landschaften</h2>
+      <div class="chapters">
+        <div class="ch demo"><b>1</b>Donautal</div>
+        <div class="ch"><b>2</b>Pannonische Ebene</div>
+        <div class="ch"><b>3</b>Industrie&shy;revier</div>
+        <div class="ch"><b>4</b>Schneeland</div>
+        <div class="ch"><b>5</b>Alpenbahn</div>
+        <div class="ch"><b>6</b>Wüstenbahn</div>
+        <div class="ch"><b>7</b>Großstadt</div>
+      </div>
+      <p>Dazu: freies Spiel mit Langzeitzielen, Sandkasten, Zufallskarten, tägliche Herausforderungen und eine Dienstakte voller Stempel.</p>
+      <img class="shot" src="img/shot-wide.png" alt="Weite Ansicht der Strecke mit Bahnhof, Wald und Fluss" />
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap faq">
+      <h2>Fragen, die uns niemand gestellt hat</h2>
+      <details><summary>Kostet die Demo etwas?</summary><p>Nein. Sie läuft im Browser, ohne Anmeldung, ohne Cookies. Ihr Spielstand bleibt auf Ihrem Gerät und lässt sich in die Vollversion mitnehmen.</p></details>
+      <details><summary>Muss ich mich mit Eisenbahn auskennen?</summary><p>Nein. Das Spiel erklärt alles in einfachen Worten, und das Bahn-ABC hilft bei Wörtern wie „Blockabstand“ oder „Stumpfgleis“.</p></details>
+      <details><summary>Kann man Züge entgleisen lassen?</summary><p>Nein. Der Fahrdienstleiter lässt keine Unfälle zu. Er lässt höchstens Fahrgäste warten. Sehr lange.</p></details>
+      <details><summary>Wo läuft das Spiel?</summary><p>Im Browser (Chrome, Firefox, Safari, Edge) und bald als Desktop-Version auf Steam für Windows und macOS.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Bahnhofsmanager · ein Hobby-Projekt aus Wien</span>
+    <span><a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a> · keine Cookies, kein Tracking</span>
+  </div>
+</footer>
+</body>
+</html>

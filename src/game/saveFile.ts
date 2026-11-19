@@ -2,16 +2,18 @@
  * Spielstand-Format, Export/Import als Datei und Prüfung von Importen.
  * Anforderungen: RM-FR-SAVE-02 (versioniert), RM-FR-SAVE-03 (Export/Import), RM-FR-SEC-01 (Importe sind nur Daten).
  */
+import { growSave } from './saveMigrate';
+import { cleanMap } from './CustomMaps';
 import type { GameSave } from './Game';
 import { VERSION } from './changelog';
 import { MAP_W, MAP_H, PARCEL } from '../config';
 import { PIECES } from '../world/pieces';
 import { BUILDINGS } from '../world/buildings';
-import { MAPS } from '../world/maps';
+import { isCustomMap, isRandomMap, MAPS } from '../world/maps';
 import { decodeSave } from './saveCodec';
 
 /** aktuelle Formatversion (GameSave.v). Bei jeder inkompatiblen Änderung erhöhen und unten eine Migration ergänzen. */
-export const SAVE_VERSION = 5 as const;
+export const SAVE_VERSION = 6 as const;
 /** älteste Version, die noch geladen werden kann */
 export const MIN_SAVE_VERSION = 4;
 
@@ -63,6 +65,7 @@ export function versionProblem(v: number | undefined): string | undefined {
  * Neue Schritte so ergänzen: `if (s.v === 5) { …; s.v = 6; }`
  */
 export function migrate(s: GameSave): GameSave {
+  if (s.v === 5) s = growSave(s);
   return s;
 }
 
@@ -247,13 +250,13 @@ function checkScalar(v: unknown, p: string) {
 
 function checkFields(s: Obj) {
   const small = s.v === 4;
-  const w = small ? 96 : MAP_W, h = small ? 32 : MAP_H;
+  const w = small ? 96 : MAP_W, h = small ? 32 : s.v === 5 ? 64 : MAP_H;
   const n = w * h;
 
   need(isStr(s.company, 60), 'Firmenname');
   need(isNum(s.money, MAX_MONEY), 'Kontostand');
   need(isInt(s.missionIdx, 0, 10_000), 'Auftragsnummer');
-  if (s.mapId !== undefined) need(typeof s.mapId === 'string' && MAPS.some((m) => m.id === s.mapId), 'unbekannte Karte');
+  if (s.mapId !== undefined) need(typeof s.mapId === 'string' && (MAPS.some((m) => m.id === s.mapId) || isRandomMap(s.mapId) || (isCustomMap(s.mapId) && !!cleanMap(s.customMap))), 'unbekannte Karte');
 
   // Zellen: 10 Bits je Zelle
   need(Array.isArray(s.cells) && s.cells.length === n, 'Kartengröße passt nicht');

@@ -1610,6 +1610,132 @@
    "w": 25,
    "h": 22
   },
+  "car_ln_emu_0": {
+   "file": "car_ln_emu_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ln_emu_1": {
+   "file": "car_ln_emu_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ln_emu_2": {
+   "file": "car_ln_emu_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ln_ecabE_0": {
+   "file": "car_ln_ecabE_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ln_ecabE_1": {
+   "file": "car_ln_ecabE_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ln_ecabE_2": {
+   "file": "car_ln_ecabE_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ln_ecabW_0": {
+   "file": "car_ln_ecabW_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ln_ecabW_1": {
+   "file": "car_ln_ecabW_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ln_ecabW_2": {
+   "file": "car_ln_ecabW_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ls_loco_0": {
+   "file": "car_ls_loco_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ls_loco_1": {
+   "file": "car_ls_loco_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ls_loco_2": {
+   "file": "car_ls_loco_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ls_coach_0": {
+   "file": "car_ls_coach_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ls_coach_1": {
+   "file": "car_ls_coach_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ls_coach_2": {
+   "file": "car_ls_coach_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
+  "car_ls_cab_0": {
+   "file": "car_ls_cab_0.png",
+   "ox": -13,
+   "oy": -18,
+   "w": 27,
+   "h": 26
+  },
+  "car_ls_cab_1": {
+   "file": "car_ls_cab_1.png",
+   "ox": -8,
+   "oy": -18,
+   "w": 17,
+   "h": 26
+  },
+  "car_ls_cab_2": {
+   "file": "car_ls_cab_2.png",
+   "ox": -12,
+   "oy": -16,
+   "w": 25,
+   "h": 22
+  },
   "car_dm_steam_0": {
    "file": "car_dm_steam_0.png",
    "ox": -13,
@@ -1974,6 +2100,41 @@
    "w": 38,
    "h": 42
   },
+  "bld_cityA": {
+   "file": "bld_cityA.png",
+   "ox": -35,
+   "oy": -38,
+   "w": 70,
+   "h": 73
+  },
+  "bld_cityB": {
+   "file": "bld_cityB.png",
+   "ox": -35,
+   "oy": -44,
+   "w": 70,
+   "h": 79
+  },
+  "bld_cityC": {
+   "file": "bld_cityC.png",
+   "ox": -35,
+   "oy": -32,
+   "w": 70,
+   "h": 67
+  },
+  "bld_slab": {
+   "file": "bld_slab.png",
+   "ox": -35,
+   "oy": -39,
+   "w": 70,
+   "h": 74
+  },
+  "bld_office": {
+   "file": "bld_office.png",
+   "ox": -35,
+   "oy": -56,
+   "w": 70,
+   "h": 91
+  },
   "bld_vending": {
    "file": "bld_vending.png",
    "ox": -19,
@@ -1990,6 +2151,20 @@
   },
   "bld_clock": {
    "file": "bld_clock.png",
+   "ox": -19,
+   "oy": -29,
+   "w": 38,
+   "h": 44
+  },
+  "bld_canopy": {
+   "file": "bld_canopy.png",
+   "ox": -19,
+   "oy": -27,
+   "w": 38,
+   "h": 42
+  },
+  "bld_board": {
+   "file": "bld_board.png",
    "ox": -19,
    "oy": -29,
    "w": 38,
@@ -2365,6 +2540,104 @@
    "oy": -35,
    "w": 38,
    "h": 54
+  },
+  "viaduct_deck": {
+   "file": "viaduct_deck.png",
+   "ox": -19,
+   "oy": -41,
+   "w": 38,
+   "h": 60
+  },
+  "viaduct_pier": {
+   "file": "viaduct_pier.png",
+   "ox": -19,
+   "oy": -41,
+   "w": 38,
+   "h": 60
+  },
+  "viaduct_car": {
+   "file": "viaduct_car.png",
+   "ox": -19,
+   "oy": -47,
+   "w": 38,
+   "h": 66
+  },
+  "xing_open": {
+   "file": "xing_open.png",
+   "ox": -19,
+   "oy": -17,
+   "w": 38,
+   "h": 36
+  },
+  "xing_closed": {
+   "file": "xing_closed.png",
+   "ox": -19,
+   "oy": -17,
+   "w": 38,
+   "h": 36
+  },
+  "auto_0": {
+   "file": "auto_0.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "auto_1": {
+   "file": "auto_1.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "auto_2": {
+   "file": "auto_2.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "auto_3": {
+   "file": "auto_3.png",
+   "ox": -19,
+   "oy": -13,
+   "w": 38,
+   "h": 32
+  },
+  "auto_tractor": {
+   "file": "auto_tractor.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
+  },
+  "auto_jeep": {
+   "file": "auto_jeep.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
+  },
+  "auto_plow": {
+   "file": "auto_plow.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
+  },
+  "auto_taxi": {
+   "file": "auto_taxi.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
+  },
+  "auto_van": {
+   "file": "auto_van.png",
+   "ox": -19,
+   "oy": -15,
+   "w": 38,
+   "h": 34
   },
   "bld_remise": {
    "file": "bld_remise.png",

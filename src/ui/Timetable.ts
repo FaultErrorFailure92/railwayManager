@@ -25,7 +25,7 @@ export class Timetable {
     if (sim.time - this.lastSample < 60) return;
     this.lastSample = sim.time;
     for (const t of sim.trains) {
-      if (t.state === 'rolling' || t.state === 'stored' || t.state === 'queued' || !t.route.length) continue;
+      if (t.deco || t.state === 'rolling' || t.state === 'stored' || t.state === 'queued' || !t.route.length) continue;
       const { i, d } = sim.posOnTrain(t, 0);
       const e = t.route[i];
       if (!e) continue;
@@ -160,7 +160,7 @@ export class Timetable {
     ctx.setLineDash([3, 3]);
     ctx.lineWidth = 1;
     for (const t of [...sim.queue, ...sim.trains]) {
-      if (t.op.kind === 'sort' || t.state === 'rolling' || t.state === 'stored') continue;
+      if (t.deco || t.op.kind === 'sort' || t.state === 'rolling' || t.state === 'stored') continue;
       const pts = this.planned(t);
       if (pts[pts.length - 1][0] < t0 || pts[0][0] > t1) continue;
       ctx.strokeStyle = t.op.color;

@@ -16,10 +16,14 @@ export interface Contract {
   declinedUntil?: number;
   /** Zusatz „Abstellen & Pflege“: Züge enden/wenden hier, werden abgestellt, gereinigt, gewaschen, repariert */
   service?: boolean;
+  /** Preis automatisch auf dem fairen Preis halten (RM-FR-CPX-02) */
+  auto?: boolean;
   /** Verstärkerzüge in der Stoßzeit (RM-FR-ECO-08) */
   boost?: boolean;
   /** Nachtzug: Anzahl Linien (je Nacht ein Zug pro Richtung und Linie) */
   lines?: number;
+  /** Fremdbahn (RM-FR-MAP-09): Züge halten bei dir oder fahren nur durch */
+  mode?: 'stop' | 'through';
 }
 
 /** Abstellgebühr je Abstellung (Zusatz „Abstellen & Pflege“) */

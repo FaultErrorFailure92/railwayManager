@@ -1,3 +1,4 @@
+import { foreignPaxBonus } from '../src/game/Foreign';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Game } from '../src/game/Game';
 import { TIERS, tierChecks, tierMetrics } from '../src/game/StationTiers';
@@ -32,7 +33,7 @@ describe('Bahnhofsstufen (RM-FR-PROG-08)', () => {
     }
     expect(g.tier).toBeGreaterThanOrEqual(1);
     expect(g.research.points).toBeGreaterThan(fp0);
-    expect(g.sim.paxFactor).toBeCloseTo((0.8 + 0.1 * g.rating.stars) * (1 + TIERS[g.tier].bonus.pax), 5);
+    expect(g.sim.paxFactor).toBeCloseTo((0.8 + 0.1 * g.rating.stars) * (1 + TIERS[g.tier].bonus.pax) * (1 + foreignPaxBonus(g)), 5);
     expect(priceMod.fair).toBeGreaterThanOrEqual(fair0);
     const g2 = new Game(JSON.parse(JSON.stringify(g.save())));
     expect(g2.tier).toBe(g.tier);
